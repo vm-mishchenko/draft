@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from draft import runs
+
 
 def register(subparsers):
     p = subparsers.add_parser("delete", help="Remove a run's state and git worktree.")
@@ -21,8 +23,8 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def run(args) -> int:
-    run_dir = Path("/tmp/draft") / args.run_id
-    if not run_dir.exists():
+    run_dir = runs.find_run_dir(args.run_id)
+    if run_dir is None:
         print(f"error: run '{args.run_id}' not found", file=sys.stderr)
         return 1
 

@@ -78,6 +78,14 @@ def _repo_root() -> str:
     return result.stdout.strip()
 
 
+def _project_name(repo: str) -> str:
+    return Path(repo).name
+
+
+def _sanitize_branch(branch: str) -> str:
+    return branch.replace("/", "-")
+
+
 def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     from importlib.resources import files
     try:
@@ -133,15 +141,17 @@ def run(args) -> int:
     _assert_on_path("claude")
     _assert_on_path("gh")
 
-    # 2. Run ID + dir
+    # 2. Run ID (dir created after project_name is known)
     run_id = time.strftime("%y%m%d-%H%M%S")
-    run_dir = Path("/tmp/draft") / run_id
+
+    repo = _repo_root()
+    project_name = _project_name(repo)
+
+    run_dir = Path.home() / ".draft" / "runs" / project_name / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # 3. PID
     (run_dir / "draft.pid").write_text(str(os.getpid()))
-
-    repo = _repo_root()
 
     # 4. Branch + spec
     if args.prompt:
@@ -154,7 +164,7 @@ def run(args) -> int:
         stem = Path(spec).stem
         branch = stem.lower().replace("_", "-").replace(" ", "-")[:50]
 
-    wt_dir = str(Path(repo).parent / branch)
+    wt_dir = str(Path.home() / ".draft" / "worktrees" / project_name / _sanitize_branch(branch))
 
     # 5. Config
     try:
@@ -176,19 +186,23 @@ def run(args) -> int:
     ctx.set("wt_dir", wt_dir)
     ctx.set("repo", repo)
     ctx.set("spec", spec)
+    ctx.set("project", project_name)
     ctx.set("started_at", ctx.started_at)
 
     # 8. Save initial state
     ctx.save()
 
-    # 9. Preamble
+    # 9. Worktree parent dir
+    Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
+
+    # 10. Preamble
     _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS)
 
-    # 10. Lifecycle + engine
+    # 11. Lifecycle + engine
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir))
     engine = Engine()
 
-    # 11. Run pipeline
+    # 12. Run pipeline
     try:
         from pipeline import Pipeline
         Pipeline(STEPS).run(ctx, engine, lifecycle)

@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+from draft import runs
 from draft.config import ConfigError, load_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
@@ -12,18 +13,6 @@ def register(subparsers):
     p = subparsers.add_parser("continue", help="Resume a stopped run.")
     p.add_argument("run_id", nargs="?", help="Run ID to resume (defaults to most recent).")
     p.set_defaults(func=run)
-
-
-def _find_latest_run_dir() -> Path | None:
-    base = Path("/tmp/draft")
-    if not base.exists():
-        return None
-    dirs = sorted(
-        [d for d in base.iterdir() if d.is_dir() and (d / "state.json").exists()],
-        key=lambda d: d.name,
-        reverse=True,
-    )
-    return dirs[0] if dirs else None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -57,13 +46,13 @@ def _next_step(ctx, steps) -> str | None:
 
 def run(args) -> int:
     if args.run_id:
-        run_dir = Path("/tmp/draft") / args.run_id
-        if not run_dir.exists():
+        run_dir = runs.find_run_dir(args.run_id)
+        if run_dir is None:
             print(f"error: run '{args.run_id}' not found", file=sys.stderr)
             return 1
         run_id = args.run_id
     else:
-        run_dir = _find_latest_run_dir()
+        run_dir = runs.find_latest_run_dir()
         if run_dir is None:
             print("error: no runs found", file=sys.stderr)
             return 1
