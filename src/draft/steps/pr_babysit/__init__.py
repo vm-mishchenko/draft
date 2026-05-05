@@ -42,7 +42,7 @@ class PrBabysitStep(Step):
     name = "pr-babysit"
 
     def defaults(self) -> dict:
-        return {"max_retries": 50, "timeout": 1200, "retry_delay": 60}
+        return {"max_retries": 100, "timeout": 1200, "retry_delay": 60}
 
     def run(self, ctx, engine):
         cfg = ctx.config(self.name)
