@@ -10,7 +10,7 @@ class PushStep(Step):
     def cmd(self, ctx) -> list[str]:
         return ["git", "push", "-u", "origin", "HEAD"]
 
-    def run(self, ctx, engine):
+    def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         rc = engine.run_stage(
             label=self.name,

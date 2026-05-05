@@ -27,6 +27,9 @@ class PipelineLifecycle:
     def on_step_error(self, step: "Step", ctx: "RunContext", exc: StepError):
         pass
 
+    def run_hooks(self, step_name: str, event: str) -> list:
+        return []
+
 
 class Step:
     name: str
@@ -37,7 +40,7 @@ class Step:
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", engine: "Engine"):
+    def run(self, ctx: "RunContext", engine: "Engine", lifecycle: "PipelineLifecycle"):
         cfg = ctx.config(self.name)
         last_rc = 1
         for attempt in range(1, cfg["max_retries"] + 1):
@@ -68,7 +71,7 @@ class Pipeline:
                 continue
             lc.before_step(step, ctx)
             try:
-                step.run(ctx, engine)
+                step.run(ctx, engine, lc)
                 ctx.mark_done(step.name)
                 ctx.save()
                 lc.on_step_success(step, ctx)

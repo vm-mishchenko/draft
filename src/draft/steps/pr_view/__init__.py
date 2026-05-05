@@ -10,7 +10,7 @@ class PrViewStep(Step):
     def defaults(self) -> dict:
         return {"max_retries": 3, "timeout": 30, "retry_delay": 5}
 
-    def run(self, ctx, engine):
+    def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         wt_dir = ctx.get("wt_dir")
 

@@ -11,3 +11,5 @@ Follow these principles:
 ## Spec
 
 {{SPEC}}
+
+{{VERIFY_ERRORS}}

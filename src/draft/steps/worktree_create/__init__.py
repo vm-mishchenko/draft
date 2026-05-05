@@ -10,7 +10,7 @@ class WorktreeCreateStep(Step):
     def cmd(self, ctx) -> list[str]:
         return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch")]
 
-    def run(self, ctx, engine):
+    def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         from pipeline import StepError
         rc = engine.run_stage(

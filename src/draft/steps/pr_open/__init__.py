@@ -21,7 +21,7 @@ class PrOpenStep(Step):
     def defaults(self) -> dict:
         return {"max_retries": 1, "timeout": 60, "retry_delay": 0}
 
-    def run(self, ctx, engine):
+    def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         repo = ctx.get("repo", "")
         branch = ctx.get("branch", "")
