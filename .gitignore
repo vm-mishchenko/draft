@@ -2,3 +2,5 @@
 __pycache__
 *.egg-info
 .draft
+.venv
+.pytest_cache
