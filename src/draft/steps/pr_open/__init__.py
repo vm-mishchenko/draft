@@ -27,13 +27,21 @@ class PrOpenStep(Step):
         branch = ctx.get("branch", "")
         body = _resolve_pr_body(repo)
 
+        log_path = ctx.log_path(self.name)
         rc = engine.run_stage(
             label=self.name,
             cmd=["gh", "pr", "create", "--title", branch, "--body", body, "--draft"],
             cwd=ctx.get("wt_dir"),
-            log_path=ctx.log_path(self.name),
+            log_path=log_path,
             attempt=1,
             timeout=cfg["timeout"],
         )
         if rc != 0:
             raise StepError(self.name, rc)
+
+        for line in log_path.read_text().splitlines():
+            if line.startswith("https://"):
+                print(line)
+                ctx.set("pr_url", line)
+                ctx.save()
+                break
