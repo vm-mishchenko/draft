@@ -1,2 +1,0 @@
-[console_scripts]
-draft = draft.cli:main

@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: draft
-Version: 0.1.0
-Summary: CLI tool to run a spec through an AI-powered pipeline and open a PR
-Author: Vitalii Mishchenko
-Requires-Python: >=3.12
-Requires-Dist: PyYAML
-Provides-Extra: dev
-Requires-Dist: pytest; extra == "dev"
