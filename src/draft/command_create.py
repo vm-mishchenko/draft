@@ -23,6 +23,12 @@ def register(subparsers):
         default=[],
         help="Override a step config value (repeatable).",
     )
+    p.add_argument(
+        "--skip-pr",
+        action="store_true",
+        default=False,
+        help="Stop after code generation; skip push and PR.",
+    )
     p.set_defaults(func=run)
 
 
@@ -118,15 +124,16 @@ def _apply_overrides(config: dict, overrides: list[str]) -> dict:
     return cfg
 
 
-def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, steps):
+def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
     print(f"logs:     {run_dir}")
     print(f"started:  {started_at}")
     print("stages:")
-    for step in steps:
-        print(f"  - {step.name}")
+    for step in all_steps:
+        suffix = " [skipped]" if step.name in skipped else ""
+        print(f"  - {step.name}{suffix}")
     print()
 
 
@@ -139,7 +146,8 @@ def run(args) -> int:
     _assert_git_repo()
     _assert_main_clone()
     _assert_on_path("claude")
-    _assert_on_path("gh")
+    if not args.skip_pr:
+        _assert_on_path("gh")
 
     # 2. Run ID (dir created after project_name is known)
     run_id = time.strftime("%y%m%d-%H%M%S")
@@ -180,7 +188,17 @@ def run(args) -> int:
         for step in STEPS
     }
 
-    # 7. Context
+    # 7. Active steps
+    PR_STEPS = {"push", "pr-open", "pr-view", "pr-babysit"}
+    skip_pr = args.skip_pr
+    if skip_pr:
+        active_steps = [s for s in STEPS if s.name not in PR_STEPS]
+        skipped_names = PR_STEPS
+    else:
+        active_steps = STEPS
+        skipped_names = set()
+
+    # 8. Context
     ctx = RunContext(run_id, run_dir, step_configs)
     ctx.set("branch", branch)
     ctx.set("wt_dir", wt_dir)
@@ -188,24 +206,25 @@ def run(args) -> int:
     ctx.set("spec", spec)
     ctx.set("project", project_name)
     ctx.set("started_at", ctx.started_at)
+    ctx.set("skip_pr", skip_pr)
 
-    # 8. Save initial state
+    # 9. Save initial state
     ctx.save()
 
-    # 9. Worktree parent dir
+    # 10. Worktree parent dir
     Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
 
-    # 10. Preamble
-    _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS)
+    # 11. Preamble
+    _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS, skipped_names)
 
-    # 11. Lifecycle + engine
+    # 12. Lifecycle + engine
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir))
     engine = Engine()
 
-    # 12. Run pipeline
+    # 13. Run pipeline
     try:
         from pipeline import Pipeline
-        Pipeline(STEPS).run(ctx, engine, lifecycle)
+        Pipeline(active_steps).run(ctx, engine, lifecycle)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         _exit_code = {
@@ -217,7 +236,10 @@ def run(args) -> int:
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return _exit_code
 
-    # 12. Success
-    print("done.")
+    # 14. Success
+    if skip_pr:
+        print(f"done. (push and PR skipped; worktree left at {wt_dir})")
+    else:
+        print("done.")
     (run_dir / "draft.pid").unlink(missing_ok=True)
     return 0
