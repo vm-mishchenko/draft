@@ -1,6 +1,14 @@
 import json
+from pathlib import Path
 
 from draft.runs import runs_base
+
+
+def _shorten(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def register(subparsers):
@@ -37,13 +45,13 @@ def run(args) -> int:
         state_path = d / "state.json"
         if not state_path.exists():
             project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'-':<10}  {'-':<30}  {'-':<50}  {d}")
+            print(f"{d.name:<18}  {project:<20}  {'-':<10}  {'-':<30}  {'-':<50}  {_shorten(d)}")
             continue
         try:
             payload = json.loads(state_path.read_text())
         except Exception:
             project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {'-':<30}  {'-':<50}  {d}")
+            print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {'-':<30}  {'-':<50}  {_shorten(d)}")
             continue
 
         project = payload.get("data", {}).get("project", d.parent.name) or d.parent.name
@@ -51,6 +59,6 @@ def run(args) -> int:
         branch = payload.get("data", {}).get("branch", "-") or "-"
         pr_url = payload.get("data", {}).get("pr_url", "") or "-"
         stages = f"{completed}/{total_steps}"
-        print(f"{d.name:<18}  {project:<20}  {stages:<10}  {branch:<30}  {pr_url:<50}  {d}")
+        print(f"{d.name:<18}  {project:<20}  {stages:<10}  {branch:<30}  {pr_url:<50}  {_shorten(d)}")
 
     return 0
