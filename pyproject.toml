@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools >= 68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "draft"
+version = "0.1.0"
+description = "CLI tool to run a spec through an AI-powered pipeline and open a PR"
+requires-python = ">= 3.12"
+authors = [{name = "Vitalii Mishchenko"}]
+dependencies = ["PyYAML"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+draft = "draft.cli:main"
+
+[tool.setuptools.package-data]
+"draft.steps.code_spec" = ["*.md"]
+"draft.steps.pr_open" = ["*.md"]
+"draft.steps.pr_babysit" = ["*.md"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
