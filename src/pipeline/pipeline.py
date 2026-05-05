@@ -70,6 +70,7 @@ class Pipeline:
             try:
                 step.run(ctx, engine)
                 ctx.mark_done(step.name)
+                ctx.save()
                 lc.on_step_success(step, ctx)
             except StepError as exc:
                 lc.on_step_error(step, ctx, exc)
