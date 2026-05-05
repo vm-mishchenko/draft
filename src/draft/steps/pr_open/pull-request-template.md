@@ -4,5 +4,4 @@
 
 ## Test plan
 
-- [ ] Manual smoke test
-- [ ] Existing tests pass
+<!-- Describe how changes were testsed -->
