@@ -29,6 +29,13 @@ def register(subparsers):
         default=False,
         help="Stop after code generation; skip push and PR.",
     )
+    p.add_argument(
+        "--from",
+        metavar="BRANCH",
+        dest="from_branch",
+        default=None,
+        help="Base branch to create the worktree from (default: origin/main or origin/master).",
+    )
     p.set_defaults(func=run)
 
 
@@ -90,6 +97,20 @@ def _project_name(repo: str) -> str:
 
 def _sanitize_branch(branch: str) -> str:
     return branch.replace("/", "-")
+
+
+def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
+    if from_branch:
+        return from_branch
+    for candidate in ("origin/main", "origin/master"):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", candidate],
+            capture_output=True, cwd=repo,
+        )
+        if result.returncode == 0:
+            return candidate
+    print("error: could not find origin/main or origin/master; use --from to specify a base branch", file=sys.stderr)
+    sys.exit(3)
 
 
 def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
@@ -154,6 +175,7 @@ def run(args) -> int:
 
     repo = _repo_root()
     project_name = _project_name(repo)
+    base_branch = _resolve_base_branch(repo, args.from_branch)
 
     run_dir = Path.home() / ".draft" / "runs" / project_name / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +223,7 @@ def run(args) -> int:
     # 8. Context
     ctx = RunContext(run_id, run_dir, step_configs)
     ctx.set("branch", branch)
+    ctx.set("base_branch", base_branch)
     ctx.set("wt_dir", wt_dir)
     ctx.set("repo", repo)
     ctx.set("spec", spec)

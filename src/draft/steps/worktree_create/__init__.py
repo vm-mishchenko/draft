@@ -8,7 +8,7 @@ class WorktreeCreateStep(Step):
         return {"max_retries": 1, "timeout": 60, "retry_delay": 0}
 
     def cmd(self, ctx) -> list[str]:
-        return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch")]
+        return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch"), ctx.get("base_branch")]
 
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
