@@ -38,4 +38,12 @@ steps:
           retry: 2
   pr-open:
     title_prefix: "CLOUDP-12345: "
+  pr-babysit:
+    checks_delay: 30
 ```
+
+Step config fields:
+- `max_retries`: attempts before failing the step
+- `timeout`: per-attempt timeout in seconds
+- `retry_delay`: seconds to wait between retries
+- `checks_delay`: `pr-babysit` only — seconds to wait before the first CI check poll
