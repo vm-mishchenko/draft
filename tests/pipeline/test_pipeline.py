@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from pipeline.context import RunContext
-from pipeline.engine import Engine, TIMEOUT_EXIT
+from pipeline.runner import Runner, TIMEOUT_EXIT
 from pipeline.pipeline import Pipeline, PipelineLifecycle, Step, StepError
 
 
@@ -65,7 +65,7 @@ def test_pipeline_skips_completed_steps(tmp_path):
         def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
         def run(self, ctx, engine, lifecycle=None): ran.append(self.name)
 
-    Pipeline([TrackStep()]).run(ctx, Engine())
+    Pipeline([TrackStep()]).run(ctx, Runner())
     assert ran == []
 
 
@@ -80,7 +80,7 @@ def test_pipeline_step_error_propagates_with_lifecycle(tmp_path):
         def run(self, ctx, engine, lifecycle=None): raise StepError("fail-step", 1)
 
     with pytest.raises(StepError):
-        Pipeline([ImmediateFailStep()]).run(ctx, Engine(), lifecycle=lc)
+        Pipeline([ImmediateFailStep()]).run(ctx, Runner(), lifecycle=lc)
 
     lc.before_step.assert_called_once()
     lc.on_step_error.assert_called_once()
@@ -103,7 +103,7 @@ def test_pipeline_lifecycle_order(tmp_path):
         def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
         def run(self, ctx, engine, lifecycle=None): pass
 
-    Pipeline([OkStep()]).run(ctx, Engine(), lifecycle=RecordingLifecycle())
+    Pipeline([OkStep()]).run(ctx, Runner(), lifecycle=RecordingLifecycle())
     assert events == ["before", "success", "after"]
 
 
@@ -111,7 +111,7 @@ def test_step_default_run_retries_on_failure(tmp_path):
     step_configs = {"counting-step": {"max_retries": 3, "timeout": None, "retry_delay": 0}}
     ctx = make_ctx(tmp_path, step_configs)
     step = CountingStep()
-    engine = Engine()
+    engine = Runner()
 
     with pytest.raises(StepError) as exc_info:
         step.run(ctx, engine)
@@ -130,13 +130,13 @@ def test_step_default_run_raises_after_max_retries(tmp_path):
         def cmd(self, ctx): return ["false"]
 
     with pytest.raises(StepError) as exc_info:
-        FailCmd().run(ctx, Engine())
+        FailCmd().run(ctx, Runner())
     assert exc_info.value.exit_code != 0
 
 
 def test_engine_timeout_returns_timeout_exit(tmp_path):
     ctx = make_ctx(tmp_path)
-    engine = Engine()
+    engine = Runner()
     log = tmp_path / "test.log"
     rc = engine.run_stage(
         label="sleep",

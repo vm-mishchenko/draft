@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pipeline.context import RunContext
-    from pipeline.engine import Engine
+    from pipeline.runner import Runner
 
 
 class StepError(Exception):
@@ -40,7 +40,7 @@ class Step:
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", engine: "Engine", lifecycle: "PipelineLifecycle | None" = None):
+    def run(self, ctx: "RunContext", engine: "Runner", lifecycle: "PipelineLifecycle | None" = None):
         cfg = ctx.config(self.name)
         last_rc = 1
         for attempt in range(1, cfg["max_retries"] + 1):
@@ -64,7 +64,7 @@ class Pipeline:
     def __init__(self, steps: list[Step]):
         self.steps = steps
 
-    def run(self, ctx: "RunContext", engine: "Engine", lifecycle: PipelineLifecycle | None = None):
+    def run(self, ctx: "RunContext", engine: "Runner", lifecycle: PipelineLifecycle | None = None):
         lc = lifecycle or PipelineLifecycle()
         for step in self.steps:
             if ctx.is_completed(step.name):

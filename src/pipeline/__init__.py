@@ -1,5 +1,5 @@
 from pipeline.context import RunContext
-from pipeline.engine import Engine
+from pipeline.runner import Runner
 from pipeline.pipeline import Pipeline, PipelineLifecycle, Step, StepError
 
 __all__ = [
@@ -8,5 +8,5 @@ __all__ = [
     "Step",
     "StepError",
     "RunContext",
-    "Engine",
+    "Runner",
 ]
