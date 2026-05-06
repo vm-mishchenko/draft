@@ -42,15 +42,15 @@ class PrBabysitStep(Step):
     name = "pr-babysit"
 
     def defaults(self) -> dict:
-        return {"max_retries": 100, "timeout": 1200, "retry_delay": 60}
+        return {"max_retries": 100, "timeout": 1200, "retry_delay": 60, "checks_delay": 30}
 
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         pr_url = ctx.get("pr_url", "")
         wt_dir = ctx.get("wt_dir")
 
+        engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
         for attempt in range(1, cfg["max_retries"] + 1):
-            engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
 
             try:
                 counts = _check_ci(pr_url)
@@ -83,5 +83,6 @@ class PrBabysitStep(Step):
 
             ctx.step_set(self.name, "attempts", attempt)
             ctx.save()
+            engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
 
         print(f"pr-babysit: exhausted attempts. PR: {pr_url}")
