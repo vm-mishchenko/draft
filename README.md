@@ -16,6 +16,10 @@ draft create <spec-path>
 draft create --prompt "TEXT"
 draft continue [run-id]
 draft delete <run-id> [--delete-branch]
+draft prune
+draft prune --yes [--delete-branch]
+draft prune --all [--project NAME | --all-projects]
+draft prune --dry-run
 ```
 
 ## Config
