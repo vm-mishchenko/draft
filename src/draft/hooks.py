@@ -55,6 +55,8 @@ def _footer(rc: int, duration: float, timeout: int) -> str:
 
 
 class HookRunner:
+    """Executes shell hook commands for a given pipeline step and lifecycle event."""
+
     def __init__(self, config: dict, cwd: str | None, run_dir: str | Path, engine):
         self._steps_config = config.get("steps", {})
         self._cwd = cwd
