@@ -11,7 +11,7 @@ import pytest
 def test_command_list_no_runs(tmp_path, capsys):
     import draft.command_list as clm
 
-    with patch("draft.runs.runs_base", return_value=tmp_path / "nonexistent"):
+    with patch("draft.command_list.runs_base", return_value=tmp_path / "nonexistent"):
         result = clm.run(object())
     captured = capsys.readouterr()
     assert "no runs" in captured.out
@@ -24,7 +24,7 @@ def test_command_list_no_runs_real(tmp_path, capsys):
     base = tmp_path / "runs"
     base.mkdir()
 
-    with patch("draft.runs.runs_base", return_value=base):
+    with patch("draft.command_list.runs_base", return_value=base):
         result = clm.run(object())
     captured = capsys.readouterr()
     assert "no runs" in captured.out

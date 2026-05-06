@@ -61,6 +61,7 @@ class HookRunner:
                 self._cwd,
             )
             results.append(result)
+        _raise_if_failed(results)
         return results
 
 

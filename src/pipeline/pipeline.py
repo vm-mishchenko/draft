@@ -40,7 +40,7 @@ class Step:
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", engine: "Engine", lifecycle: "PipelineLifecycle"):
+    def run(self, ctx: "RunContext", engine: "Engine", lifecycle: "PipelineLifecycle | None" = None):
         cfg = ctx.config(self.name)
         last_rc = 1
         for attempt in range(1, cfg["max_retries"] + 1):

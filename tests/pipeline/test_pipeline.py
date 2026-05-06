@@ -63,7 +63,7 @@ def test_pipeline_skips_completed_steps(tmp_path):
     class TrackStep(Step):
         name = "ok-step"
         def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
-        def run(self, ctx, engine): ran.append(self.name)
+        def run(self, ctx, engine, lifecycle=None): ran.append(self.name)
 
     Pipeline([TrackStep()]).run(ctx, Engine())
     assert ran == []
@@ -77,7 +77,7 @@ def test_pipeline_step_error_propagates_with_lifecycle(tmp_path):
     class ImmediateFailStep(Step):
         name = "fail-step"
         def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
-        def run(self, ctx, engine): raise StepError("fail-step", 1)
+        def run(self, ctx, engine, lifecycle=None): raise StepError("fail-step", 1)
 
     with pytest.raises(StepError):
         Pipeline([ImmediateFailStep()]).run(ctx, Engine(), lifecycle=lc)
@@ -101,7 +101,7 @@ def test_pipeline_lifecycle_order(tmp_path):
     class OkStep(Step):
         name = "ok-step"
         def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
-        def run(self, ctx, engine): pass
+        def run(self, ctx, engine, lifecycle=None): pass
 
     Pipeline([OkStep()]).run(ctx, Engine(), lifecycle=RecordingLifecycle())
     assert events == ["before", "success", "after"]
