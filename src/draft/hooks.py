@@ -11,6 +11,8 @@ from pipeline import PipelineLifecycle, StepError
 
 @dataclass
 class HookResult:
+    """Result of a single hook command execution."""
+
     cmd: str
     rc: int
     output: str
