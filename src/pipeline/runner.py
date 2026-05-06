@@ -16,7 +16,7 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
-class Engine:
+class Runner:
     LABEL_WIDTH = 36
 
     def run_stage(

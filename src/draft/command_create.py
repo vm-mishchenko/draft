@@ -8,7 +8,7 @@ from pathlib import Path
 from draft.config import ConfigError, load_config, step_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
-from pipeline import Engine, RunContext, StepError
+from pipeline import Runner, RunContext, StepError
 
 
 def register(subparsers):
@@ -242,7 +242,7 @@ def run(args) -> int:
 
     # 12. Lifecycle + engine
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir))
-    engine = Engine()
+    engine = Runner()
 
     # 13. Run pipeline
     try:

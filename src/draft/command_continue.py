@@ -6,7 +6,7 @@ from draft import runs
 from draft.config import ConfigError, load_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
-from pipeline import Engine, Pipeline, RunContext, StepError
+from pipeline import Runner, Pipeline, RunContext, StepError
 
 
 def register(subparsers):
@@ -95,7 +95,7 @@ def run(args) -> int:
     _print_preamble(ctx, STEPS)
 
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir))
-    engine = Engine()
+    engine = Runner()
 
     try:
         Pipeline(STEPS).run(ctx, engine, lifecycle)
