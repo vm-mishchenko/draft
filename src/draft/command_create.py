@@ -113,6 +113,16 @@ def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
     sys.exit(3)
 
 
+def _unique_branch(repo: str, branch: str) -> str:
+    from draft.steps.worktree_create import _branch_exists
+    i = 1
+    candidate = branch
+    while _branch_exists(repo, candidate):
+        candidate = f"{branch}-{i}"
+        i += 1
+    return candidate
+
+
 def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     from importlib.resources import files
     try:
@@ -194,6 +204,7 @@ def run(args) -> int:
         stem = Path(spec).stem
         branch = stem.lower().replace("_", "-").replace(" ", "-")[:50]
 
+    branch = _unique_branch(repo, branch)
     wt_dir = str(Path.home() / ".draft" / "worktrees" / project_name / _sanitize_branch(branch))
 
     # 5. Config
