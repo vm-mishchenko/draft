@@ -84,11 +84,12 @@ class PrOpenStep(Step):
             body = (STEP_DIR / "pull-request-template.md").read_text()
 
         log_path = ctx.log_path(self.name)
+        gh_base = base_branch.removeprefix("origin/")
         rc = engine.run_stage(
             label=self.name,
             cmd=[
                 "gh", "pr", "create",
-                "--base", base_branch,
+                "--base", gh_base,
                 "--title", title_prefix + title,
                 "--body", body,
                 "--draft",
