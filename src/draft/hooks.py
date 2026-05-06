@@ -20,7 +20,7 @@ class HookResult:
 
 
 class HookError(Exception):
-    pass
+    """Raised when a hook command exits with a non-zero return code."""
 
 
 def _run_hook_cmd(cmd: str, timeout: int, cwd: str | None) -> HookResult:
