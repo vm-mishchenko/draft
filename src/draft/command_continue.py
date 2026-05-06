@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +45,16 @@ def _next_step(ctx, steps) -> str | None:
     return None
 
 
+def _branch_at(path: str) -> str | None:
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True, text=True, cwd=path,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def run(args) -> int:
     if args.run_id:
         run_dir = runs.find_run_dir(args.run_id)
@@ -76,16 +87,61 @@ def run(args) -> int:
         except ValueError:
             pass
 
-    # Recover deleted worktree
+    # State for finished-run / drift checks
+    state_for_check = {
+        "completed": ctx._completed,
+        "data": dict(ctx._data),
+    }
+    finished = runs.is_run_finished(state_for_check)
+    worktree_mode = ctx.get("worktree_mode", "worktree")
+    delete_worktree = bool(ctx.get("delete_worktree", False))
+    saved_branch = ctx.get("branch", "")
+    repo = ctx.get("repo", "")
     wt_dir = ctx.get("wt_dir", "")
-    if ctx.is_completed("worktree-create") and wt_dir and not Path(wt_dir).exists():
+
+    # Finished + worktree gone (--delete-worktree happy path): nothing to do
+    if (
+        finished
+        and worktree_mode == "worktree"
+        and delete_worktree
+        and wt_dir
+        and not Path(wt_dir).exists()
+    ):
+        print(f"run '{run_id}' is already complete; worktree was deleted.")
+        return 0
+
+    # Drift check: current branch context vs saved branch
+    if saved_branch:
+        if worktree_mode == "no-worktree":
+            current = _branch_at(repo) if repo else None
+            if current is not None and current != saved_branch:
+                print(
+                    f"error: branch drift; run '{run_id}' targets '{saved_branch}' but {repo} is on '{current}'",
+                    file=sys.stderr,
+                )
+                return 2
+        elif wt_dir and Path(wt_dir).exists():
+            current = _branch_at(wt_dir)
+            if current is not None and current != saved_branch:
+                print(
+                    f"error: branch drift; run '{run_id}' targets '{saved_branch}' but worktree is on '{current}'",
+                    file=sys.stderr,
+                )
+                return 2
+
+    # Recover deleted worktree (only for unfinished worktree-mode runs)
+    if (
+        worktree_mode == "worktree"
+        and ctx.is_completed("worktree-create")
+        and wt_dir
+        and not Path(wt_dir).exists()
+    ):
         ctx._completed.remove("worktree-create")
         ctx.save()
 
     # New PID
     pid_file.write_text(str(os.getpid()))
 
-    repo = ctx.get("repo", "")
     try:
         config = load_config(repo)
     except ConfigError as exc:
@@ -97,13 +153,16 @@ def run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
 
-    _print_preamble(ctx, STEPS)
+    expected = set(runs.expected_steps(state_for_check))
+    active_steps = [s for s in STEPS if s.name in expected]
+
+    _print_preamble(ctx, active_steps)
 
     engine = Runner()
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine))
 
     try:
-        Pipeline(STEPS).run(ctx, engine, lifecycle)
+        Pipeline(active_steps).run(ctx, engine, lifecycle)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         _exit_code = {

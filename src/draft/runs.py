@@ -8,6 +8,20 @@ FULL_PIPELINE_STEPS = ("worktree-create", "code-spec", "push", "pr-open", "pr-vi
 SKIP_PR_STEPS = ("worktree-create", "code-spec")
 
 
+def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool) -> tuple[str, ...]:
+    steps: list[str] = []
+    if worktree_mode != "no-worktree":
+        steps.append("worktree-create")
+    steps.append("code-spec")
+    if not skip_pr:
+        steps.append("push")
+        if pr_mode != "reuse":
+            steps.append("pr-open")
+        steps.append("pr-view")
+        steps.append("pr-babysit")
+    return tuple(steps)
+
+
 def runs_base() -> Path:
     return Path.home() / ".draft" / "runs"
 
@@ -71,13 +85,33 @@ def load_state(run_dir: Path) -> dict | None:
 
 
 def expected_steps(state: dict) -> tuple[str, ...]:
-    if state.get("data", {}).get("skip_pr"):
-        return SKIP_PR_STEPS
-    return FULL_PIPELINE_STEPS
+    data = state.get("data", {})
+    return _expected_steps(
+        worktree_mode=data.get("worktree_mode", "worktree"),
+        pr_mode=data.get("pr_mode"),
+        skip_pr=bool(data.get("skip_pr", False)),
+    )
 
 
 def is_run_finished(state: dict) -> bool:
     return all(s in state.get("completed", []) for s in expected_steps(state))
+
+
+def find_active_run_on_branch(project: str, branch: str) -> Path | None:
+    project_dir = runs_base() / project
+    if not project_dir.exists():
+        return None
+    for run_dir in sorted(project_dir.iterdir(), reverse=True):
+        if not run_dir.is_dir():
+            continue
+        state = load_state(run_dir)
+        if state is None:
+            continue
+        if state.get("data", {}).get("branch") != branch:
+            continue
+        if is_run_active(run_dir) or not is_run_finished(state):
+            return run_dir
+    return None
 
 
 def project_runs(project_name: str) -> list[Path]:

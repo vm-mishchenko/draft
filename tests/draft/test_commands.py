@@ -582,3 +582,325 @@ def test_prune_skip_pr_finished_included(tmp_path, capsys):
     assert result == 0
     captured = capsys.readouterr()
     assert "260505-130000" in captured.out
+
+
+# --- create-modes: flag conflicts ---
+
+
+def _make_create_args(**kwargs):
+    class FakeArgs:
+        spec_path = "spec.md"
+        prompt = None
+        overrides = []
+        skip_pr = False
+        from_branch = None
+        branch = None
+        no_worktree = False
+        delete_worktree = False
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+def test_reject_branch_and_from_together(capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._reject_flag_conflicts(_make_create_args(branch="foo", from_branch="main"))
+    assert exc.value.code == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_reject_delete_worktree_with_no_worktree(capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._reject_flag_conflicts(_make_create_args(delete_worktree=True, no_worktree=True))
+    assert exc.value.code == 2
+    assert "--delete-worktree" in capsys.readouterr().err
+
+
+def test_reject_flag_conflicts_no_op_when_clean():
+    import draft.command_create as cmd
+
+    cmd._reject_flag_conflicts(_make_create_args())  # must not raise
+
+
+# --- create-modes: _compose_active_steps ---
+
+
+def test_compose_active_steps_default():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "open", False)
+    assert [s.name for s in active] == ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
+    assert skipped == set()
+
+
+def test_compose_active_steps_no_worktree():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("no-worktree", "open", False)
+    assert "worktree-create" not in [s.name for s in active]
+    assert "worktree-create" in skipped
+
+
+def test_compose_active_steps_skip_pr():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "skip", True)
+    assert [s.name for s in active] == ["worktree-create", "code-spec"]
+    assert skipped == {"push", "pr-open", "pr-view", "pr-babysit"}
+
+
+def test_compose_active_steps_pr_reuse_skips_pr_open():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "reuse", False)
+    names = [s.name for s in active]
+    assert "pr-open" not in names
+    assert "pr-view" in names
+    assert "pr-babysit" in names
+    assert "pr-open" in skipped
+
+
+# --- create-modes: runs.expected_steps with new keys ---
+
+
+def test_expected_steps_legacy_full():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {}}
+    assert r.expected_steps(state) == r.FULL_PIPELINE_STEPS
+
+
+def test_expected_steps_legacy_skip_pr():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"skip_pr": True}}
+    assert r.expected_steps(state) == r.SKIP_PR_STEPS
+
+
+def test_expected_steps_no_worktree_open():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"worktree_mode": "no-worktree", "pr_mode": "open"}}
+    assert r.expected_steps(state) == ("code-spec", "push", "pr-open", "pr-view", "pr-babysit")
+
+
+def test_expected_steps_pr_reuse():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"worktree_mode": "worktree", "pr_mode": "reuse"}}
+    assert r.expected_steps(state) == ("worktree-create", "code-spec", "push", "pr-view", "pr-babysit")
+
+
+def test_expected_steps_no_worktree_skip_pr():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"worktree_mode": "no-worktree", "skip_pr": True}}
+    assert r.expected_steps(state) == ("code-spec",)
+
+
+# --- create-modes: runs.find_active_run_on_branch ---
+
+
+def test_find_active_run_on_branch_none(tmp_path):
+    import draft.runs as r
+
+    with patch("draft.runs.runs_base", return_value=tmp_path / "nope"):
+        assert r.find_active_run_on_branch("proj", "foo") is None
+
+
+def test_find_active_run_on_branch_returns_unfinished(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"branch": "foo"},
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "foo")
+    assert result == run_dir
+
+
+def test_find_active_run_on_branch_skips_finished(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": list(r.FULL_PIPELINE_STEPS),
+        "data": {"branch": "foo"},
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "foo")
+    assert result is None
+
+
+def test_find_active_run_on_branch_skips_other_branch(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"branch": "other"},
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "foo")
+    assert result is None
+
+
+# --- create-modes: command_continue drift and finished-run exit ---
+
+
+def _continue_state(*, completed=None, branch="foo", wt_dir="/tmp/wt", repo="/tmp/repo",
+                    worktree_mode="worktree", delete_worktree=False, skip_pr=False, pr_mode="open"):
+    return {
+        "run_id": "260506-100000",
+        "run_dir": "",
+        "completed": completed or [],
+        "data": {
+            "branch": branch,
+            "wt_dir": wt_dir,
+            "repo": repo,
+            "worktree_mode": worktree_mode,
+            "delete_worktree": delete_worktree,
+            "skip_pr": skip_pr,
+            "pr_mode": pr_mode,
+        },
+        "step_data": {},
+        "step_configs": {},
+        "started_at": "2026-05-06T00:00:00",
+    }
+
+
+def test_continue_finished_with_deleted_worktree_exits_clean(tmp_path, capsys):
+    import draft.command_continue as cmd_continue
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    wt = tmp_path / "gone"  # does not exist
+
+    state = _continue_state(
+        completed=list(r.FULL_PIPELINE_STEPS),
+        wt_dir=str(wt),
+        delete_worktree=True,
+    )
+    state["run_dir"] = str(run_dir)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260506-100000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cmd_continue.run(FakeArgs())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "already complete" in out
+
+
+def test_continue_drift_no_worktree_refuses(tmp_path, capsys):
+    import draft.command_continue as cmd_continue
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    state = _continue_state(
+        completed=["code-spec"],
+        wt_dir=str(repo),
+        repo=str(repo),
+        worktree_mode="no-worktree",
+        branch="foo",
+    )
+    state["run_dir"] = str(run_dir)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260506-100000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.command_continue._branch_at", return_value="other-branch"):
+        result = cmd_continue.run(FakeArgs())
+
+    assert result == 2
+    assert "drift" in capsys.readouterr().err
+
+
+def test_continue_drift_worktree_refuses(tmp_path, capsys):
+    import draft.command_continue as cmd_continue
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+
+    state = _continue_state(
+        completed=["worktree-create", "code-spec"],
+        wt_dir=str(wt),
+        branch="foo",
+    )
+    state["run_dir"] = str(run_dir)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260506-100000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.command_continue._branch_at", return_value="other-branch"):
+        result = cmd_continue.run(FakeArgs())
+
+    assert result == 2
+    assert "drift" in capsys.readouterr().err
+
+
+# --- create-modes: WorktreeCreateStep existing-branch mode ---
+
+
+def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
+    from draft.steps.worktree_create import WorktreeCreateStep
+    from pipeline import RunContext
+
+    ctx = RunContext("rid", tmp_path, {"worktree-create": {"max_retries": 1, "timeout": 60}})
+    ctx.set("branch", "foo")
+    ctx.set("base_branch", "origin/main")
+    ctx.set("wt_dir", "/tmp/wt")
+    ctx.set("branch_source", "existing")
+
+    cmd = WorktreeCreateStep().cmd(ctx)
+    assert cmd == ["git", "worktree", "add", "/tmp/wt", "foo"]
+    assert "-b" not in cmd
+
+
+def test_worktree_create_new_branch_uses_dash_b(tmp_path):
+    from draft.steps.worktree_create import WorktreeCreateStep
+    from pipeline import RunContext
+
+    ctx = RunContext("rid", tmp_path, {"worktree-create": {"max_retries": 1, "timeout": 60}})
+    ctx.set("branch", "foo")
+    ctx.set("base_branch", "origin/main")
+    ctx.set("wt_dir", "/tmp/wt")
+    ctx.set("branch_source", "new")
+
+    cmd = WorktreeCreateStep().cmd(ctx)
+    assert cmd == ["git", "worktree", "add", "/tmp/wt", "-b", "foo", "origin/main"]

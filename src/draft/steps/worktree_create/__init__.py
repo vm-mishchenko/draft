@@ -44,6 +44,8 @@ class WorktreeCreateStep(Step):
         return {"max_retries": 1, "timeout": 60, "retry_delay": 0}
 
     def cmd(self, ctx) -> list[str]:
+        if ctx.get("branch_source") == "existing":
+            return ["git", "worktree", "add", ctx.get("wt_dir"), ctx.get("branch")]
         return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch"), ctx.get("base_branch")]
 
     def run(self, ctx, engine, lifecycle):
@@ -52,8 +54,9 @@ class WorktreeCreateStep(Step):
 
         branch = ctx.get("branch")
         repo = ctx.get("repo")
+        branch_source = ctx.get("branch_source", "new")
 
-        if _branch_exists(repo, branch):
+        if branch_source == "new" and _branch_exists(repo, branch):
             project = ctx.get("project")
             run_id = _find_run_id_for_branch(project, branch, exclude_run_id=ctx.run_id)
             print(f"\nerror: branch '{branch}' already exists", file=sys.stderr)
@@ -62,6 +65,10 @@ class WorktreeCreateStep(Step):
                 print(f"\n       to remove it: draft delete {run_id}", file=sys.stderr)
             else:
                 print(f"\n       to remove it: git branch -D {branch}", file=sys.stderr)
+            raise StepError(self.name, 255)
+
+        if branch_source == "existing" and not _branch_exists(repo, branch):
+            print(f"\nerror: branch '{branch}' no longer exists", file=sys.stderr)
             raise StepError(self.name, 255)
 
         rc = engine.run_stage(
