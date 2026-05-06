@@ -93,7 +93,7 @@ def _build_claude_cmd(ctx) -> list[str]:
     else:
         verify_section = ""
     prompt = template.replace("{{SPEC}}", spec).replace("{{VERIFY_ERRORS}}", verify_section)
-    return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read", "--output-format", "stream-json"]
+    return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read", "--output-format", "stream-json", "--verbose"]
 
 
 def _is_branch_clean(cwd: str) -> bool:
