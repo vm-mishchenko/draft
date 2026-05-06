@@ -36,4 +36,6 @@ steps:
         - cmd: "echo failed"
           timeout: 10
           retry: 2
+  pr-open:
+    title_prefix: "CLOUDP-12345: "
 ```
