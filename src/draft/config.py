@@ -49,3 +49,62 @@ def step_config(config: dict, step_name: str, step_defaults: dict) -> dict:
 
 def load_hook_config(config: dict) -> dict:
     return config.get("steps", {})
+
+
+_HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
+
+
+def validate_config(config: dict) -> None:
+    """Validate hook entries.
+
+    Recognised hook fields are exactly `cmd` and `timeout`. Any other key
+    (e.g. `retry`, `name`) is rejected. `cmd` is required and must be a
+    non-empty string. Raises ConfigError on first violation.
+    """
+    steps = config.get("steps")
+    if steps is None:
+        return
+    if not isinstance(steps, dict):
+        raise ConfigError("'steps' must be a mapping")
+
+    for step_name, step_cfg in steps.items():
+        if not isinstance(step_cfg, dict):
+            continue
+        hooks = step_cfg.get("hooks")
+        if hooks is None:
+            continue
+        if not isinstance(hooks, dict):
+            raise ConfigError(
+                f"'hooks' for step '{step_name}' must be a mapping"
+            )
+        for event, entries in hooks.items():
+            if entries is None:
+                continue
+            if not isinstance(entries, list):
+                raise ConfigError(
+                    f"hooks for step '{step_name}' event '{event}' "
+                    f"must be a list"
+                )
+            for i, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    raise ConfigError(
+                        f"hook entry {i} for step '{step_name}' "
+                        f"event '{event}' must be a mapping"
+                    )
+                if "cmd" not in entry:
+                    raise ConfigError(
+                        f"hook entry {i} for step '{step_name}' "
+                        f"event '{event}' is missing required key 'cmd'"
+                    )
+                if not isinstance(entry["cmd"], str) or not entry["cmd"]:
+                    raise ConfigError(
+                        f"'cmd' for step '{step_name}' event '{event}' "
+                        f"entry {i} must be a non-empty string"
+                    )
+                unknown = set(entry.keys()) - _HOOK_ALLOWED_KEYS
+                if unknown:
+                    bad = sorted(unknown)[0]
+                    raise ConfigError(
+                        f"unknown hook option '{bad}' for step "
+                        f"'{step_name}' event '{event}' entry {i}"
+                    )

@@ -2,6 +2,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,44 @@ def _fmt_elapsed(seconds: float) -> str:
 class Runner:
     LABEL_WIDTH = 36
 
+    @contextmanager
+    def tty_ticker(self, label: str):
+        is_tty = sys.stdout.isatty()
+        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
+        start = time.monotonic()
+        stop_event = threading.Event()
+        final_status = ["?"]
+
+        def _set_status(text: str) -> None:
+            final_status[0] = text
+
+        def _tick():
+            while not stop_event.is_set():
+                elapsed = _fmt_elapsed(time.monotonic() - start)
+                line = f"{padded} {elapsed:>7}  running"
+                if is_tty:
+                    sys.stdout.write(f"\r\033[K{line}")
+                    sys.stdout.flush()
+                stop_event.wait(1)
+
+        thread = threading.Thread(target=_tick, daemon=True)
+        if is_tty:
+            thread.start()
+
+        try:
+            yield _set_status
+        finally:
+            stop_event.set()
+            if is_tty:
+                thread.join()
+            elapsed = _fmt_elapsed(time.monotonic() - start)
+            line = f"{padded} {elapsed:>7}  {final_status[0]}"
+            if is_tty:
+                sys.stdout.write(f"\r\033[K{line}\n")
+            else:
+                sys.stdout.write(f"{line}\n")
+            sys.stdout.flush()
+
     def run_stage(
         self,
         label: str,
@@ -29,76 +68,50 @@ class Runner:
         timeout: float | None = None,
         line_formatter=None,
     ) -> int:
-        is_tty = sys.stdout.isatty()
-        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
-
         with open(log_path, "a") as log_fd:
             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             log_fd.write(f"=== attempt {attempt} @ {ts} ===\n")
             log_fd.flush()
 
-            start = time.monotonic()
-            proc = subprocess.Popen(
-                cmd,
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
+            with self.tty_ticker(label) as set_status:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
 
-            stop_event = threading.Event()
+                def _stream():
+                    for chunk in iter(lambda: proc.stdout.read(4096), b""):
+                        text = chunk.decode(errors="replace")
+                        if line_formatter is not None:
+                            lines = text.splitlines(keepends=True)
+                            out = []
+                            for ln in lines:
+                                formatted = line_formatter(ln)
+                                if formatted is not None:
+                                    out.append(formatted if formatted.endswith("\n") else formatted + "\n")
+                            text = "".join(out)
+                        if text:
+                            log_fd.write(text)
+                            log_fd.flush()
 
-            def _ticker():
-                while not stop_event.is_set():
-                    elapsed = _fmt_elapsed(time.monotonic() - start)
-                    line = f"{padded} {elapsed:>7}  running"
-                    if is_tty:
-                        sys.stdout.write(f"\r\033[K{line}")
-                        sys.stdout.flush()
-                    stop_event.wait(1)
+                streamer = threading.Thread(target=_stream, daemon=True)
+                streamer.start()
 
-            def _stream():
-                for chunk in iter(lambda: proc.stdout.read(4096), b""):
-                    text = chunk.decode(errors="replace")
-                    if line_formatter is not None:
-                        lines = text.splitlines(keepends=True)
-                        out = []
-                        for ln in lines:
-                            formatted = line_formatter(ln)
-                            if formatted is not None:
-                                out.append(formatted if formatted.endswith("\n") else formatted + "\n")
-                        text = "".join(out)
-                    if text:
-                        log_fd.write(text)
-                        log_fd.flush()
-
-            ticker = threading.Thread(target=_ticker, daemon=True)
-            streamer = threading.Thread(target=_stream, daemon=True)
-            if is_tty:
-                ticker.start()
-            streamer.start()
-
-            rc = TIMEOUT_EXIT
-            try:
-                proc.wait(timeout=timeout)
-                rc = proc.returncode
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
                 rc = TIMEOUT_EXIT
-            finally:
-                streamer.join()
-                stop_event.set()
-                if is_tty:
-                    ticker.join()
+                try:
+                    proc.wait(timeout=timeout)
+                    rc = proc.returncode
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                    rc = TIMEOUT_EXIT
+                finally:
+                    streamer.join()
 
-        elapsed = _fmt_elapsed(time.monotonic() - start)
-        status = "ok" if rc == 0 else ("timeout" if rc == TIMEOUT_EXIT else f"exit {rc}")
-        line = f"{padded} {elapsed:>7}  {status}"
-        if is_tty:
-            sys.stdout.write(f"\r\033[K{line}\n")
-        else:
-            sys.stdout.write(f"{line}\n")
-        sys.stdout.flush()
+                status = "ok" if rc == 0 else ("timeout" if rc == TIMEOUT_EXIT else f"exit {rc}")
+                set_status(status)
 
         return rc
 

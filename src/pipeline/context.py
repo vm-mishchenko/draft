@@ -44,6 +44,9 @@ class RunContext:
     def log_path(self, step_name: str) -> Path:
         return self.run_dir / f"{step_name}.log"
 
+    def hook_log_path(self, step_name: str, event: str) -> Path:
+        return self.run_dir / f"{step_name}.{event}.log"
+
     # --- step config ---
 
     def config(self, step_name: str) -> dict:

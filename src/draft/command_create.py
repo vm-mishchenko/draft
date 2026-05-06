@@ -5,7 +5,7 @@ import sys
 import time
 from pathlib import Path
 
-from draft.config import ConfigError, load_config, step_config
+from draft.config import ConfigError, load_config, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Runner, RunContext, StepError
@@ -203,6 +203,11 @@ def run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     config = _apply_overrides(config, args.overrides)
+    try:
+        validate_config(config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
 
     # 6. Step configs
     step_configs = {
@@ -241,8 +246,10 @@ def run(args) -> int:
     _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS, skipped_names)
 
     # 12. Lifecycle + engine
-    lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir))
     engine = Runner()
+    lifecycle = DraftLifecycle(
+        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
+    )
 
     # 13. Run pipeline
     try:

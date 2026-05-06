@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from draft.config import ConfigError, load_config, step_config
+from draft.config import ConfigError, load_config, step_config, validate_config
 
 
 def test_load_config_merges_global_and_project(tmp_path):
@@ -78,3 +78,64 @@ def test_step_config_no_overrides_uses_defaults():
     defaults = {"max_retries": 1, "timeout": None, "retry_delay": 0}
     result = step_config(config, "missing-step", defaults)
     assert result == defaults
+
+
+# --- validate_config ---
+
+def test_validate_config_accepts_cmd_only():
+    validate_config({"steps": {"s": {"hooks": {"pre": [{"cmd": "echo hi"}]}}}})
+
+
+def test_validate_config_accepts_cmd_and_timeout():
+    validate_config(
+        {"steps": {"s": {"hooks": {"pre": [{"cmd": "echo", "timeout": 5}]}}}}
+    )
+
+
+def test_validate_config_no_steps_is_ok():
+    validate_config({})
+    validate_config({"unrelated": "value"})
+
+
+def test_validate_config_no_hooks_is_ok():
+    validate_config({"steps": {"s": {"max_retries": 3}}})
+
+
+def test_validate_config_rejects_retry():
+    with pytest.raises(ConfigError) as exc:
+        validate_config(
+            {"steps": {"code-spec": {"hooks": {"pre": [{"cmd": "x", "retry": 2}]}}}}
+        )
+    msg = str(exc.value)
+    assert "'retry'" in msg
+    assert "code-spec" in msg
+    assert "pre" in msg
+
+
+def test_validate_config_rejects_unknown_field():
+    with pytest.raises(ConfigError) as exc:
+        validate_config(
+            {"steps": {"s": {"hooks": {"post": [{"cmd": "x", "name": "foo"}]}}}}
+        )
+    assert "'name'" in str(exc.value)
+
+
+def test_validate_config_requires_cmd():
+    with pytest.raises(ConfigError) as exc:
+        validate_config({"steps": {"s": {"hooks": {"pre": [{"timeout": 5}]}}}})
+    assert "'cmd'" in str(exc.value)
+
+
+def test_validate_config_rejects_empty_cmd():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"s": {"hooks": {"pre": [{"cmd": ""}]}}}})
+
+
+def test_validate_config_rejects_non_dict_entry():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"s": {"hooks": {"pre": ["echo hi"]}}}})
+
+
+def test_validate_config_rejects_non_list_event():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"s": {"hooks": {"pre": "echo hi"}}}})

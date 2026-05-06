@@ -1,9 +1,58 @@
+from contextlib import contextmanager
+
 import pytest
 
 from draft.hooks import HookError, HookRunner
 
 
-def test_hook_runner_runs_commands_in_order(tmp_path):
+class FakeEngine:
+    """No-op engine for hook tests. Records every set_status call."""
+
+    def __init__(self):
+        self.statuses: list[str] = []
+
+    @contextmanager
+    def tty_ticker(self, label: str):
+        recorded = []
+
+        def set_status(text: str) -> None:
+            recorded.append(text)
+
+        try:
+            yield set_status
+        finally:
+            self.statuses.extend(recorded)
+
+
+def _runner(config, cwd, run_dir, engine=None) -> HookRunner:
+    engine = engine or FakeEngine()
+    return HookRunner(config, cwd=str(cwd), run_dir=run_dir, engine=engine)
+
+
+# --- log file shape ---
+
+def test_log_file_has_header_body_footer(tmp_path):
+    out_file = tmp_path / "out.txt"
+    config = {
+        "steps": {
+            "code-spec": {
+                "hooks": {
+                    "pre": [
+                        {"cmd": f"echo hello >> {out_file}"},
+                    ]
+                }
+            }
+        }
+    }
+    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
+
+    log = (tmp_path / "code-spec.pre.log").read_text()
+    assert "=== code-spec.pre[0] @ " in log
+    assert f"$ echo hello >> {out_file}" in log
+    assert "--- exit 0 in" in log
+
+
+def test_two_commands_share_one_log_file_in_order(tmp_path):
     out_file = tmp_path / "out.txt"
     config = {
         "steps": {
@@ -17,62 +66,123 @@ def test_hook_runner_runs_commands_in_order(tmp_path):
             }
         }
     }
-    runner = HookRunner(config, cwd=str(tmp_path))
-    runner.run("code-spec", "pre")
+    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
 
-    lines = out_file.read_text().splitlines()
-    assert lines[0].strip() == "first"
-    assert lines[1].strip() == "second"
+    log = (tmp_path / "code-spec.pre.log").read_text()
+    assert log.index("code-spec.pre[0]") < log.index("code-spec.pre[1]")
+    assert log.count("=== ") == 2
 
 
-def test_hook_runner_first_failure_raises(tmp_path):
+def test_log_file_truncated_on_re_invocation(tmp_path):
     config = {
         "steps": {
             "code-spec": {
                 "hooks": {
+                    "pre": [{"cmd": "echo invocation"}],
+                }
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+    runner.run("code-spec", "pre")
+    first = (tmp_path / "code-spec.pre.log").read_text()
+    assert first.count("=== code-spec.pre[0]") == 1
+
+    runner.run("code-spec", "pre")
+    second = (tmp_path / "code-spec.pre.log").read_text()
+    assert second.count("=== code-spec.pre[0]") == 1
+
+
+# --- empty / missing ---
+
+def test_no_hooks_no_log_file(tmp_path):
+    _runner({}, tmp_path, tmp_path).run("nonexistent", "pre")
+    assert not (tmp_path / "nonexistent.pre.log").exists()
+
+
+def test_empty_event_no_log_file(tmp_path):
+    config = {"steps": {"code-spec": {"hooks": {"pre": []}}}}
+    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
+    assert not (tmp_path / "code-spec.pre.log").exists()
+
+
+# --- cwd missing ---
+
+def test_missing_cwd_skips_with_status_no_log(tmp_path):
+    config = {
+        "steps": {
+            "step": {
+                "hooks": {
                     "pre": [
-                        {"cmd": "exit 1", "retry": 1},
+                        {"cmd": "echo a"},
+                        {"cmd": "echo b"},
                     ]
                 }
             }
         }
     }
-    runner = HookRunner(config, cwd=str(tmp_path))
-    with pytest.raises(HookError):
-        runner.run("code-spec", "pre")
+    engine = FakeEngine()
+    missing_cwd = tmp_path / "does-not-exist"
+    runner = HookRunner(config, cwd=str(missing_cwd), run_dir=tmp_path, engine=engine)
+
+    result = runner.run("step", "pre")
+
+    assert result == []
+    assert not (tmp_path / "step.pre.log").exists()
+    assert engine.statuses == ["skipped (cwd missing)", "skipped (cwd missing)"]
 
 
-def test_hook_runner_retry_on_failure(tmp_path):
-    count_file = tmp_path / "count.txt"
-    count_file.write_text("0")
-    # Script increments count then fails; with retry=2 it runs twice
-    script = (
-        f"COUNT=$(cat {count_file}); "
-        f"echo $((COUNT+1)) > {count_file}; "
-        f"exit 1"
-    )
+# --- failure / fail-fast ---
+
+def test_first_failure_stops_event(tmp_path):
+    marker = tmp_path / "ran-second"
     config = {
         "steps": {
             "step": {
                 "hooks": {
-                    "pre": [{"cmd": script, "retry": 2}]
+                    "pre": [
+                        {"cmd": "exit 1"},
+                        {"cmd": f"touch {marker}"},
+                    ]
                 }
             }
         }
     }
-    runner = HookRunner(config, cwd=str(tmp_path))
+    runner = _runner(config, tmp_path, tmp_path)
+
     with pytest.raises(HookError):
         runner.run("step", "pre")
 
-    assert int(count_file.read_text().strip()) == 2
+    assert not marker.exists()
+    log = (tmp_path / "step.pre.log").read_text()
+    assert "=== step.pre[0]" in log
+    assert "=== step.pre[1]" not in log
+    assert "--- exit 1 in" in log
 
 
-def test_hook_runner_no_hooks_is_noop(tmp_path):
-    runner = HookRunner({}, cwd=str(tmp_path))
-    runner.run("nonexistent-step", "pre")  # should not raise
+def test_timeout_records_footer_and_raises(tmp_path):
+    config = {
+        "steps": {
+            "step": {
+                "hooks": {
+                    "pre": [{"cmd": "sleep 5", "timeout": 1}]
+                }
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+
+    with pytest.raises(HookError):
+        runner.run("step", "pre")
+
+    log = (tmp_path / "step.pre.log").read_text()
+    assert "--- timed out after 1s ---" in log
 
 
-def test_hook_runner_missing_event_is_noop(tmp_path):
-    config = {"steps": {"code-spec": {"hooks": {"pre": []}}}}
-    runner = HookRunner(config, cwd=str(tmp_path))
-    runner.run("code-spec", "on_error")  # no on_error defined — should not raise
+# --- duration ---
+
+def test_hook_result_carries_duration(tmp_path):
+    config = {"steps": {"s": {"hooks": {"pre": [{"cmd": "true"}]}}}}
+    [result] = _runner(config, tmp_path, tmp_path).run("s", "pre")
+    assert result.duration >= 0
+    assert result.rc == 0
