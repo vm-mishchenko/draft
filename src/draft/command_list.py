@@ -1,4 +1,6 @@
 import json
+import os
+from pathlib import Path
 
 from draft.runs import runs_base
 
@@ -6,6 +8,21 @@ from draft.runs import runs_base
 def register(subparsers):
     p = subparsers.add_parser("list", help="List the 15 most recent runs.")
     p.set_defaults(func=run)
+
+
+def _is_run_active(run_dir: Path) -> bool:
+    pid_file = run_dir / "draft.pid"
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def run(args) -> int:
@@ -29,21 +46,22 @@ def run(args) -> int:
         return 0
 
     total_steps = 6
-    header = f"{'RUN-ID':<18}  {'PROJECT':<20}  {'STAGES':<10}  {'BRANCH':<30}  PR"
+    header = f"{'RUN-ID':<18}  {'PROJECT':<20}  {'STAGES':<10}  {'RUNNING':<8}  {'BRANCH':<30}  PR"
     print(header)
     print("-" * len(header))
 
     for d in dirs:
+        running = "yes" if _is_run_active(d) else "-"
         state_path = d / "state.json"
         if not state_path.exists():
             project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'-':<10}  {'-':<30}  -")
+            print(f"{d.name:<18}  {project:<20}  {'-':<10}  {running:<8}  {'-':<30}  -")
             continue
         try:
             payload = json.loads(state_path.read_text())
         except Exception:
             project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {'-':<30}  -")
+            print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {running:<8}  {'-':<30}  -")
             continue
 
         project = payload.get("data", {}).get("project", d.parent.name) or d.parent.name
@@ -51,6 +69,6 @@ def run(args) -> int:
         branch = payload.get("data", {}).get("branch", "-") or "-"
         pr_url = payload.get("data", {}).get("pr_url", "") or "-"
         stages = f"{completed}/{total_steps}"
-        print(f"{d.name:<18}  {project:<20}  {stages:<10}  {branch:<30}  {pr_url}")
+        print(f"{d.name:<18}  {project:<20}  {stages:<10}  {running:<8}  {branch:<30}  {pr_url}")
 
     return 0
