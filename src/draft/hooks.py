@@ -11,6 +11,8 @@ from pipeline import PipelineLifecycle, StepError
 
 @dataclass
 class HookResult:
+    """Result of a single hook command execution."""
+
     cmd: str
     rc: int
     output: str
@@ -18,7 +20,7 @@ class HookResult:
 
 
 class HookError(Exception):
-    pass
+    """Raised when a hook command exits with a non-zero return code."""
 
 
 def _run_hook_cmd(cmd: str, timeout: int, cwd: str | None) -> HookResult:
@@ -55,6 +57,8 @@ def _footer(rc: int, duration: float, timeout: int) -> str:
 
 
 class HookRunner:
+    """Executes shell hook commands for a given pipeline step and lifecycle event."""
+
     def __init__(self, config: dict, cwd: str | None, run_dir: str | Path, engine):
         self._steps_config = config.get("steps", {})
         self._cwd = cwd
@@ -133,6 +137,8 @@ def _raise_if_failed(results: list[HookResult]) -> None:
 
 
 class DraftLifecycle(PipelineLifecycle):
+    """Runs user-defined hooks at each pipeline step lifecycle event."""
+
     def __init__(self, hook_runner: HookRunner):
         self._hooks = hook_runner
 
