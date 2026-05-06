@@ -24,11 +24,17 @@ def _find_run_id_for_branch(project: str, branch: str, exclude_run_id: str | Non
 
 
 def _branch_exists(repo: str, branch: str) -> bool:
-    result = subprocess.run(
+    local = subprocess.run(
         ["git", "branch", "--list", branch],
         capture_output=True, text=True, cwd=repo,
     )
-    return bool(result.stdout.strip())
+    if local.stdout.strip():
+        return True
+    remote = subprocess.run(
+        ["git", "branch", "-r", "--list", f"*/{branch}"],
+        capture_output=True, text=True, cwd=repo,
+    )
+    return bool(remote.stdout.strip())
 
 
 class WorktreeCreateStep(Step):
