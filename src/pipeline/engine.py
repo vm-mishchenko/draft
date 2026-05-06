@@ -27,6 +27,7 @@ class Engine:
         log_path: Path,
         attempt: int = 1,
         timeout: float | None = None,
+        line_formatter=None,
     ) -> int:
         is_tty = sys.stdout.isatty()
         padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
@@ -40,8 +41,9 @@ class Engine:
             proc = subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                stdout=log_fd,
-                stderr=log_fd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
             )
 
             stop_event = threading.Event()
@@ -55,19 +57,37 @@ class Engine:
                         sys.stdout.flush()
                     stop_event.wait(1)
 
+            def _stream():
+                for chunk in iter(lambda: proc.stdout.read(4096), b""):
+                    text = chunk.decode(errors="replace")
+                    if line_formatter is not None:
+                        lines = text.splitlines(keepends=True)
+                        out = []
+                        for ln in lines:
+                            formatted = line_formatter(ln)
+                            if formatted is not None:
+                                out.append(formatted if formatted.endswith("\n") else formatted + "\n")
+                        text = "".join(out)
+                    if text:
+                        log_fd.write(text)
+                        log_fd.flush()
+
             ticker = threading.Thread(target=_ticker, daemon=True)
+            streamer = threading.Thread(target=_stream, daemon=True)
             if is_tty:
                 ticker.start()
+            streamer.start()
 
             rc = TIMEOUT_EXIT
             try:
-                proc.communicate(timeout=timeout)
+                proc.wait(timeout=timeout)
                 rc = proc.returncode
             except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.communicate()
+                proc.wait()
                 rc = TIMEOUT_EXIT
             finally:
+                streamer.join()
                 stop_event.set()
                 if is_tty:
                     ticker.join()
