@@ -1,13 +1,13 @@
 import sys
 from unittest.mock import patch
 
-from pipeline.engine import Engine
+from pipeline.runner import Runner
 
 
 def test_tty_ticker_yields_set_status_and_prints_final_line(capsys):
-    engine = Engine()
+    runner = Runner()
     with patch.object(sys.stdout, "isatty", return_value=False):
-        with engine.tty_ticker("my-label") as set_status:
+        with runner.tty_ticker("my-label") as set_status:
             set_status("ok")
 
     captured = capsys.readouterr()
@@ -17,9 +17,9 @@ def test_tty_ticker_yields_set_status_and_prints_final_line(capsys):
 
 
 def test_tty_ticker_default_status_is_question_mark(capsys):
-    engine = Engine()
+    runner = Runner()
     with patch.object(sys.stdout, "isatty", return_value=False):
-        with engine.tty_ticker("noop"):
+        with runner.tty_ticker("noop"):
             pass
 
     captured = capsys.readouterr()
@@ -27,11 +27,11 @@ def test_tty_ticker_default_status_is_question_mark(capsys):
 
 
 def test_tty_ticker_propagates_exceptions(capsys):
-    engine = Engine()
+    runner = Runner()
     raised = False
     try:
         with patch.object(sys.stdout, "isatty", return_value=False):
-            with engine.tty_ticker("boom"):
+            with runner.tty_ticker("boom"):
                 raise RuntimeError("boom")
     except RuntimeError:
         raised = True
