@@ -40,11 +40,11 @@ class Step:
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", engine: "Runner", lifecycle: "PipelineLifecycle | None" = None):
+    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None):
         cfg = ctx.config(self.name)
         last_rc = 1
         for attempt in range(1, cfg["max_retries"] + 1):
-            rc = engine.run_stage(
+            rc = runner.run_stage(
                 label=self.name,
                 cmd=self.cmd(ctx),
                 cwd=ctx.get("cwd"),
@@ -56,7 +56,7 @@ class Step:
                 return
             last_rc = rc
             if attempt < cfg["max_retries"]:
-                engine.sleep(cfg["retry_delay"])
+                runner.sleep(cfg["retry_delay"])
         raise StepError(self.name, last_rc)
 
 
@@ -64,14 +64,14 @@ class Pipeline:
     def __init__(self, steps: list[Step]):
         self.steps = steps
 
-    def run(self, ctx: "RunContext", engine: "Runner", lifecycle: PipelineLifecycle | None = None):
+    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: PipelineLifecycle | None = None):
         lc = lifecycle or PipelineLifecycle()
         for step in self.steps:
             if ctx.is_completed(step.name):
                 continue
             lc.before_step(step, ctx)
             try:
-                step.run(ctx, engine, lc)
+                step.run(ctx, runner, lc)
                 ctx.mark_done(step.name)
                 ctx.save()
                 lc.on_step_success(step, ctx)
