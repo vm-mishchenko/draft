@@ -6,15 +6,18 @@ from pathlib import Path
 from pipeline import Step
 
 
-def _find_run_id_for_branch(project: str, branch: str) -> str | None:
+def _find_run_id_for_branch(project: str, branch: str, exclude_run_id: str | None = None) -> str | None:
     runs_dir = Path.home() / ".draft" / "runs" / project
     if not runs_dir.exists():
         return None
     for state_file in sorted(runs_dir.glob("*/state.json"), reverse=True):
         try:
             data = json.loads(state_file.read_text())
+            run_id = data.get("run_id")
+            if run_id == exclude_run_id:
+                continue
             if data.get("data", {}).get("branch") == branch:
-                return data.get("run_id")
+                return run_id
         except Exception:
             continue
     return None
@@ -46,11 +49,13 @@ class WorktreeCreateStep(Step):
 
         if _branch_exists(repo, branch):
             project = ctx.get("project")
-            run_id = _find_run_id_for_branch(project, branch)
+            run_id = _find_run_id_for_branch(project, branch, exclude_run_id=ctx.run_id)
             print(f"\nerror: branch '{branch}' already exists", file=sys.stderr)
             if run_id:
                 print(f"       created by run: {run_id}", file=sys.stderr)
-            print(f"\n       to remove it: git branch -D {branch}", file=sys.stderr)
+                print(f"\n       to remove it: draft delete {run_id}", file=sys.stderr)
+            else:
+                print(f"\n       to remove it: git branch -D {branch}", file=sys.stderr)
             raise StepError(self.name, 255)
 
         rc = engine.run_stage(

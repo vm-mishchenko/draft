@@ -1,3 +1,4 @@
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -43,6 +44,8 @@ class HookRunner:
         self._cwd = cwd
 
     def run(self, step_name: str, event: str) -> list[HookResult]:
+        if self._cwd and not os.path.isdir(self._cwd):
+            return []
         entries = (
             self._steps_config
             .get(step_name, {})

@@ -43,7 +43,6 @@ class Engine:
                 cwd=cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                bufsize=1,
             )
 
             stop_event = threading.Event()
