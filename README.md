@@ -15,7 +15,7 @@ draft list
 draft create <spec-path>
 draft create --prompt "TEXT"
 draft continue [run-id]
-draft delete <run-id>
+draft delete <run-id> [--delete-branch]
 ```
 
 ## Config

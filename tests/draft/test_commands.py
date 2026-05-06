@@ -44,6 +44,7 @@ def test_command_delete_active_pid_refuses(tmp_path, capsys):
 
     class FakeArgs:
         run_id = "260505-120000"
+        delete_branch = False
 
     with patch("draft.runs.find_run_dir", return_value=run_dir):
         result = cmd_delete.run(FakeArgs())
@@ -51,6 +52,84 @@ def test_command_delete_active_pid_refuses(tmp_path, capsys):
     assert result == 3
     captured = capsys.readouterr()
     assert "active" in captured.err
+
+
+def test_command_delete_with_delete_branch_flag(tmp_path, capsys):
+    import draft.command_delete as cmd_delete
+
+    project_dir = tmp_path / "myproject"
+    run_dir = project_dir / "260505-120000"
+    run_dir.mkdir(parents=True)
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    state = {
+        "data": {
+            "branch": "draft/feature-x",
+            "repo": str(repo_dir),
+            "wt_dir": str(tmp_path / "wt-already-gone"),
+        }
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260505-120000"
+        delete_branch = True
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.command_delete.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.stdout = ""
+        result = cmd_delete.run(FakeArgs())
+
+    assert result == 0
+    assert not run_dir.exists()
+    branch_calls = [
+        call for call in mock_run.call_args_list
+        if call.args and call.args[0][:3] == ["git", "branch", "-D"]
+    ]
+    assert len(branch_calls) == 1
+    assert branch_calls[0].args[0] == ["git", "branch", "-D", "draft/feature-x"]
+    assert branch_calls[0].kwargs.get("cwd") == str(repo_dir)
+    captured = capsys.readouterr()
+    assert "deleted branch draft/feature-x" in captured.out
+
+
+def test_command_delete_without_flag_skips_branch_deletion(tmp_path, capsys):
+    import draft.command_delete as cmd_delete
+
+    project_dir = tmp_path / "myproject"
+    run_dir = project_dir / "260505-120000"
+    run_dir.mkdir(parents=True)
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    state = {
+        "data": {
+            "branch": "draft/feature-x",
+            "repo": str(repo_dir),
+            "wt_dir": str(tmp_path / "wt-already-gone"),
+        }
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260505-120000"
+        delete_branch = False
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.command_delete.subprocess.run") as mock_run:
+        result = cmd_delete.run(FakeArgs())
+
+    assert result == 0
+    branch_calls = [
+        call for call in mock_run.call_args_list
+        if call.args and call.args[0][:3] == ["git", "branch", "-D"]
+    ]
+    assert branch_calls == []
 
 
 # --- command_continue ---

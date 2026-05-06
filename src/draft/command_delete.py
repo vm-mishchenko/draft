@@ -11,6 +11,11 @@ from draft import runs
 def register(subparsers):
     p = subparsers.add_parser("delete", help="Remove a run's state and git worktree.")
     p.add_argument("run_id", help="Run ID to delete.")
+    p.add_argument(
+        "--delete-branch",
+        action="store_true",
+        help="Also delete the git branch associated with the run.",
+    )
     p.set_defaults(func=run)
 
 
@@ -43,13 +48,18 @@ def run(args) -> int:
         except ValueError:
             pass
 
-    # Load worktree path from state.json
+    # Load worktree path and branch from state.json
     state_path = run_dir / "state.json"
     wt_dir = None
+    branch = None
+    repo = None
     if state_path.exists():
         try:
             payload = json.loads(state_path.read_text())
-            wt_dir = payload.get("data", {}).get("wt_dir")
+            data = payload.get("data", {})
+            wt_dir = data.get("wt_dir")
+            branch = data.get("branch")
+            repo = data.get("repo")
         except Exception:
             pass
 
@@ -59,6 +69,27 @@ def run(args) -> int:
             ["git", "worktree", "remove", wt_dir, "--force"],
             capture_output=True,
         )
+
+    # Optionally delete branch
+    if getattr(args, "delete_branch", False):
+        if branch and repo and Path(repo).exists():
+            result = subprocess.run(
+                ["git", "branch", "-D", branch],
+                capture_output=True, text=True, cwd=repo,
+            )
+            if result.returncode == 0:
+                print(f"deleted branch {branch}")
+            else:
+                stderr = result.stderr.strip() or result.stdout.strip()
+                print(
+                    f"warning: failed to delete branch '{branch}': {stderr}",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                "warning: --delete-branch requested but branch or repo missing from state",
+                file=sys.stderr,
+            )
 
     # Remove run directory
     shutil.rmtree(run_dir)
