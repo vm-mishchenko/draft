@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from draft.hooks import HookError, HookRunner
+from draft.hooks import DraftLifecycle, HookError, HookRunner
 
 
 class FakeEngine:
@@ -134,7 +134,7 @@ def test_missing_cwd_skips_with_status_no_log(tmp_path):
 
 # --- failure / fail-fast ---
 
-def test_first_failure_stops_event(tmp_path):
+def test_first_failure_stops_event_returns_results(tmp_path):
     marker = tmp_path / "ran-second"
     config = {
         "steps": {
@@ -148,19 +148,18 @@ def test_first_failure_stops_event(tmp_path):
             }
         }
     }
-    runner = _runner(config, tmp_path, tmp_path)
-
-    with pytest.raises(HookError):
-        runner.run("step", "pre")
+    results = _runner(config, tmp_path, tmp_path).run("step", "pre")
 
     assert not marker.exists()
+    assert len(results) == 1
+    assert results[0].rc == 1
     log = (tmp_path / "step.pre.log").read_text()
     assert "=== step.pre[0]" in log
     assert "=== step.pre[1]" not in log
     assert "--- exit 1 in" in log
 
 
-def test_timeout_records_footer_and_raises(tmp_path):
+def test_timeout_returns_failed_result(tmp_path):
     config = {
         "steps": {
             "step": {
@@ -170,11 +169,9 @@ def test_timeout_records_footer_and_raises(tmp_path):
             }
         }
     }
-    runner = _runner(config, tmp_path, tmp_path)
+    [result] = _runner(config, tmp_path, tmp_path).run("step", "pre")
 
-    with pytest.raises(HookError):
-        runner.run("step", "pre")
-
+    assert result.rc == 124
     log = (tmp_path / "step.pre.log").read_text()
     assert "--- timed out after 1s ---" in log
 
@@ -186,3 +183,48 @@ def test_hook_result_carries_duration(tmp_path):
     [result] = _runner(config, tmp_path, tmp_path).run("s", "pre")
     assert result.duration >= 0
     assert result.rc == 0
+
+
+# --- DraftLifecycle wraps + raises ---
+
+def test_lifecycle_before_step_raises_on_failure(tmp_path):
+    config = {"steps": {"s": {"hooks": {"pre": [{"cmd": "exit 5"}]}}}}
+    runner = _runner(config, tmp_path, tmp_path)
+    lifecycle = DraftLifecycle(runner)
+
+    class FakeStep:
+        name = "s"
+
+    with pytest.raises(HookError):
+        lifecycle.before_step(FakeStep(), object())
+
+
+def test_lifecycle_after_step_raises_on_failure(tmp_path):
+    config = {"steps": {"s": {"hooks": {"post": [{"cmd": "exit 5"}]}}}}
+    runner = _runner(config, tmp_path, tmp_path)
+    lifecycle = DraftLifecycle(runner)
+
+    class FakeStep:
+        name = "s"
+
+    with pytest.raises(HookError):
+        lifecycle.after_step(FakeStep(), object())
+
+
+def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
+    config = {
+        "steps": {
+            "code-spec": {
+                "hooks": {
+                    "verify": [{"cmd": "exit 2"}, {"cmd": "true"}]
+                }
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+    lifecycle = DraftLifecycle(runner)
+
+    results = lifecycle.run_hooks("code-spec", "verify")
+
+    assert len(results) == 1
+    assert results[0].rc == 2

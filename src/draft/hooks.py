@@ -118,9 +118,7 @@ class HookRunner:
                 results.append(result)
 
                 if result.rc != 0:
-                    raise HookError(
-                        f"Hook command failed (exit {result.rc}): {cmd}"
-                    )
+                    break
         finally:
             if log_fd is not None:
                 log_fd.close()
@@ -128,21 +126,27 @@ class HookRunner:
         return results
 
 
+def _raise_if_failed(results: list[HookResult]) -> None:
+    for r in results:
+        if r.rc != 0:
+            raise HookError(f"Hook command failed (exit {r.rc}): {r.cmd}")
+
+
 class DraftLifecycle(PipelineLifecycle):
     def __init__(self, hook_runner: HookRunner):
         self._hooks = hook_runner
 
     def before_step(self, step, ctx):
-        self._hooks.run(step.name, "pre")
+        _raise_if_failed(self._hooks.run(step.name, "pre"))
 
     def after_step(self, step, ctx):
-        self._hooks.run(step.name, "post")
+        _raise_if_failed(self._hooks.run(step.name, "post"))
 
     def on_step_success(self, step, ctx):
-        self._hooks.run(step.name, "on_success")
+        _raise_if_failed(self._hooks.run(step.name, "on_success"))
 
     def on_step_error(self, step, ctx, exc: StepError):
-        self._hooks.run(step.name, "on_error")
+        _raise_if_failed(self._hooks.run(step.name, "on_error"))
 
     def run_hooks(self, step_name: str, event: str) -> list[HookResult]:
         return self._hooks.run(step_name, event)
