@@ -224,6 +224,10 @@ def _branch_worktrees(repo: str, branch: str) -> list[str]:
     return paths
 
 
+def _canonical_worktree_path(project: str, branch: str) -> Path:
+    return Path.home() / ".draft" / "worktrees" / project / _sanitize_branch(branch)
+
+
 def _is_working_tree_clean(repo: str) -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -299,14 +303,56 @@ def _assert_no_active_run_on_branch(project: str, branch: str) -> None:
         sys.exit(2)
 
 
-def _assert_branch_free_for_worktree(repo: str, branch: str) -> None:
+def _resolve_worktree_for_existing_branch(
+    repo: str, project: str, branch: str, branch_was_explicit: bool
+) -> tuple[str, str]:
+    """Decide between fresh-create and reuse for the worktree-mode existing-branch path.
+
+    Returns (wt_dir, worktree_mode) where worktree_mode is "worktree" (will be created)
+    or "reuse-existing" (already at canonical path, validated, will be reused as-is).
+    Calls sys.exit(2) on any refusal."""
     paths = _branch_worktrees(repo, branch)
-    if paths:
-        print(f"error: branch '{branch}' is currently checked out in:", file=sys.stderr)
+    canonical = _canonical_worktree_path(project, branch)
+    canonical_str = str(canonical)
+
+    if not paths:
+        return (canonical_str, "worktree")
+
+    if not branch_was_explicit:
+        print(f"error: branch '{branch}' (current HEAD) has a worktree at:", file=sys.stderr)
         for p in paths:
             print(f"       {p}", file=sys.stderr)
-        print("       use --no-worktree to operate in place, or remove the worktree first", file=sys.stderr)
+        print(f"       pass '--branch {branch}' explicitly to reuse it, or remove the worktree first", file=sys.stderr)
         sys.exit(2)
+
+    if len(paths) != 1 or Path(paths[0]).resolve() != canonical.resolve():
+        print(f"error: branch '{branch}' is checked out at non-canonical path(s):", file=sys.stderr)
+        for p in paths:
+            print(f"       {p}", file=sys.stderr)
+        print(f"       only worktrees at {canonical_str} can be reused; remove the others first", file=sys.stderr)
+        sys.exit(2)
+
+    if not Path(canonical_str).is_dir():
+        print(f"error: branch '{branch}' has a stale worktree registration; directory missing:", file=sys.stderr)
+        print(f"       {canonical_str}", file=sys.stderr)
+        print(f"       run 'git worktree prune' to clean up, then rerun", file=sys.stderr)
+        sys.exit(2)
+
+    head = _current_head_branch(canonical_str)
+    if head is None:
+        print(f"error: worktree {canonical_str} has detached HEAD; refusing to reuse", file=sys.stderr)
+        sys.exit(2)
+    if head != branch:
+        print(f"error: worktree {canonical_str} is on branch '{head}', not '{branch}'", file=sys.stderr)
+        sys.exit(2)
+
+    if not _is_working_tree_clean(canonical_str):
+        print(f"error: worktree is dirty; cannot reuse:", file=sys.stderr)
+        print(f"       {canonical_str}", file=sys.stderr)
+        print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
+        sys.exit(2)
+
+    return (canonical_str, "reuse-existing")
 
 
 def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
@@ -335,7 +381,7 @@ def _checkout_in_place(repo: str, branch: str) -> None:
 
 def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool):
     skipped = set()
-    if worktree_mode == "no-worktree":
+    if worktree_mode in ("no-worktree", "reuse-existing"):
         skipped.add("worktree-create")
     if skip_pr:
         skipped.update({"push", "pr-open", "pr-view", "pr-babysit"})
@@ -345,7 +391,7 @@ def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool):
     return active, skipped
 
 
-def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped):
+def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
@@ -353,7 +399,13 @@ def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skip
     print(f"started:  {started_at}")
     print("stages:")
     for step in all_steps:
-        suffix = " [skipped]" if step.name in skipped else ""
+        if step.name in skipped:
+            if step.name == "worktree-create" and worktree_mode == "reuse-existing":
+                suffix = " [skipped, reused]"
+            else:
+                suffix = " [skipped]"
+        else:
+            suffix = ""
         print(f"  - {step.name}{suffix}")
     print()
 
@@ -393,6 +445,8 @@ def run(args) -> int:
     branch, branch_source = _resolve_working_branch(repo, args, base_branch)
 
     # 4. Branch-context preflight (no side effects, may exit)
+    existing_wt_dir: str | None = None
+    existing_worktree_mode: str | None = None
     if branch_source == "existing":
         _assert_no_active_run_on_branch(project_name, branch)
         if args.no_worktree:
@@ -401,7 +455,12 @@ def run(args) -> int:
                 print(f"error: working tree is dirty; commit or stash before --no-worktree", file=sys.stderr)
                 return 2
         else:
-            _assert_branch_free_for_worktree(repo, branch)
+            branch_was_explicit = (
+                args.branch is not None and args.branch != _BRANCH_HEAD_SENTINEL
+            )
+            existing_wt_dir, existing_worktree_mode = _resolve_worktree_for_existing_branch(
+                repo, project_name, branch, branch_was_explicit
+            )
     else:  # new branch
         if args.no_worktree:
             print("error: --no-worktree requires --branch (existing branch)", file=sys.stderr)
@@ -431,11 +490,15 @@ def run(args) -> int:
         branch = _unique_branch(repo, branch)
 
     # 7. Worktree path
-    worktree_mode = "no-worktree" if args.no_worktree else "worktree"
-    if worktree_mode == "no-worktree":
+    if args.no_worktree:
+        worktree_mode = "no-worktree"
         wt_dir = repo
+    elif existing_worktree_mode is not None:
+        worktree_mode = existing_worktree_mode
+        wt_dir = existing_wt_dir
     else:
-        wt_dir = str(Path.home() / ".draft" / "worktrees" / project_name / _sanitize_branch(branch))
+        worktree_mode = "worktree"
+        wt_dir = str(_canonical_worktree_path(project_name, branch))
 
     # 8. Config
     try:
@@ -486,7 +549,7 @@ def run(args) -> int:
         Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
 
     # 13. Preamble
-    _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS, skipped_names)
+    _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS, skipped_names, worktree_mode)
 
     # 14. Lifecycle + engine
     engine = Runner()
@@ -510,17 +573,17 @@ def run(args) -> int:
         return _exit_code
 
     # 16. Post-success cleanup
-    if args.delete_worktree and worktree_mode == "worktree":
+    if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
         _remove_worktree(wt_dir)
 
     # 17. Done
     if args.skip_pr:
-        if args.delete_worktree and worktree_mode == "worktree":
+        if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
             print("done. (push and PR skipped; worktree removed)")
         else:
             print(f"done. (push and PR skipped; worktree left at {wt_dir})")
     else:
-        if args.delete_worktree and worktree_mode == "worktree":
+        if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
             print("done. (worktree removed)")
         else:
             print("done.")

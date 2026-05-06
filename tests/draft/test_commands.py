@@ -904,3 +904,300 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
 
     cmd = WorktreeCreateStep().cmd(ctx)
     assert cmd == ["git", "worktree", "add", "/tmp/wt", "-b", "foo", "origin/main"]
+
+
+# --- reuse-worktree: _resolve_worktree_for_existing_branch ---
+
+
+def _canonical(project: str, branch: str) -> str:
+    return str(Path.home() / ".draft" / "worktrees" / project / branch.replace("/", "-"))
+
+
+def test_resolve_worktree_no_existing_returns_create():
+    import draft.command_create as cmd
+
+    with patch("draft.command_create._branch_worktrees", return_value=[]):
+        wt_dir, mode = cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
+
+    assert mode == "worktree"
+    assert wt_dir == _canonical("proj", "feature-x")
+
+
+def test_resolve_worktree_canonical_clean_reuses(tmp_path):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "wt"
+    canonical.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
+         patch("draft.command_create._current_head_branch", return_value="feature-x"), \
+         patch("draft.command_create._is_working_tree_clean", return_value=True):
+        wt_dir, mode = cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
+
+    assert mode == "reuse-existing"
+    assert wt_dir == str(canonical)
+
+
+def test_resolve_worktree_no_value_form_refuses(capsys):
+    import draft.command_create as cmd
+
+    with patch("draft.command_create._branch_worktrees", return_value=["/some/path"]):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=False
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "(current HEAD)" in err
+    assert "--branch feature-x" in err
+
+
+def test_resolve_worktree_non_canonical_path_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "canonical"
+    other = tmp_path / "other"
+    other.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(other)]):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "non-canonical" in err
+    assert str(other) in err
+
+
+def test_resolve_worktree_multiple_paths_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    extra = tmp_path / "extra"
+    extra.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical), str(extra)]):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "non-canonical" in err
+    assert str(extra) in err
+
+
+def test_resolve_worktree_stale_registration_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "missing"  # does not exist on disk
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "stale worktree registration" in err
+    assert "git worktree prune" in err
+
+
+def test_resolve_worktree_detached_head_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "wt"
+    canonical.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
+         patch("draft.command_create._current_head_branch", return_value=None):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "detached HEAD" in err
+
+
+def test_resolve_worktree_wrong_branch_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "wt"
+    canonical.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
+         patch("draft.command_create._current_head_branch", return_value="other-branch"):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "other-branch" in err
+    assert "feature-x" in err
+
+
+def test_resolve_worktree_dirty_refuses(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    canonical = tmp_path / "wt"
+    canonical.mkdir()
+
+    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
+         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
+         patch("draft.command_create._current_head_branch", return_value="feature-x"), \
+         patch("draft.command_create._is_working_tree_clean", return_value=False):
+        with pytest.raises(SystemExit) as exc:
+            cmd._resolve_worktree_for_existing_branch(
+                "/repo", "proj", "feature-x", branch_was_explicit=True
+            )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "dirty" in err
+    assert "git -C" in err
+
+
+# --- reuse-worktree: _compose_active_steps and runs.expected_steps ---
+
+
+def test_compose_active_steps_reuse_existing_skips_worktree_create():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("reuse-existing", "open", False)
+    names = [s.name for s in active]
+    assert "worktree-create" not in names
+    assert names == ["code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
+    assert "worktree-create" in skipped
+
+
+def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
+    names = [s.name for s in active]
+    assert names == ["code-spec", "push", "pr-view", "pr-babysit"]
+    assert skipped == {"worktree-create", "pr-open"}
+
+
+def test_compose_active_steps_reuse_existing_with_skip_pr():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
+    names = [s.name for s in active]
+    assert names == ["code-spec"]
+    assert skipped == {"worktree-create", "push", "pr-open", "pr-view", "pr-babysit"}
+
+
+def test_expected_steps_reuse_existing_open():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"}}
+    assert r.expected_steps(state) == ("code-spec", "push", "pr-open", "pr-view", "pr-babysit")
+
+
+def test_expected_steps_reuse_existing_pr_reuse():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"}}
+    assert r.expected_steps(state) == ("code-spec", "push", "pr-view", "pr-babysit")
+
+
+def test_is_run_finished_reuse_existing():
+    import draft.runs as r
+
+    state = {
+        "completed": ["code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+    }
+    assert r.is_run_finished(state) is True
+
+
+# --- reuse-worktree: command_continue with reuse-existing ---
+
+
+def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, capsys):
+    import draft.command_continue as cmd_continue
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    wt = tmp_path / "gone"  # does not exist
+
+    state = _continue_state(
+        completed=["code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        wt_dir=str(wt),
+        delete_worktree=True,
+        worktree_mode="reuse-existing",
+    )
+    state["run_dir"] = str(run_dir)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260506-100000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cmd_continue.run(FakeArgs())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "already complete" in out
+
+
+# --- reuse-worktree: _print_preamble annotations ---
+
+
+def test_preamble_reused_annotation_for_reuse_existing(capsys):
+    import draft.command_create as cmd
+    from draft.steps import STEPS
+
+    skipped = {"worktree-create"}
+    cmd._print_preamble(
+        "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, skipped, "reuse-existing"
+    )
+    out = capsys.readouterr().out
+    assert "worktree-create [skipped, reused]" in out
+
+
+def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
+    import draft.command_create as cmd
+    from draft.steps import STEPS
+
+    skipped = {"worktree-create"}
+    cmd._print_preamble(
+        "rid", "feature-x", "/repo", "/runs/rid", "started", STEPS, skipped, "no-worktree"
+    )
+    out = capsys.readouterr().out
+    assert "worktree-create [skipped]" in out
+    assert "reused" not in out
+
+
+def test_preamble_no_skipped_annotation_for_active_step(capsys):
+    import draft.command_create as cmd
+    from draft.steps import STEPS
+
+    cmd._print_preamble(
+        "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, set(), "worktree"
+    )
+    out = capsys.readouterr().out
+    assert "worktree-create\n" in out  # no suffix
+    assert "[skipped" not in out

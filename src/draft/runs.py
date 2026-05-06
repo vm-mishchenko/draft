@@ -10,7 +10,7 @@ SKIP_PR_STEPS = ("worktree-create", "code-spec")
 
 def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool) -> tuple[str, ...]:
     steps: list[str] = []
-    if worktree_mode != "no-worktree":
+    if worktree_mode not in ("no-worktree", "reuse-existing"):
         steps.append("worktree-create")
     steps.append("code-spec")
     if not skip_pr:

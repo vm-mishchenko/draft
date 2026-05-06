@@ -102,7 +102,7 @@ def run(args) -> int:
     # Finished + worktree gone (--delete-worktree happy path): nothing to do
     if (
         finished
-        and worktree_mode == "worktree"
+        and worktree_mode in ("worktree", "reuse-existing")
         and delete_worktree
         and wt_dir
         and not Path(wt_dir).exists()
