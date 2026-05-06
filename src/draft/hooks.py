@@ -133,6 +133,8 @@ def _raise_if_failed(results: list[HookResult]) -> None:
 
 
 class DraftLifecycle(PipelineLifecycle):
+    """Runs user-defined hooks at each pipeline step lifecycle event."""
+
     def __init__(self, hook_runner: HookRunner):
         self._hooks = hook_runner
 
