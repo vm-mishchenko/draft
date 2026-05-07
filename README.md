@@ -8,21 +8,167 @@ CLI that takes a spec file (or inline prompt), runs it through an AI-powered pip
 - Run `make setup` and put the venv on your PATH (the command prints where it is)
 - Nuclear option: `make clean && make setup`
 
-## Usage
+## Commands
+
+### draft list
+
+List the 15 most recent runs across all projects.
 
 ```
 draft list
+```
+
+No options.
+
+### draft create
+
+Start a fresh run from a spec file or inline prompt.
+
+```
 draft create <spec-path>
 draft create --prompt "TEXT"
-draft create <spec-path> --skip-pr
-draft create <spec-path> --from <branch>
-draft create <spec-path> --set <step>.<key>=<value>
+```
+
+**Arguments**
+
+- `spec-path` — path to the spec file; omit when using `--prompt`
+- `--prompt TEXT` — inline prompt text instead of a spec file
+- `--from BRANCH` — base branch for the new worktree (default: `origin/main` or `origin/master`)
+- `--branch [NAME]` — use an existing local branch; omit `NAME` to use current `HEAD`
+- `--skip-pr` — stop after code generation; skip push and PR steps
+- `--no-worktree` — run in the main repo instead of a linked worktree; requires `--branch`
+- `--delete-worktree` — remove the worktree after the run succeeds
+- `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+
+`--branch` and `--from` are mutually exclusive. `--delete-worktree` and `--no-worktree` are mutually exclusive.
+
+### draft continue
+
+Resume a stopped or failed run.
+
+```
 draft continue [run-id]
-draft delete <run-id> [--delete-branch]
+```
+
+**Arguments**
+
+- `run-id` — run to resume; defaults to the most recent run
+
+### draft delete
+
+Remove a single run's state directory and its linked git worktree.
+
+```
+draft delete <run-id>
+draft delete <run-id> --delete-branch
+```
+
+**Arguments**
+
+- `run-id` — run to remove (required)
+- `--delete-branch` — also delete the local git branch for this run
+
+### draft prune
+
+Bulk-delete finished runs. By default operates on the current project.
+
+```
 draft prune
-draft prune --yes [--delete-branch]
-draft prune --all [--project NAME | --all-projects]
+draft prune --yes
 draft prune --dry-run
+draft prune --all
+draft prune --project NAME
+draft prune --all-projects
+draft prune --delete-branch
+```
+
+**Arguments**
+
+- `--yes`, `-y` — skip the confirmation prompt
+- `--dry-run` — print the selection and exit without deleting
+- `--all` — include every non-active run regardless of finished status (not only successful ones)
+- `--project NAME` — operate on the named project instead of the current one
+- `--all-projects` — operate across every project under `~/.draft/runs/`; mutually exclusive with `--project`
+- `--delete-branch` — also delete the local git branch for each pruned run
+
+## Use Cases
+
+### Spec or prompt to PR
+
+Write a spec file describing the change, then run:
+
+```
+draft create path/to/spec.md
+```
+
+Or skip the file and pass an inline description:
+
+```
+draft create --prompt "add a health-check endpoint"
+```
+
+`draft` creates a worktree on a new branch, runs `claude` against the spec until the code is clean and tests pass, pushes the branch, opens a draft PR, then polls CI and asks `claude` to fix any failures until every check goes green.
+
+### Spec or prompt to commit
+
+Use `--skip-pr` to stop after code generation. No push or PR is created; the commits land on a local branch in a worktree.
+
+```
+draft create path/to/spec.md --skip-pr
+```
+
+Add `--delete-worktree` to clean up the worktree automatically once the commits are done:
+
+```
+draft create path/to/spec.md --skip-pr --delete-worktree
+```
+
+### Continue after failure
+
+If a run stops partway through (network error, CI timeout, etc.), resume it:
+
+```
+draft continue
+```
+
+To resume a specific run rather than the most recent one:
+
+```
+draft continue 260506-143201
+```
+
+### Iterate on an existing branch
+
+Point `draft` at a branch that already has some work on it. `draft` reuses or creates the canonical worktree for that branch and, if a draft PR is already open, skips straight to babysitting CI.
+
+```
+draft create path/to/spec.md --branch my-feature-branch
+```
+
+Use current `HEAD` without typing the branch name:
+
+```
+draft create path/to/spec.md --branch
+```
+
+### Clean up finished runs
+
+Remove all successfully finished runs for the current project:
+
+```
+draft prune
+```
+
+Preview what would be deleted:
+
+```
+draft prune --dry-run
+```
+
+Remove runs for every project and also delete their branches:
+
+```
+draft prune --all-projects --delete-branch --yes
 ```
 
 ## Pipeline
@@ -31,12 +177,12 @@ A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/
 
 Steps run in this order:
 
-- `worktree-create`: create a linked git worktree on a fresh branch off the base branch
-- `code-spec`: invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
-- `push`: `git push -u origin HEAD`
-- `pr-open`: ask `claude` for a title and body, then `gh pr create --draft`
-- `pr-view`: resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
-- `pr-babysit`: poll CI; when checks fail, hand them to `claude` to fix until everything is green
+- `worktree-create` — create a linked git worktree on a fresh branch off the base branch
+- `code-spec` — invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
+- `push` — `git push -u origin HEAD`
+- `pr-open` — ask `claude` for a title and body, then `gh pr create --draft`
+- `pr-view` — resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
+- `pr-babysit` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
 
 `--skip-pr` stops after `code-spec` and skips `push`, `pr-open`, `pr-view`, `pr-babysit`.
 
@@ -71,14 +217,14 @@ steps:
 
 Common fields (all steps):
 
-- `max_retries`: attempts before failing the step
-- `timeout`: per-attempt timeout in seconds
-- `retry_delay`: seconds to wait between retries
+- `max_retries` — attempts before failing the step
+- `timeout` — per-attempt timeout in seconds
+- `retry_delay` — seconds to wait between retries
 
 Step-specific fields:
 
-- `pr-open.title_prefix`: string prepended to the PR title
-- `pr-babysit.checks_delay`: seconds to wait before the first CI poll
+- `pr-open.title_prefix` — string prepended to the PR title
+- `pr-babysit.checks_delay` — seconds to wait before the first CI poll
 
 Defaults per step:
 
@@ -108,16 +254,16 @@ steps:
 
 Entry fields:
 
-- `cmd`: shell command, required
-- `timeout`: seconds before the hook is killed, default 30
+- `cmd` — shell command, required
+- `timeout` — seconds before the hook is killed, default 30
 
 Events available on every step:
 
-- `pre`: before the step runs
-- `post`: after the step finishes, success or failure
-- `on_success`: after the step succeeds
-- `on_error`: after the step raises a `StepError`
+- `pre` — before the step runs
+- `post` — after the step finishes, success or failure
+- `on_success` — after the step succeeds
+- `on_error` — after the step raises a `StepError`
 
 Step-specific events:
 
-- `code-spec.verify`: invoked once `claude` produces a clean commit; non-zero output is fed back into the next `code-spec` attempt as test failures
+- `code-spec.verify` — invoked once `claude` produces a clean commit; non-zero output is fed back into the next `code-spec` attempt as test failures
