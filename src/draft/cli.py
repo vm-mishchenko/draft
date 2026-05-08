@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from draft import command_create, command_continue, command_delete, command_list, command_prune
+from draft import command_create, command_continue, command_delete, command_list, command_prune, command_status
 
 
 def main():
@@ -15,6 +15,7 @@ def main():
     command_continue.register(subs)
     command_delete.register(subs)
     command_prune.register(subs)
+    command_status.register(subs)
 
     args = parser.parse_args()
     if args.command is None:

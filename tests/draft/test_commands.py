@@ -1636,3 +1636,233 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
         mock_run.return_value.stdout = ""
         with pytest.raises(StepError):
             DeleteWorktreeStep().run(ctx, Runner(), None)
+
+
+# --- command_status ---
+
+def _make_status_args(run_id):
+    class FakeArgs:
+        pass
+    FakeArgs.run_id = run_id
+    return FakeArgs()
+
+
+def test_status_run_not_found(capsys):
+    import draft.command_status as cs
+
+    with patch("draft.runs.find_run_dir", return_value=None):
+        result = cs.run(_make_status_args("260508-notfound"))
+
+    assert result == 1
+    assert "error: run '260508-notfound' not found" in capsys.readouterr().err
+
+
+def test_status_state_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "run-id" in out
+    assert "260508-100000" in out
+    assert "myproject" in out
+    assert "unknown" in out
+    assert "STEP" not in out
+
+
+def test_status_state_corrupt(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{")
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 1
+    assert "corrupt" in capsys.readouterr().err
+
+
+def _make_status_run(tmp_path, run_id="260508-100000", state=None):
+    run_dir = tmp_path / "myproject" / run_id
+    run_dir.mkdir(parents=True)
+    if state is not None:
+        (run_dir / "state.json").write_text(json.dumps(state))
+    return run_dir
+
+
+def test_status_done_all_steps_show_done(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "data": {"branch": "main", "wt_dir": None},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "status:   done" in out
+    assert out.count("done") >= 6
+
+
+def test_status_running_partial_shows_active(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec"],
+        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=True):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "status:   running" in out
+    lines = [l for l in out.splitlines() if l.strip()]
+    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"])]
+    statuses = [l.split()[-1] for l in step_lines]
+    assert statuses[:2] == ["done", "done"]
+    assert statuses[2] == "active"
+    assert all(s == "pending" for s in statuses[3:])
+
+
+def test_status_stopped_partial_shows_stopped(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec"],
+        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "status:   stopped" in out
+    lines = [l for l in out.splitlines() if l.strip()]
+    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"])]
+    statuses = [l.split()[-1] for l in step_lines]
+    assert statuses[:2] == ["done", "done"]
+    assert statuses[2] == "stopped"
+    assert all(s == "pending" for s in statuses[3:])
+
+
+def test_status_pr_url_printed_when_present(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "pr:" in out
+    assert "https://github.com/org/repo/pull/42" in out
+
+
+def test_status_pr_url_absent_not_printed(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "pr:" not in out
+
+
+def test_status_wt_dir_absent_shows_dash(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "worktree: -" in out
+
+
+def test_status_skipped_steps_excluded_from_table(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["implement-spec"],
+        "data": {"branch": "feat", "worktree_mode": "no-worktree", "skip_pr": True},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "create-worktree" not in out
+    assert "implement-spec" in out
+
+
+def test_status_no_pid_steps_complete_is_done(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec"],
+        "data": {"branch": "feat", "skip_pr": True},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "status:   done" in out
+
+
+def test_status_no_pid_steps_incomplete_is_stopped(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree"],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "status:   stopped" in out
