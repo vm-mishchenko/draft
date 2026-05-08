@@ -71,13 +71,13 @@ class WorktreeCreateStep(Step):
             print(f"\nerror: branch '{branch}' no longer exists", file=sys.stderr)
             raise StepError(self.name, 255)
 
-        rc = engine.run_stage(
-            label=self.name,
-            cmd=self.cmd(ctx),
-            cwd=repo,
-            log_path=ctx.log_path(self.name),
-            attempt=1,
-            timeout=cfg["timeout"],
-        )
-        if rc != 0:
-            raise StepError(self.name, rc)
+        with engine.stage(self.name):
+            rc = engine.run_command(
+                cmd=self.cmd(ctx),
+                cwd=repo,
+                log_path=ctx.log_path(self.name),
+                attempt=1,
+                timeout=cfg["timeout"],
+            )
+            if rc != 0:
+                raise StepError(self.name, rc)
