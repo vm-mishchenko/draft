@@ -32,6 +32,118 @@ def test_command_list_no_runs_real(tmp_path, capsys):
     assert result == 0
 
 
+def _make_list_run(base, run_id, state):
+    run_dir = base / "myproject" / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+    return run_dir
+
+
+def test_command_list_full_pipeline_shows_6(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create", "code-spec"],
+        "data": {"worktree_mode": "worktree", "pr_mode": "open", "skip_pr": False},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "2/6" in capsys.readouterr().out
+
+
+def test_command_list_skip_pr_shows_2(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"skip_pr": True},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "1/2" in capsys.readouterr().out
+
+
+def test_command_list_reuse_existing_shows_5(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["code-spec"],
+        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "1/5" in capsys.readouterr().out
+
+
+def test_command_list_reuse_pr_shows_5(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create", "code-spec"],
+        "data": {"worktree_mode": "worktree", "pr_mode": "reuse"},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "2/5" in capsys.readouterr().out
+
+
+def test_command_list_legacy_no_keys_shows_6(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create", "code-spec"],
+        "data": {},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "2/6" in capsys.readouterr().out
+
+
+def test_command_list_missing_state_shows_dash(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+    out = capsys.readouterr().out
+    assert result == 0
+    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    assert lines and "-" in lines[0]
+
+
+def test_command_list_corrupt_state_shows_corrupt(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{{")
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+    out = capsys.readouterr().out
+    assert result == 0
+    assert "corrupt" in out
+
+
 # --- command_delete ---
 
 def test_command_delete_active_pid_refuses(tmp_path, capsys):
