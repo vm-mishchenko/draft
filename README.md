@@ -10,6 +10,13 @@ CLI that takes a spec file (or inline prompt), runs it through an AI-powered pip
 
 ## Commands
 
+- [draft list](#draft-list) — list recent runs
+- [draft status](#draft-status) — show status of a single run
+- [draft create](#draft-create) — start a new run from a spec or prompt
+- [draft continue](#draft-continue) — resume a stopped or failed run
+- [draft delete](#draft-delete) — remove a single run
+- [draft prune](#draft-prune) — bulk-delete finished runs
+
 ### draft list
 
 List the 15 most recent runs across all projects.
@@ -19,6 +26,18 @@ draft list
 ```
 
 No options.
+
+### draft status
+
+Show the status of a single run: run-level state, step-by-step progress, branch, worktree path, and PR URL.
+
+```
+draft status <run-id>
+```
+
+**Arguments**
+
+- `run-id` — run to inspect (required)
 
 ### draft create
 
