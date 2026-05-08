@@ -1638,12 +1638,213 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
             DeleteWorktreeStep().run(ctx, Runner(), None)
 
 
+# --- command_list --json ---
+
+def _make_list_args(**kwargs):
+    class FakeArgs:
+        json = False
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+def test_command_list_json_no_runs_dir(tmp_path, capsys):
+    import draft.command_list as clm
+
+    with patch("draft.command_list.runs_base", return_value=tmp_path / "nonexistent"):
+        result = clm.run(_make_list_args(json=True))
+    assert result == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
+def test_command_list_json_empty_runs(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    base.mkdir()
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(json=True))
+    assert result == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
+def test_command_list_json_valid_row(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    wt = tmp_path / "my-worktree"
+    wt.mkdir()
+    state = {
+        "completed": ["worktree-create", "code-spec"],
+        "data": {"worktree_mode": "worktree", "pr_mode": "open", "skip_pr": False,
+                 "branch": "feat/foo", "wt_dir": str(wt), "pr_url": "https://github.com/org/repo/pull/1"},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["state"] == "ok"
+    assert row["run_id"] == "260508-100000"
+    assert row["project"] == "myproject"
+    assert row["branch"] == "feat/foo"
+    assert row["pr_url"] == "https://github.com/org/repo/pull/1"
+    assert row["workspace"] == "yes"
+    assert isinstance(row["running"], bool)
+
+
+def test_command_list_json_missing_state(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["state"] == "missing"
+    assert rows[0]["stages_completed"] is None
+    assert rows[0]["stages_total"] is None
+    assert rows[0]["workspace"] is None
+    assert rows[0]["branch"] is None
+    assert rows[0]["pr_url"] is None
+
+
+def test_command_list_json_corrupt_state(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{{")
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["state"] == "corrupt"
+    assert rows[0]["stages_completed"] is None
+
+
+def test_command_list_json_workspace_yes(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    state = {"completed": [], "data": {"wt_dir": str(wt)}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["workspace"] == "yes"
+
+
+def test_command_list_json_workspace_no(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"wt_dir": str(tmp_path / "gone")}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["workspace"] == "no"
+
+
+def test_command_list_json_workspace_null_when_absent(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["workspace"] is None
+
+
+def test_command_list_json_pr_url_null_when_absent(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["pr_url"] is None
+
+
+def test_command_list_json_running_true(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps({"completed": [], "data": {}}))
+    (run_dir / "draft.pid").write_text(str(os.getpid()))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["running"] is True
+
+
+def test_command_list_json_running_false(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(json=True))
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows[0]["running"] is False
+
+
+def test_command_list_no_json_unchanged(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"branch": "feat"}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "RUN-ID" in out
+    assert "260508-100000" in out
+
+
 # --- command_status ---
 
-def _make_status_args(run_id):
+def _make_status_args(run_id, *, use_json=False):
     class FakeArgs:
         pass
     FakeArgs.run_id = run_id
+    FakeArgs.json = use_json
     return FakeArgs()
 
 
@@ -1866,3 +2067,197 @@ def test_status_no_pid_steps_incomplete_is_stopped(tmp_path, capsys):
     assert result == 0
     out = capsys.readouterr().out
     assert "status:   stopped" in out
+
+
+# --- command_status --json ---
+
+def test_status_json_run_not_found(capsys):
+    import draft.command_status as cs
+
+    with patch("draft.runs.find_run_dir", return_value=None):
+        result = cs.run(_make_status_args("260508-notfound", use_json=True))
+
+    assert result == 1
+    out, err = capsys.readouterr().out, capsys.readouterr().err
+    assert out == ""
+
+
+def test_status_json_state_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "unknown"
+    assert data["run_id"] == "260508-100000"
+    assert data["project"] == "myproject"
+    assert data["branch"] is None
+    assert data["worktree"] is None
+    assert data["pr_url"] is None
+    assert data["steps"] is None
+
+
+def test_status_json_corrupt_no_json(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{")
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_status_json_done_all_steps(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "data": {"branch": "main", "wt_dir": None},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "done"
+    assert all(s["status"] == "done" for s in data["steps"])
+
+
+def test_status_json_running_partial(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec"],
+        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=True):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "running"
+    step_statuses = {s["name"]: s["status"] for s in data["steps"]}
+    assert step_statuses["create-worktree"] == "done"
+    assert step_statuses["implement-spec"] == "done"
+    assert step_statuses["push-commits"] == "active"
+
+
+def test_status_json_stopped_partial(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec"],
+        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "stopped"
+    step_statuses = {s["name"]: s["status"] for s in data["steps"]}
+    assert step_statuses["push-commits"] == "stopped"
+
+
+def test_status_json_pr_url_null_when_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["pr_url"] is None
+
+
+def test_status_json_pr_url_present(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["pr_url"] == "https://github.com/org/repo/pull/42"
+
+
+def test_status_json_worktree_null_when_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {"completed": [], "data": {"branch": "feat"}}
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["worktree"] is None
+
+
+def test_status_json_skipped_steps_absent_from_steps_array(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["implement-spec"],
+        "data": {"branch": "feat", "worktree_mode": "no-worktree", "skip_pr": True},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    step_names = [s["name"] for s in data["steps"]]
+    assert "create-worktree" not in step_names
+    assert "implement-spec" in step_names
+
+
+def test_status_json_no_json_unchanged(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir), \
+         patch("draft.runs.is_run_active", return_value=False):
+        result = cs.run(_make_status_args("260508-100000"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "run-id" in out
+    assert "status" in out
