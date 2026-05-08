@@ -1329,29 +1329,31 @@ def test_continue_only_delete_worktree_pending_worktree_absent_exits_clean(tmp_p
 
 def test_delete_worktree_step_path_missing_succeeds(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
-    from pipeline import RunContext
+    from pipeline import RunContext, Runner
 
     ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
     ctx.set("wt_dir", str(tmp_path / "nonexistent"))
 
-    DeleteWorktreeStep().run(ctx, None, None)  # must not raise
+    with patch("sys.stdout.isatty", return_value=False):
+        DeleteWorktreeStep().run(ctx, Runner(), None)  # must not raise
 
 
 def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
-    from pipeline import RunContext, StepError
+    from pipeline import RunContext, Runner, StepError
 
     ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
     ctx.set("wt_dir", "")
 
-    with pytest.raises(StepError):
-        DeleteWorktreeStep().run(ctx, None, None)
+    with patch("sys.stdout.isatty", return_value=False):
+        with pytest.raises(StepError):
+            DeleteWorktreeStep().run(ctx, Runner(), None)
 
 
 def test_delete_worktree_step_git_success(tmp_path):
     from unittest.mock import MagicMock
     from draft.steps.delete_worktree import DeleteWorktreeStep
-    from pipeline import RunContext
+    from pipeline import RunContext, Runner
 
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -1362,7 +1364,8 @@ def test_delete_worktree_step_git_success(tmp_path):
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, None, None)
+        with patch("sys.stdout.isatty", return_value=False):
+            DeleteWorktreeStep().run(ctx, Runner(), None)
 
     mock_run.assert_called_once_with(
         ["git", "worktree", "remove", str(wt), "--force"],
@@ -1372,7 +1375,7 @@ def test_delete_worktree_step_git_success(tmp_path):
 
 def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
-    from pipeline import RunContext
+    from pipeline import RunContext, Runner
 
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -1383,12 +1386,13 @@ def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path
         mock_run.return_value.returncode = 128
         mock_run.return_value.stderr = "fatal: 'wt' is not a working tree"
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, None, None)  # must not raise
+        with patch("sys.stdout.isatty", return_value=False):
+            DeleteWorktreeStep().run(ctx, Runner(), None)  # must not raise
 
 
 def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
-    from pipeline import RunContext, StepError
+    from pipeline import RunContext, Runner, StepError
 
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -1399,5 +1403,6 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "fatal: internal error"
         mock_run.return_value.stdout = ""
-        with pytest.raises(StepError):
-            DeleteWorktreeStep().run(ctx, None, None)
+        with patch("sys.stdout.isatty", return_value=False):
+            with pytest.raises(StepError):
+                DeleteWorktreeStep().run(ctx, Runner(), None)

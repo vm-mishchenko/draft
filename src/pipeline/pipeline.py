@@ -43,21 +43,21 @@ class Step:
     def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None):
         cfg = ctx.config(self.name)
         last_rc = 1
-        for attempt in range(1, cfg["max_retries"] + 1):
-            rc = runner.run_stage(
-                label=self.name,
-                cmd=self.cmd(ctx),
-                cwd=ctx.get("cwd"),
-                log_path=ctx.log_path(self.name),
-                attempt=attempt,
-                timeout=cfg["timeout"],
-            )
-            if rc == 0:
-                return
-            last_rc = rc
-            if attempt < cfg["max_retries"]:
-                runner.sleep(cfg["retry_delay"])
-        raise StepError(self.name, last_rc)
+        with runner.stage(self.name):
+            for attempt in range(1, cfg["max_retries"] + 1):
+                rc = runner.run_command(
+                    cmd=self.cmd(ctx),
+                    cwd=ctx.get("cwd"),
+                    log_path=ctx.log_path(self.name),
+                    attempt=attempt,
+                    timeout=cfg["timeout"],
+                )
+                if rc == 0:
+                    return
+                last_rc = rc
+                if attempt < cfg["max_retries"]:
+                    runner.sleep(cfg["retry_delay"])
+            raise StepError(self.name, last_rc)
 
 
 class Pipeline:

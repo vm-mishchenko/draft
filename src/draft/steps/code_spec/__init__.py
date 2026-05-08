@@ -128,29 +128,29 @@ class CodeSpecStep(Step):
         cfg = ctx.config(self.name)
         wt_dir = ctx.get("wt_dir")
 
-        for attempt in range(1, cfg["max_retries"] + 1):
-            engine.run_stage(
-                label=self.name,
-                cmd=_build_claude_cmd(ctx),
-                cwd=wt_dir,
-                log_path=ctx.log_path(self.name),
-                attempt=attempt,
-                timeout=cfg["timeout"],
-                line_formatter=_format_event,
-            )
+        with engine.stage(self.name) as s:
+            for attempt in range(1, cfg["max_retries"] + 1):
+                engine.run_command(
+                    cmd=_build_claude_cmd(ctx),
+                    cwd=wt_dir,
+                    log_path=ctx.log_path(self.name),
+                    attempt=attempt,
+                    timeout=cfg["timeout"],
+                    line_formatter=_format_event,
+                )
 
-            if _is_branch_clean(wt_dir) and _commits_ahead(wt_dir) > 0:
-                results = lifecycle.run_hooks(self.name, "verify")
-                failures = [r for r in results if r.rc != 0]
-                if failures:
-                    errors = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
-                    ctx.step_set(self.name, "verify_errors", errors)
-                    continue
-                ctx.step_set(self.name, "verify_errors", "")
-                ctx.save()
-                return
+                if _is_branch_clean(wt_dir) and _commits_ahead(wt_dir) > 0:
+                    results = lifecycle.run_hooks(self.name, "verify")
+                    failures = [r for r in results if r.rc != 0]
+                    if failures:
+                        errors = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
+                        ctx.step_set(self.name, "verify_errors", errors)
+                        continue
+                    ctx.step_set(self.name, "verify_errors", "")
+                    ctx.save()
+                    return
 
-            if attempt < cfg["max_retries"]:
-                engine.sleep(cfg["retry_delay"])
+                if attempt < cfg["max_retries"]:
+                    engine.sleep(cfg["retry_delay"])
 
-        raise StepError(self.name, 1)
+            raise StepError(self.name, 1)
