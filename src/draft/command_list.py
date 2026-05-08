@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 
+from draft import runs
 from draft.runs import runs_base
 
 
@@ -45,7 +46,6 @@ def run(args) -> int:
         print("no runs")
         return 0
 
-    total_steps = 6
     header = f"{'RUN-ID':<18}  {'PROJECT':<20}  {'STAGES':<10}  {'RUNNING':<8}  {'BRANCH':<30}  PR"
     print(header)
     print("-" * len(header))
@@ -64,6 +64,7 @@ def run(args) -> int:
             print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {running:<8}  {'-':<30}  -")
             continue
 
+        total_steps = len(runs.expected_steps(payload))
         project = payload.get("data", {}).get("project", d.parent.name) or d.parent.name
         completed = len(payload.get("completed", []))
         branch = payload.get("data", {}).get("branch", "-") or "-"
