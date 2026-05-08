@@ -382,11 +382,11 @@ def _checkout_in_place(repo: str, branch: str) -> None:
 def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False):
     skipped = set()
     if worktree_mode in ("no-worktree", "reuse-existing"):
-        skipped.add("worktree-create")
+        skipped.add("create-worktree")
     if skip_pr:
-        skipped.update({"push", "pr-open", "pr-view", "pr-babysit"})
+        skipped.update({"push-commits", "open-pr", "view-pr", "babysit-pr"})
     elif pr_mode == "reuse":
-        skipped.add("pr-open")
+        skipped.add("open-pr")
     if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
         skipped.add("delete-worktree")
     active = [s for s in STEPS if s.name not in skipped]
@@ -402,7 +402,7 @@ def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skip
     print("stages:")
     for step in all_steps:
         if step.name in skipped:
-            if step.name == "worktree-create" and worktree_mode == "reuse-existing":
+            if step.name == "create-worktree" and worktree_mode == "reuse-existing":
                 suffix = " [skipped, reused]"
             else:
                 suffix = " [skipped]"
@@ -566,10 +566,10 @@ def run(args) -> int:
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         _exit_code = {
-            "code-spec": 4,
-            "push": 5,
-            "pr-open": 6,
-            "pr-view": 6,
+            "implement-spec": 4,
+            "push-commits": 5,
+            "open-pr": 6,
+            "view-pr": 6,
         }.get(exc.step_name, 1)
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return _exit_code

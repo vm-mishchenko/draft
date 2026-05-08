@@ -7,7 +7,7 @@ Steps:
    - `git log {{BASE_BRANCH}}..HEAD --format="%s%n%n%b"`
 3. Write a concise title (one line) and a body that follows the PR-body template structure.
 
-Output contract. Your stdout is parsed by `pr-open`. Output exactly two fenced blocks, in this order, with the opening and closing markers on their own lines:
+Output contract. Your stdout is parsed by `open-pr`. Output exactly two fenced blocks, in this order, with the opening and closing markers on their own lines:
 
 <<<PR-TITLE>>>
 your one-line title here

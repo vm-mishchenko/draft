@@ -5,7 +5,7 @@ from pipeline import Step, StepError
 
 
 class PrViewStep(Step):
-    name = "pr-view"
+    name = "view-pr"
 
     def defaults(self) -> dict:
         return {"max_retries": 3, "timeout": 30, "retry_delay": 5}

@@ -35,7 +35,7 @@ def test_log_file_has_header_body_footer(tmp_path):
     out_file = tmp_path / "out.txt"
     config = {
         "steps": {
-            "code-spec": {
+            "implement-spec": {
                 "hooks": {
                     "pre": [
                         {"cmd": f"echo hello >> {out_file}"},
@@ -44,10 +44,10 @@ def test_log_file_has_header_body_footer(tmp_path):
             }
         }
     }
-    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
+    _runner(config, tmp_path, tmp_path).run("implement-spec", "pre")
 
-    log = (tmp_path / "code-spec.pre.log").read_text()
-    assert "=== code-spec.pre[0] @ " in log
+    log = (tmp_path / "implement-spec.pre.log").read_text()
+    assert "=== implement-spec.pre[0] @ " in log
     assert f"$ echo hello >> {out_file}" in log
     assert "--- exit 0 in" in log
 
@@ -56,7 +56,7 @@ def test_two_commands_share_one_log_file_in_order(tmp_path):
     out_file = tmp_path / "out.txt"
     config = {
         "steps": {
-            "code-spec": {
+            "implement-spec": {
                 "hooks": {
                     "pre": [
                         {"cmd": f"echo first >> {out_file}"},
@@ -66,17 +66,17 @@ def test_two_commands_share_one_log_file_in_order(tmp_path):
             }
         }
     }
-    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
+    _runner(config, tmp_path, tmp_path).run("implement-spec", "pre")
 
-    log = (tmp_path / "code-spec.pre.log").read_text()
-    assert log.index("code-spec.pre[0]") < log.index("code-spec.pre[1]")
+    log = (tmp_path / "implement-spec.pre.log").read_text()
+    assert log.index("implement-spec.pre[0]") < log.index("implement-spec.pre[1]")
     assert log.count("=== ") == 2
 
 
 def test_log_file_truncated_on_re_invocation(tmp_path):
     config = {
         "steps": {
-            "code-spec": {
+            "implement-spec": {
                 "hooks": {
                     "pre": [{"cmd": "echo invocation"}],
                 }
@@ -84,13 +84,13 @@ def test_log_file_truncated_on_re_invocation(tmp_path):
         }
     }
     runner = _runner(config, tmp_path, tmp_path)
-    runner.run("code-spec", "pre")
-    first = (tmp_path / "code-spec.pre.log").read_text()
-    assert first.count("=== code-spec.pre[0]") == 1
+    runner.run("implement-spec", "pre")
+    first = (tmp_path / "implement-spec.pre.log").read_text()
+    assert first.count("=== implement-spec.pre[0]") == 1
 
-    runner.run("code-spec", "pre")
-    second = (tmp_path / "code-spec.pre.log").read_text()
-    assert second.count("=== code-spec.pre[0]") == 1
+    runner.run("implement-spec", "pre")
+    second = (tmp_path / "implement-spec.pre.log").read_text()
+    assert second.count("=== implement-spec.pre[0]") == 1
 
 
 # --- empty / missing ---
@@ -101,9 +101,9 @@ def test_no_hooks_no_log_file(tmp_path):
 
 
 def test_empty_event_no_log_file(tmp_path):
-    config = {"steps": {"code-spec": {"hooks": {"pre": []}}}}
-    _runner(config, tmp_path, tmp_path).run("code-spec", "pre")
-    assert not (tmp_path / "code-spec.pre.log").exists()
+    config = {"steps": {"implement-spec": {"hooks": {"pre": []}}}}
+    _runner(config, tmp_path, tmp_path).run("implement-spec", "pre")
+    assert not (tmp_path / "implement-spec.pre.log").exists()
 
 
 # --- cwd missing ---
@@ -214,7 +214,7 @@ def test_lifecycle_after_step_raises_on_failure(tmp_path):
 def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
     config = {
         "steps": {
-            "code-spec": {
+            "implement-spec": {
                 "hooks": {
                     "verify": [{"cmd": "exit 2"}, {"cmd": "true"}]
                 }
@@ -224,7 +224,7 @@ def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
     runner = _runner(config, tmp_path, tmp_path)
     lifecycle = DraftLifecycle(runner)
 
-    results = lifecycle.run_hooks("code-spec", "verify")
+    results = lifecycle.run_hooks("implement-spec", "verify")
 
     assert len(results) == 1
     assert results[0].rc == 2
