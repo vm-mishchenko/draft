@@ -379,7 +379,7 @@ def _checkout_in_place(repo: str, branch: str) -> None:
         sys.exit(3)
 
 
-def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool):
+def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False):
     skipped = set()
     if worktree_mode in ("no-worktree", "reuse-existing"):
         skipped.add("worktree-create")
@@ -387,6 +387,8 @@ def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool):
         skipped.update({"push", "pr-open", "pr-view", "pr-babysit"})
     elif pr_mode == "reuse":
         skipped.add("pr-open")
+    if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+        skipped.add("delete-worktree")
     active = [s for s in STEPS if s.name not in skipped]
     return active, skipped
 
@@ -522,7 +524,7 @@ def run(args) -> int:
     }
 
     # 10. Active steps
-    active_steps, skipped_names = _compose_active_steps(worktree_mode, pr_mode, args.skip_pr)
+    active_steps, skipped_names = _compose_active_steps(worktree_mode, pr_mode, args.skip_pr, args.delete_worktree)
 
     # 11. Context
     ctx = RunContext(run_id, run_dir, step_configs)
@@ -572,20 +574,10 @@ def run(args) -> int:
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return _exit_code
 
-    # 16. Post-success cleanup
-    if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
-        _remove_worktree(wt_dir)
-
-    # 17. Done
-    if args.skip_pr:
-        if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
-            print("done. (push and PR skipped; worktree removed)")
-        else:
-            print(f"done. (push and PR skipped; worktree left at {wt_dir})")
+    # 16. Done
+    if args.skip_pr and not (args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+        print(f"done. (push and PR skipped; worktree left at {wt_dir})")
     else:
-        if args.delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
-            print("done. (worktree removed)")
-        else:
-            print("done.")
+        print("done.")
     (run_dir / "draft.pid").unlink(missing_ok=True)
     return 0

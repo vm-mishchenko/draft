@@ -8,7 +8,7 @@ FULL_PIPELINE_STEPS = ("worktree-create", "code-spec", "push", "pr-open", "pr-vi
 SKIP_PR_STEPS = ("worktree-create", "code-spec")
 
 
-def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool) -> tuple[str, ...]:
+def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool, delete_worktree: bool = False) -> tuple[str, ...]:
     steps: list[str] = []
     if worktree_mode not in ("no-worktree", "reuse-existing"):
         steps.append("worktree-create")
@@ -19,6 +19,8 @@ def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool) -
             steps.append("pr-open")
         steps.append("pr-view")
         steps.append("pr-babysit")
+    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
+        steps.append("delete-worktree")
     return tuple(steps)
 
 
@@ -90,6 +92,7 @@ def expected_steps(state: dict) -> tuple[str, ...]:
         worktree_mode=data.get("worktree_mode", "worktree"),
         pr_mode=data.get("pr_mode"),
         skip_pr=bool(data.get("skip_pr", False)),
+        delete_worktree=bool(data.get("delete_worktree", False)),
     )
 
 
