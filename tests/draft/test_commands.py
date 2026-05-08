@@ -144,6 +144,129 @@ def test_command_list_corrupt_state_shows_corrupt(tmp_path, capsys):
     assert "corrupt" in out
 
 
+# --- _workspace_status ---
+
+def test_workspace_status_existing_dir(tmp_path):
+    from draft.command_list import _workspace_status
+
+    assert _workspace_status(str(tmp_path)) == "yes"
+
+
+def test_workspace_status_missing_dir(tmp_path):
+    from draft.command_list import _workspace_status
+
+    assert _workspace_status(str(tmp_path / "nonexistent")) == "no"
+
+
+def test_workspace_status_empty_string():
+    from draft.command_list import _workspace_status
+
+    assert _workspace_status("") == "-"
+
+
+def test_workspace_status_none():
+    from draft.command_list import _workspace_status
+
+    assert _workspace_status(None) == "-"
+
+
+def test_workspace_status_oserror(monkeypatch):
+    from draft.command_list import _workspace_status
+    from unittest.mock import MagicMock, patch
+
+    with patch("draft.command_list.Path") as MockPath:
+        MockPath.return_value.is_dir.side_effect = OSError("permission denied")
+        result = _workspace_status("/some/path")
+
+    assert result == "-"
+
+
+def test_command_list_workspace_column_yes(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    wt = tmp_path / "my-worktree"
+    wt.mkdir()
+    state = {
+        "completed": [],
+        "data": {"wt_dir": str(wt)},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    assert lines and "yes" in lines[0]
+
+
+def test_command_list_workspace_column_no(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": [],
+        "data": {"wt_dir": str(tmp_path / "nonexistent")},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    assert lines and "no" in lines[0]
+
+
+def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {}}
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    assert lines
+    # The WORKSPACE column should show '-'
+    # Split by multiple spaces to check the workspace field
+    assert "-" in lines[0]
+
+
+def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100001"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+    out = capsys.readouterr().out
+    assert result == 0
+    lines = [l for l in out.splitlines() if "260508-100001" in l]
+    assert lines and "WORKSPACE" not in lines[0]
+    assert "WORKSPACE" in out.splitlines()[0]
+
+
+def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260508-100002"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{{")
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+    out = capsys.readouterr().out
+    assert result == 0
+    assert "WORKSPACE" in out.splitlines()[0]
+    lines = [l for l in out.splitlines() if "260508-100002" in l]
+    assert lines
+
+
 # --- command_delete ---
 
 def test_command_delete_active_pid_refuses(tmp_path, capsys):
