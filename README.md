@@ -112,6 +112,12 @@ draft prune --delete-branch
 
 ## Use Cases
 
+- [Spec or prompt to PR](#spec-or-prompt-to-pr) — generate code and open a draft PR
+- [Spec or prompt to commit](#spec-or-prompt-to-commit) — generate code locally without pushing
+- [Continue after failure](#continue-after-failure) — resume a stopped or failed run
+- [Iterate on an existing branch](#iterate-on-an-existing-branch) — run against a branch that already has work
+- [Clean up finished runs](#clean-up-finished-runs) — remove finished runs in bulk
+
 ### Spec or prompt to PR
 
 Write a spec file describing the change, then run:
