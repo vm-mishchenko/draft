@@ -2,7 +2,7 @@ from pipeline import Step, StepError
 
 
 class PushStep(Step):
-    name = "push"
+    name = "push-commits"
 
     def defaults(self) -> dict:
         return {"max_retries": 1, "timeout": 120, "retry_delay": 0}

@@ -39,7 +39,7 @@ def _is_branch_clean(cwd: str) -> bool:
 
 
 class PrBabysitStep(Step):
-    name = "pr-babysit"
+    name = "babysit-pr"
 
     def defaults(self) -> dict:
         return {"max_retries": 100, "timeout": 1200, "retry_delay": 60, "checks_delay": 30}
@@ -85,4 +85,4 @@ class PrBabysitStep(Step):
             ctx.save()
             engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
 
-        print(f"pr-babysit: exhausted attempts. PR: {pr_url}")
+        print(f"babysit-pr: exhausted attempts. PR: {pr_url}")

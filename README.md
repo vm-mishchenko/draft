@@ -177,15 +177,15 @@ A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/
 
 Steps run in this order:
 
-- `worktree-create` — create a linked git worktree on a fresh branch off the base branch
-- `code-spec` — invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
-- `push` — `git push -u origin HEAD`
-- `pr-open` — ask `claude` for a title and body, then `gh pr create --draft`
-- `pr-view` — resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
-- `pr-babysit` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
+- `create-worktree` — create a linked git worktree on a fresh branch off the base branch
+- `implement-spec` — invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
+- `push-commits` — `git push -u origin HEAD`
+- `open-pr` — ask `claude` for a title and body, then `gh pr create --draft`
+- `view-pr` — resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
+- `babysit-pr` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
 - `delete-worktree` — remove the linked worktree with `git worktree remove --force`
 
-`--skip-pr` stops after `code-spec` and skips `push`, `pr-open`, `pr-view`, `pr-babysit`.
+`--skip-pr` stops after `implement-spec` and skips `push-commits`, `open-pr`, `view-pr`, `babysit-pr`.
 
 `delete-worktree` is included only when `--delete-worktree` is set and `worktree_mode` is `worktree` or `reuse-existing`; it is skipped otherwise. If the worktree directory is already absent when the step runs, it succeeds without error (idempotent). This makes resume safe: re-running after a partial cleanup does not fail. Hooks at `steps.delete-worktree.hooks.<event>` are opt-in and fire only when the step is active; a skipped step fires no hooks.
 
@@ -198,11 +198,11 @@ Project values override global; both merge on top of each step's defaults. `--se
 
 ```yaml
 steps:
-  worktree-create:
+  create-worktree:
     hooks:
       post:
         - cmd: connect-global-agent
-  code-spec:
+  implement-spec:
     max_retries: 10
     timeout: 1200
     hooks:
@@ -210,9 +210,9 @@ steps:
         - cmd: make setup
       verify:
         - cmd: make test
-  pr-open:
+  open-pr:
     title_prefix: "PROJ-12345: "
-  pr-babysit:
+  babysit-pr:
     checks_delay: 30
 ```
 
@@ -226,17 +226,17 @@ Common fields (all steps):
 
 Step-specific fields:
 
-- `pr-open.title_prefix` — string prepended to the PR title
-- `pr-babysit.checks_delay` — seconds to wait before the first CI poll
+- `open-pr.title_prefix` — string prepended to the PR title
+- `babysit-pr.checks_delay` — seconds to wait before the first CI poll
 
 Defaults per step:
 
-- `worktree-create`: `max_retries=1`, `timeout=60`
-- `code-spec`: `max_retries=10`, `timeout=1200`
-- `push`: `max_retries=1`, `timeout=120`
-- `pr-open`: `max_retries=1`, `timeout=300`, `title_prefix=""`
-- `pr-view`: `max_retries=3`, `timeout=30`, `retry_delay=5`
-- `pr-babysit`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
+- `create-worktree`: `max_retries=1`, `timeout=60`
+- `implement-spec`: `max_retries=10`, `timeout=1200`
+- `push-commits`: `max_retries=1`, `timeout=120`
+- `open-pr`: `max_retries=1`, `timeout=300`, `title_prefix=""`
+- `view-pr`: `max_retries=3`, `timeout=30`, `retry_delay=5`
+- `babysit-pr`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
 - `delete-worktree`: `max_retries=1`, `timeout=60`
 
 ## Hooks
@@ -245,7 +245,7 @@ A hook is a shell command attached to a step lifecycle event. Hooks live under `
 
 ```yaml
 steps:
-  code-spec:
+  implement-spec:
     hooks:
       pre:
         - cmd: make setup
@@ -270,4 +270,4 @@ Events available on every step:
 
 Step-specific events:
 
-- `code-spec.verify` — invoked once `claude` produces a clean commit; non-zero output is fed back into the next `code-spec` attempt as test failures
+- `implement-spec.verify` — invoked once `claude` produces a clean commit; non-zero output is fed back into the next `implement-spec` attempt as test failures

@@ -86,7 +86,7 @@ def _summarize_tool_input(name, inp):
 
 def _build_claude_cmd(ctx) -> list[str]:
     spec = ctx.get("spec", "")
-    verify_errors = ctx.step_get("code-spec", "verify_errors", "")
+    verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
     template = files("draft.steps.code_spec").joinpath("code_spec.md").read_text()
     if verify_errors:
         verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
@@ -119,7 +119,7 @@ def _commits_ahead(cwd: str) -> int:
 
 
 class CodeSpecStep(Step):
-    name = "code-spec"
+    name = "implement-spec"
 
     def defaults(self) -> dict:
         return {"max_retries": 10, "timeout": 1200, "retry_delay": 0}

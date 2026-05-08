@@ -38,7 +38,7 @@ def _branch_exists(repo: str, branch: str) -> bool:
 
 
 class WorktreeCreateStep(Step):
-    name = "worktree-create"
+    name = "create-worktree"
 
     def defaults(self) -> dict:
         return {"max_retries": 1, "timeout": 60, "retry_delay": 0}

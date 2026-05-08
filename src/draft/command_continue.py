@@ -138,11 +138,11 @@ def run(args) -> int:
     # Recover deleted worktree (only for unfinished worktree-mode runs)
     if (
         worktree_mode == "worktree"
-        and ctx.is_completed("worktree-create")
+        and ctx.is_completed("create-worktree")
         and wt_dir
         and not Path(wt_dir).exists()
     ):
-        ctx._completed.remove("worktree-create")
+        ctx._completed.remove("create-worktree")
         ctx.save()
 
     # New PID
@@ -171,10 +171,10 @@ def run(args) -> int:
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         _exit_code = {
-            "code-spec": 4,
-            "push": 5,
-            "pr-open": 6,
-            "pr-view": 6,
+            "implement-spec": 4,
+            "push-commits": 5,
+            "open-pr": 6,
+            "view-pr": 6,
         }.get(exc.step_name, 1)
         pid_file.unlink(missing_ok=True)
         return _exit_code

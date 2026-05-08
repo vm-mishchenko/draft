@@ -177,7 +177,7 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
     state = {
         "run_id": "260505-120000",
         "run_dir": str(run_dir),
-        "completed": ["worktree-create"],
+        "completed": ["create-worktree"],
         "data": {"branch": "fix", "wt_dir": str(wt_path), "repo": str(tmp_path)},
         "step_data": {},
         "step_configs": {},
@@ -196,7 +196,7 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
         cmd_continue.run(FakeArgs())
 
     saved = json.loads((run_dir / "state.json").read_text())
-    assert "worktree-create" not in saved["completed"]
+    assert "create-worktree" not in saved["completed"]
 
 
 # --- runs.delete_run ---
@@ -309,7 +309,7 @@ def test_is_run_finished_full_pipeline(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
         "data": {},
     }
     assert r.is_run_finished(state) is True
@@ -319,7 +319,7 @@ def test_is_run_finished_missing_pr_babysit(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["worktree-create", "code-spec", "push", "pr-open", "pr-view"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr"],
         "data": {},
     }
     assert r.is_run_finished(state) is False
@@ -329,7 +329,7 @@ def test_is_run_finished_skip_pr_true(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["worktree-create", "code-spec"],
+        "completed": ["create-worktree", "implement-spec"],
         "data": {"skip_pr": True},
     }
     assert r.is_run_finished(state) is True
@@ -339,7 +339,7 @@ def test_is_run_finished_skip_pr_false(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["worktree-create", "code-spec"],
+        "completed": ["create-worktree", "implement-spec"],
         "data": {"skip_pr": False},
     }
     assert r.is_run_finished(state) is False
@@ -363,14 +363,14 @@ def _make_prune_args(**kwargs):
 
 def _full_state(branch="draft/feat"):
     return {
-        "completed": ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
         "data": {"branch": branch},
     }
 
 
 def _partial_state(branch="draft/feat"):
     return {
-        "completed": ["worktree-create"],
+        "completed": ["create-worktree"],
         "data": {"branch": branch},
     }
 
@@ -531,7 +531,7 @@ def test_prune_yes_delete_branch(tmp_path, capsys):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     state = {
-        "completed": ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
         "data": {"branch": "draft/feat", "repo": str(repo_dir)},
     }
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=state)
@@ -570,7 +570,7 @@ def test_prune_skip_pr_finished_included(tmp_path, capsys):
     import draft.command_prune as cp
 
     state = {
-        "completed": ["worktree-create", "code-spec"],
+        "completed": ["create-worktree", "implement-spec"],
         "data": {"branch": "draft/feat", "skip_pr": True},
     }
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=state)
@@ -634,7 +634,7 @@ def test_compose_active_steps_default():
     import draft.command_create as cmd
 
     active, skipped = cmd._compose_active_steps("worktree", "open", False)
-    assert [s.name for s in active] == ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
+    assert [s.name for s in active] == ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"]
     assert skipped == {"delete-worktree"}
 
 
@@ -642,16 +642,16 @@ def test_compose_active_steps_no_worktree():
     import draft.command_create as cmd
 
     active, skipped = cmd._compose_active_steps("no-worktree", "open", False)
-    assert "worktree-create" not in [s.name for s in active]
-    assert "worktree-create" in skipped
+    assert "create-worktree" not in [s.name for s in active]
+    assert "create-worktree" in skipped
 
 
 def test_compose_active_steps_skip_pr():
     import draft.command_create as cmd
 
     active, skipped = cmd._compose_active_steps("worktree", "skip", True)
-    assert [s.name for s in active] == ["worktree-create", "code-spec"]
-    assert skipped == {"push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"}
+    assert [s.name for s in active] == ["create-worktree", "implement-spec"]
+    assert skipped == {"push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"}
 
 
 def test_compose_active_steps_pr_reuse_skips_pr_open():
@@ -659,10 +659,10 @@ def test_compose_active_steps_pr_reuse_skips_pr_open():
 
     active, skipped = cmd._compose_active_steps("worktree", "reuse", False)
     names = [s.name for s in active]
-    assert "pr-open" not in names
-    assert "pr-view" in names
-    assert "pr-babysit" in names
-    assert "pr-open" in skipped
+    assert "open-pr" not in names
+    assert "view-pr" in names
+    assert "babysit-pr" in names
+    assert "open-pr" in skipped
     assert "delete-worktree" in skipped
 
 
@@ -687,21 +687,21 @@ def test_expected_steps_no_worktree_open():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "no-worktree", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("code-spec", "push", "pr-open", "pr-view", "pr-babysit")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr")
 
 
 def test_expected_steps_pr_reuse():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "worktree", "pr_mode": "reuse"}}
-    assert r.expected_steps(state) == ("worktree-create", "code-spec", "push", "pr-view", "pr-babysit")
+    assert r.expected_steps(state) == ("create-worktree", "implement-spec", "push-commits", "view-pr", "babysit-pr")
 
 
 def test_expected_steps_no_worktree_skip_pr():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "no-worktree", "skip_pr": True}}
-    assert r.expected_steps(state) == ("code-spec",)
+    assert r.expected_steps(state) == ("implement-spec",)
 
 
 # --- create-modes: runs.find_active_run_on_branch ---
@@ -721,7 +721,7 @@ def test_find_active_run_on_branch_returns_unfinished(tmp_path):
     run_dir = project_dir / "260506-100000"
     run_dir.mkdir(parents=True)
     state = {
-        "completed": ["worktree-create"],
+        "completed": ["create-worktree"],
         "data": {"branch": "foo"},
     }
     (run_dir / "state.json").write_text(json.dumps(state))
@@ -755,7 +755,7 @@ def test_find_active_run_on_branch_skips_other_branch(tmp_path):
     run_dir = project_dir / "260506-100000"
     run_dir.mkdir(parents=True)
     state = {
-        "completed": ["worktree-create"],
+        "completed": ["create-worktree"],
         "data": {"branch": "other"},
     }
     (run_dir / "state.json").write_text(json.dumps(state))
@@ -827,7 +827,7 @@ def test_continue_drift_no_worktree_refuses(tmp_path, capsys):
     repo.mkdir()
 
     state = _continue_state(
-        completed=["code-spec"],
+        completed=["implement-spec"],
         wt_dir=str(repo),
         repo=str(repo),
         worktree_mode="no-worktree",
@@ -857,7 +857,7 @@ def test_continue_drift_worktree_refuses(tmp_path, capsys):
     wt.mkdir()
 
     state = _continue_state(
-        completed=["worktree-create", "code-spec"],
+        completed=["create-worktree", "implement-spec"],
         wt_dir=str(wt),
         branch="foo",
     )
@@ -882,7 +882,7 @@ def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
     from draft.steps.worktree_create import WorktreeCreateStep
     from pipeline import RunContext
 
-    ctx = RunContext("rid", tmp_path, {"worktree-create": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"create-worktree": {"max_retries": 1, "timeout": 60}})
     ctx.set("branch", "foo")
     ctx.set("base_branch", "origin/main")
     ctx.set("wt_dir", "/tmp/wt")
@@ -897,7 +897,7 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
     from draft.steps.worktree_create import WorktreeCreateStep
     from pipeline import RunContext
 
-    ctx = RunContext("rid", tmp_path, {"worktree-create": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"create-worktree": {"max_retries": 1, "timeout": 60}})
     ctx.set("branch", "foo")
     ctx.set("base_branch", "origin/main")
     ctx.set("wt_dir", "/tmp/wt")
@@ -1086,9 +1086,9 @@ def test_compose_active_steps_reuse_existing_skips_worktree_create():
 
     active, skipped = cmd._compose_active_steps("reuse-existing", "open", False)
     names = [s.name for s in active]
-    assert "worktree-create" not in names
-    assert names == ["code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
-    assert "worktree-create" in skipped
+    assert "create-worktree" not in names
+    assert names == ["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"]
+    assert "create-worktree" in skipped
     assert "delete-worktree" in skipped
 
 
@@ -1097,8 +1097,8 @@ def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
 
     active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
     names = [s.name for s in active]
-    assert names == ["code-spec", "push", "pr-view", "pr-babysit"]
-    assert skipped == {"worktree-create", "pr-open", "delete-worktree"}
+    assert names == ["implement-spec", "push-commits", "view-pr", "babysit-pr"]
+    assert skipped == {"create-worktree", "open-pr", "delete-worktree"}
 
 
 def test_compose_active_steps_reuse_existing_with_skip_pr():
@@ -1106,29 +1106,29 @@ def test_compose_active_steps_reuse_existing_with_skip_pr():
 
     active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
     names = [s.name for s in active]
-    assert names == ["code-spec"]
-    assert skipped == {"worktree-create", "push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"}
+    assert names == ["implement-spec"]
+    assert skipped == {"create-worktree", "push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"}
 
 
 def test_expected_steps_reuse_existing_open():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("code-spec", "push", "pr-open", "pr-view", "pr-babysit")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr")
 
 
 def test_expected_steps_reuse_existing_pr_reuse():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"}}
-    assert r.expected_steps(state) == ("code-spec", "push", "pr-view", "pr-babysit")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "view-pr", "babysit-pr")
 
 
 def test_is_run_finished_reuse_existing():
     import draft.runs as r
 
     state = {
-        "completed": ["code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        "completed": ["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
         "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
     }
     assert r.is_run_finished(state) is True
@@ -1146,7 +1146,7 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
     wt = tmp_path / "gone"  # does not exist
 
     state = _continue_state(
-        completed=["code-spec", "push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"],
+        completed=["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"],
         wt_dir=str(wt),
         delete_worktree=True,
         worktree_mode="reuse-existing",
@@ -1172,24 +1172,24 @@ def test_preamble_reused_annotation_for_reuse_existing(capsys):
     import draft.command_create as cmd
     from draft.steps import STEPS
 
-    skipped = {"worktree-create"}
+    skipped = {"create-worktree"}
     cmd._print_preamble(
         "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, skipped, "reuse-existing"
     )
     out = capsys.readouterr().out
-    assert "worktree-create [skipped, reused]" in out
+    assert "create-worktree [skipped, reused]" in out
 
 
 def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
     import draft.command_create as cmd
     from draft.steps import STEPS
 
-    skipped = {"worktree-create"}
+    skipped = {"create-worktree"}
     cmd._print_preamble(
         "rid", "feature-x", "/repo", "/runs/rid", "started", STEPS, skipped, "no-worktree"
     )
     out = capsys.readouterr().out
-    assert "worktree-create [skipped]" in out
+    assert "create-worktree [skipped]" in out
     assert "reused" not in out
 
 
@@ -1201,7 +1201,7 @@ def test_preamble_no_skipped_annotation_for_active_step(capsys):
         "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, set(), "worktree"
     )
     out = capsys.readouterr().out
-    assert "worktree-create\n" in out  # no suffix
+    assert "create-worktree\n" in out  # no suffix
     assert "[skipped" not in out
 
 
@@ -1249,7 +1249,7 @@ def test_compose_active_steps_skip_pr_with_delete_worktree():
 
     active, skipped = cmd._compose_active_steps("worktree", "skip", True, delete_worktree=True)
     names = [s.name for s in active]
-    assert names == ["worktree-create", "code-spec", "delete-worktree"]
+    assert names == ["create-worktree", "implement-spec", "delete-worktree"]
     assert "delete-worktree" not in skipped
 
 

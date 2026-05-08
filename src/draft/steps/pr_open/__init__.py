@@ -40,7 +40,7 @@ def _parse_title_body(text: str) -> tuple[str, str]:
 
 
 class PrOpenStep(Step):
-    name = "pr-open"
+    name = "open-pr"
 
     def defaults(self) -> dict:
         return {"max_retries": 1, "timeout": 300, "retry_delay": 0, "title_prefix": ""}
@@ -55,15 +55,15 @@ class PrOpenStep(Step):
 
         body_path = _resolve_pr_body_path(repo)
         prompt = (
-            (STEP_DIR / "pr-open.md")
+            (STEP_DIR / "open-pr.md")
             .read_text()
             .replace("{{BASE_BRANCH}}", base_branch)
             .replace("{{PR_BODY_TEMPLATE_PATH}}", body_path)
         )
 
-        claude_log = ctx.log_path("pr-open-claude")
+        claude_log = ctx.log_path("open-pr-claude")
         rc = engine.run_stage(
-            label="pr-open-claude",
+            label="open-pr-claude",
             cmd=["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
             cwd=wt_dir,
             log_path=claude_log,
@@ -77,7 +77,7 @@ class PrOpenStep(Step):
             title, body = _parse_title_body(claude_log.read_text())
         except _ParseError as e:
             print(
-                f"pr-open: agent output unparseable ({e}); falling back to branch-name title",
+                f"open-pr: agent output unparseable ({e}); falling back to branch-name title",
                 file=sys.stderr,
             )
             title = branch
