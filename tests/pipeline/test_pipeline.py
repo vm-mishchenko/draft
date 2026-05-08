@@ -138,8 +138,7 @@ def test_engine_timeout_returns_timeout_exit(tmp_path):
     ctx = make_ctx(tmp_path)
     engine = Runner()
     log = tmp_path / "test.log"
-    rc = engine.run_stage(
-        label="sleep",
+    rc = engine.run_command(
         cmd=["sleep", "10"],
         cwd=str(tmp_path),
         log_path=log,

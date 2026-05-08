@@ -62,45 +62,47 @@ class PrOpenStep(Step):
         )
 
         claude_log = ctx.log_path("open-pr-claude")
-        rc = engine.run_stage(
-            label="open-pr-claude",
-            cmd=["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
-            cwd=wt_dir,
-            log_path=claude_log,
-            attempt=1,
-            timeout=cfg["timeout"],
-        )
-        if rc != 0:
-            raise StepError(self.name, rc)
-
-        try:
-            title, body = _parse_title_body(claude_log.read_text())
-        except _ParseError as e:
-            print(
-                f"open-pr: agent output unparseable ({e}); falling back to branch-name title",
-                file=sys.stderr,
-            )
-            title = branch
-            body = (STEP_DIR / "pull-request-template.md").read_text()
-
         log_path = ctx.log_path(self.name)
         gh_base = base_branch.removeprefix("origin/")
-        rc = engine.run_stage(
-            label=self.name,
-            cmd=[
-                "gh", "pr", "create",
-                "--base", gh_base,
-                "--title", title_prefix + title,
-                "--body", body,
-                "--draft",
-            ],
-            cwd=wt_dir,
-            log_path=log_path,
-            attempt=1,
-            timeout=cfg["timeout"],
-        )
-        if rc != 0:
-            raise StepError(self.name, rc)
+
+        with engine.stage(self.name) as s:
+            s.update("drafting")
+            rc = engine.run_command(
+                cmd=["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
+                cwd=wt_dir,
+                log_path=claude_log,
+                attempt=1,
+                timeout=cfg["timeout"],
+            )
+            if rc != 0:
+                raise StepError(self.name, rc)
+
+            try:
+                title, body = _parse_title_body(claude_log.read_text())
+            except _ParseError as e:
+                print(
+                    f"open-pr: agent output unparseable ({e}); falling back to branch-name title",
+                    file=sys.stderr,
+                )
+                title = branch
+                body = (STEP_DIR / "pull-request-template.md").read_text()
+
+            s.update("creating PR")
+            rc = engine.run_command(
+                cmd=[
+                    "gh", "pr", "create",
+                    "--base", gh_base,
+                    "--title", title_prefix + title,
+                    "--body", body,
+                    "--draft",
+                ],
+                cwd=wt_dir,
+                log_path=log_path,
+                attempt=1,
+                timeout=cfg["timeout"],
+            )
+            if rc != 0:
+                raise StepError(self.name, rc)
 
         for line in log_path.read_text().splitlines():
             if line.startswith("https://"):

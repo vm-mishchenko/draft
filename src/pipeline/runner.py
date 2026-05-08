@@ -17,8 +17,19 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
+class StageHandle:
+    def __init__(self):
+        self._status = "ok"
+
+    def update(self, text: str) -> None:
+        self._status = text
+
+
 class Runner:
     LABEL_WIDTH = 36
+
+    def __init__(self):
+        self._active_stage: StageHandle | None = None
 
     @contextmanager
     def tty_ticker(self, label: str):
@@ -58,14 +69,55 @@ class Runner:
                 sys.stdout.write(f"{line}\n")
             sys.stdout.flush()
 
-    def run_stage(
+    @contextmanager
+    def stage(self, label: str):
+        is_tty = sys.stdout.isatty()
+        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
+        start = time.monotonic()
+        stop_event = threading.Event()
+        handle = StageHandle()
+        self._active_stage = handle
+
+        def _tick():
+            while not stop_event.is_set():
+                elapsed = _fmt_elapsed(time.monotonic() - start)
+                line = f"{padded} {elapsed:>7}  {handle._status}"
+                if is_tty:
+                    sys.stdout.write(f"\r\033[K{line}")
+                    sys.stdout.flush()
+                stop_event.wait(1)
+
+        thread = threading.Thread(target=_tick, daemon=True)
+        if is_tty:
+            thread.start()
+
+        failed = False
+        try:
+            yield handle
+        except Exception:
+            failed = True
+            raise
+        finally:
+            self._active_stage = None
+            stop_event.set()
+            if is_tty:
+                thread.join()
+            elapsed = _fmt_elapsed(time.monotonic() - start)
+            status = "failed" if failed else handle._status
+            line = f"{padded} {elapsed:>7}  {status}"
+            if is_tty:
+                sys.stdout.write(f"\r\033[K{line}\n")
+            else:
+                sys.stdout.write(f"{line}\n")
+            sys.stdout.flush()
+
+    def run_command(
         self,
-        label: str,
         cmd: list[str],
         cwd: str | Path | None,
         log_path: Path,
-        attempt: int = 1,
         timeout: float | None = None,
+        attempt: int = 1,
         line_formatter=None,
     ) -> int:
         with open(log_path, "a") as log_fd:
@@ -73,50 +125,50 @@ class Runner:
             log_fd.write(f"=== attempt {attempt} @ {ts} ===\n")
             log_fd.flush()
 
-            with self.tty_ticker(label) as set_status:
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
 
-                def _stream():
-                    for chunk in iter(lambda: proc.stdout.read(4096), b""):
-                        text = chunk.decode(errors="replace")
-                        if line_formatter is not None:
-                            lines = text.splitlines(keepends=True)
-                            out = []
-                            for ln in lines:
-                                formatted = line_formatter(ln)
-                                if formatted is not None:
-                                    out.append(formatted if formatted.endswith("\n") else formatted + "\n")
-                            text = "".join(out)
-                        if text:
-                            log_fd.write(text)
-                            log_fd.flush()
+            def _stream():
+                for chunk in iter(lambda: proc.stdout.read(4096), b""):
+                    text = chunk.decode(errors="replace")
+                    if line_formatter is not None:
+                        lines = text.splitlines(keepends=True)
+                        out = []
+                        for ln in lines:
+                            formatted = line_formatter(ln)
+                            if formatted is not None:
+                                out.append(formatted if formatted.endswith("\n") else formatted + "\n")
+                        text = "".join(out)
+                    if text:
+                        log_fd.write(text)
+                        log_fd.flush()
 
-                streamer = threading.Thread(target=_stream, daemon=True)
-                streamer.start()
+            streamer = threading.Thread(target=_stream, daemon=True)
+            streamer.start()
 
+            rc = TIMEOUT_EXIT
+            try:
+                proc.wait(timeout=timeout)
+                rc = proc.returncode
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
                 rc = TIMEOUT_EXIT
-                try:
-                    proc.wait(timeout=timeout)
-                    rc = proc.returncode
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                    rc = TIMEOUT_EXIT
-                finally:
-                    streamer.join()
-
-                status = "ok" if rc == 0 else ("timeout" if rc == TIMEOUT_EXIT else f"exit {rc}")
-                set_status(status)
+            finally:
+                streamer.join()
 
         return rc
 
     def sleep(self, seconds: float, label: str = "waiting"):
         if seconds <= 0:
+            return
+        if self._active_stage is not None:
+            self._active_stage.update(label)
+            time.sleep(seconds)
             return
         is_tty = sys.stdout.isatty()
         padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)

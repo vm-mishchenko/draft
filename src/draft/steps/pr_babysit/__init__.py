@@ -50,39 +50,41 @@ class PrBabysitStep(Step):
         wt_dir = ctx.get("wt_dir")
 
         engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
-        for attempt in range(1, cfg["max_retries"] + 1):
+        with engine.stage(self.name) as s:
+            for attempt in range(1, cfg["max_retries"] + 1):
+                s.update(f"{attempt}/{cfg['max_retries']}")
 
-            try:
-                counts = _check_ci(pr_url)
-            except Exception:
-                counts = {"success": 0, "failure": 0, "pending": 1}
+                try:
+                    counts = _check_ci(pr_url)
+                except Exception:
+                    counts = {"success": 0, "failure": 0, "pending": 1}
 
-            total = sum(counts.values())
-            print(
-                f"CI: {counts['success']}/{total} passed, "
-                f"{counts['failure']} failed, "
-                f"{counts['pending']} pending"
-            )
-
-            if counts["failure"] == 0 and counts["pending"] == 0:
-                if _is_branch_clean(wt_dir):
-                    ctx.step_set(self.name, "attempts", attempt)
-                    ctx.save()
-                    print(f"PR is green: {pr_url}")
-                    return
-
-            if counts["failure"] > 0:
-                engine.run_stage(
-                    label=self.name,
-                    cmd=_build_claude_cmd(ctx),
-                    cwd=wt_dir,
-                    log_path=ctx.log_path(self.name),
-                    attempt=attempt,
-                    timeout=cfg["timeout"],
+                total = sum(counts.values())
+                print(
+                    f"CI: {counts['success']}/{total} passed, "
+                    f"{counts['failure']} failed, "
+                    f"{counts['pending']} pending"
                 )
 
-            ctx.step_set(self.name, "attempts", attempt)
-            ctx.save()
-            engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
+                if counts["failure"] == 0 and counts["pending"] == 0:
+                    if _is_branch_clean(wt_dir):
+                        ctx.step_set(self.name, "attempts", attempt)
+                        ctx.save()
+                        s.update(f"green ({attempt} checks)")
+                        print(f"PR is green: {pr_url}")
+                        return
+
+                if counts["failure"] > 0:
+                    engine.run_command(
+                        cmd=_build_claude_cmd(ctx),
+                        cwd=wt_dir,
+                        log_path=ctx.log_path(self.name),
+                        attempt=attempt,
+                        timeout=cfg["timeout"],
+                    )
+
+                ctx.step_set(self.name, "attempts", attempt)
+                ctx.save()
+                engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
 
         print(f"babysit-pr: exhausted attempts. PR: {pr_url}")
