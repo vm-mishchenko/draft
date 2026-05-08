@@ -635,7 +635,7 @@ def test_compose_active_steps_default():
 
     active, skipped = cmd._compose_active_steps("worktree", "open", False)
     assert [s.name for s in active] == ["worktree-create", "code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
-    assert skipped == set()
+    assert skipped == {"delete-worktree"}
 
 
 def test_compose_active_steps_no_worktree():
@@ -651,7 +651,7 @@ def test_compose_active_steps_skip_pr():
 
     active, skipped = cmd._compose_active_steps("worktree", "skip", True)
     assert [s.name for s in active] == ["worktree-create", "code-spec"]
-    assert skipped == {"push", "pr-open", "pr-view", "pr-babysit"}
+    assert skipped == {"push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"}
 
 
 def test_compose_active_steps_pr_reuse_skips_pr_open():
@@ -663,6 +663,7 @@ def test_compose_active_steps_pr_reuse_skips_pr_open():
     assert "pr-view" in names
     assert "pr-babysit" in names
     assert "pr-open" in skipped
+    assert "delete-worktree" in skipped
 
 
 # --- create-modes: runs.expected_steps with new keys ---
@@ -798,7 +799,7 @@ def test_continue_finished_with_deleted_worktree_exits_clean(tmp_path, capsys):
     wt = tmp_path / "gone"  # does not exist
 
     state = _continue_state(
-        completed=list(r.FULL_PIPELINE_STEPS),
+        completed=list(r.FULL_PIPELINE_STEPS) + ["delete-worktree"],
         wt_dir=str(wt),
         delete_worktree=True,
     )
@@ -1088,6 +1089,7 @@ def test_compose_active_steps_reuse_existing_skips_worktree_create():
     assert "worktree-create" not in names
     assert names == ["code-spec", "push", "pr-open", "pr-view", "pr-babysit"]
     assert "worktree-create" in skipped
+    assert "delete-worktree" in skipped
 
 
 def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
@@ -1096,7 +1098,7 @@ def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
     active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
     names = [s.name for s in active]
     assert names == ["code-spec", "push", "pr-view", "pr-babysit"]
-    assert skipped == {"worktree-create", "pr-open"}
+    assert skipped == {"worktree-create", "pr-open", "delete-worktree"}
 
 
 def test_compose_active_steps_reuse_existing_with_skip_pr():
@@ -1105,7 +1107,7 @@ def test_compose_active_steps_reuse_existing_with_skip_pr():
     active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
     names = [s.name for s in active]
     assert names == ["code-spec"]
-    assert skipped == {"worktree-create", "push", "pr-open", "pr-view", "pr-babysit"}
+    assert skipped == {"worktree-create", "push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"}
 
 
 def test_expected_steps_reuse_existing_open():
@@ -1144,7 +1146,7 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
     wt = tmp_path / "gone"  # does not exist
 
     state = _continue_state(
-        completed=["code-spec", "push", "pr-open", "pr-view", "pr-babysit"],
+        completed=["code-spec", "push", "pr-open", "pr-view", "pr-babysit", "delete-worktree"],
         wt_dir=str(wt),
         delete_worktree=True,
         worktree_mode="reuse-existing",
@@ -1201,3 +1203,201 @@ def test_preamble_no_skipped_annotation_for_active_step(capsys):
     out = capsys.readouterr().out
     assert "worktree-create\n" in out  # no suffix
     assert "[skipped" not in out
+
+
+# --- delete-worktree: _compose_active_steps ---
+
+
+def test_compose_active_steps_delete_worktree_included_for_worktree_mode():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "open", False, delete_worktree=True)
+    names = [s.name for s in active]
+    assert names[-1] == "delete-worktree"
+    assert "delete-worktree" not in skipped
+
+
+def test_compose_active_steps_delete_worktree_included_for_reuse_existing():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("reuse-existing", "open", False, delete_worktree=True)
+    names = [s.name for s in active]
+    assert names[-1] == "delete-worktree"
+    assert "delete-worktree" not in skipped
+
+
+def test_compose_active_steps_delete_worktree_skipped_when_false():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "open", False, delete_worktree=False)
+    names = [s.name for s in active]
+    assert "delete-worktree" not in names
+    assert "delete-worktree" in skipped
+
+
+def test_compose_active_steps_delete_worktree_skipped_for_no_worktree():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("no-worktree", "open", False, delete_worktree=True)
+    names = [s.name for s in active]
+    assert "delete-worktree" not in names
+    assert "delete-worktree" in skipped
+
+
+def test_compose_active_steps_skip_pr_with_delete_worktree():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps("worktree", "skip", True, delete_worktree=True)
+    names = [s.name for s in active]
+    assert names == ["worktree-create", "code-spec", "delete-worktree"]
+    assert "delete-worktree" not in skipped
+
+
+# --- delete-worktree: runs.expected_steps ---
+
+
+def test_expected_steps_delete_worktree_appended():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"delete_worktree": True}}
+    result = r.expected_steps(state)
+    assert result[-1] == "delete-worktree"
+
+
+def test_expected_steps_delete_worktree_skipped_when_false():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"delete_worktree": False}}
+    assert "delete-worktree" not in r.expected_steps(state)
+
+
+def test_expected_steps_delete_worktree_skipped_for_no_worktree():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"delete_worktree": True, "worktree_mode": "no-worktree", "skip_pr": True}}
+    assert "delete-worktree" not in r.expected_steps(state)
+
+
+def test_expected_steps_delete_worktree_included_for_reuse_existing():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {"delete_worktree": True, "worktree_mode": "reuse-existing", "pr_mode": "open"}}
+    result = r.expected_steps(state)
+    assert result[-1] == "delete-worktree"
+
+
+def test_expected_steps_legacy_delete_worktree_missing_defaults_false():
+    import draft.runs as r
+
+    state = {"completed": [], "data": {}}
+    assert "delete-worktree" not in r.expected_steps(state)
+
+
+# --- delete-worktree: command_continue ---
+
+
+def test_continue_only_delete_worktree_pending_worktree_absent_exits_clean(tmp_path, capsys):
+    import draft.command_continue as cmd_continue
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260506-100000"
+    run_dir.mkdir(parents=True)
+    wt = tmp_path / "gone"  # does not exist
+
+    state = _continue_state(
+        completed=list(r.FULL_PIPELINE_STEPS),
+        wt_dir=str(wt),
+        delete_worktree=True,
+    )
+    state["run_dir"] = str(run_dir)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260506-100000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cmd_continue.run(FakeArgs())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "already complete" in out
+
+
+# --- delete-worktree: DeleteWorktreeStep behavior ---
+
+
+def test_delete_worktree_step_path_missing_succeeds(tmp_path):
+    from draft.steps.delete_worktree import DeleteWorktreeStep
+    from pipeline import RunContext
+
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx.set("wt_dir", str(tmp_path / "nonexistent"))
+
+    DeleteWorktreeStep().run(ctx, None, None)  # must not raise
+
+
+def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
+    from draft.steps.delete_worktree import DeleteWorktreeStep
+    from pipeline import RunContext, StepError
+
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx.set("wt_dir", "")
+
+    with pytest.raises(StepError):
+        DeleteWorktreeStep().run(ctx, None, None)
+
+
+def test_delete_worktree_step_git_success(tmp_path):
+    from unittest.mock import MagicMock
+    from draft.steps.delete_worktree import DeleteWorktreeStep
+    from pipeline import RunContext
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx.set("wt_dir", str(wt))
+
+    with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.stdout = ""
+        DeleteWorktreeStep().run(ctx, None, None)
+
+    mock_run.assert_called_once_with(
+        ["git", "worktree", "remove", str(wt), "--force"],
+        capture_output=True, text=True,
+    )
+
+
+def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path):
+    from draft.steps.delete_worktree import DeleteWorktreeStep
+    from pipeline import RunContext
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx.set("wt_dir", str(wt))
+
+    with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 128
+        mock_run.return_value.stderr = "fatal: 'wt' is not a working tree"
+        mock_run.return_value.stdout = ""
+        DeleteWorktreeStep().run(ctx, None, None)  # must not raise
+
+
+def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
+    from draft.steps.delete_worktree import DeleteWorktreeStep
+    from pipeline import RunContext, StepError
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx.set("wt_dir", str(wt))
+
+    with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "fatal: internal error"
+        mock_run.return_value.stdout = ""
+        with pytest.raises(StepError):
+            DeleteWorktreeStep().run(ctx, None, None)

@@ -183,8 +183,11 @@ Steps run in this order:
 - `pr-open` — ask `claude` for a title and body, then `gh pr create --draft`
 - `pr-view` — resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
 - `pr-babysit` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
+- `delete-worktree` — remove the linked worktree with `git worktree remove --force`
 
 `--skip-pr` stops after `code-spec` and skips `push`, `pr-open`, `pr-view`, `pr-babysit`.
+
+`delete-worktree` is included only when `--delete-worktree` is set and `worktree_mode` is `worktree` or `reuse-existing`; it is skipped otherwise. If the worktree directory is already absent when the step runs, it succeeds without error (idempotent). This makes resume safe: re-running after a partial cleanup does not fail. Hooks at `steps.delete-worktree.hooks.<event>` are opt-in and fire only when the step is active; a skipped step fires no hooks.
 
 ## Config
 
@@ -234,6 +237,7 @@ Defaults per step:
 - `pr-open`: `max_retries=1`, `timeout=300`, `title_prefix=""`
 - `pr-view`: `max_retries=3`, `timeout=30`, `retry_delay=5`
 - `pr-babysit`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
+- `delete-worktree`: `max_retries=1`, `timeout=60`
 
 ## Hooks
 

@@ -4,6 +4,7 @@ from draft.steps.push import PushStep
 from draft.steps.pr_open import PrOpenStep
 from draft.steps.pr_view import PrViewStep
 from draft.steps.pr_babysit import PrBabysitStep
+from draft.steps.delete_worktree import DeleteWorktreeStep
 
 STEPS = [
     WorktreeCreateStep(),
@@ -12,4 +13,5 @@ STEPS = [
     PrOpenStep(),
     PrViewStep(),
     PrBabysitStep(),
+    DeleteWorktreeStep(),
 ]

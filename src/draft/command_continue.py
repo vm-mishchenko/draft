@@ -92,6 +92,7 @@ def run(args) -> int:
         "completed": ctx._completed,
         "data": dict(ctx._data),
     }
+    expected = runs.expected_steps(state_for_check)
     finished = runs.is_run_finished(state_for_check)
     worktree_mode = ctx.get("worktree_mode", "worktree")
     delete_worktree = bool(ctx.get("delete_worktree", False))
@@ -99,13 +100,18 @@ def run(args) -> int:
     repo = ctx.get("repo", "")
     wt_dir = ctx.get("wt_dir", "")
 
-    # Finished + worktree gone (--delete-worktree happy path): nothing to do
+    # Finished + worktree gone, OR only delete-worktree pending and worktree already absent
+    worktree_absent = bool(wt_dir and not Path(wt_dir).exists())
+    delete_wt_only_pending = (
+        "delete-worktree" in expected
+        and not ctx.is_completed("delete-worktree")
+        and all(ctx.is_completed(s) for s in expected if s != "delete-worktree")
+    )
     if (
-        finished
-        and worktree_mode in ("worktree", "reuse-existing")
+        worktree_mode in ("worktree", "reuse-existing")
         and delete_worktree
-        and wt_dir
-        and not Path(wt_dir).exists()
+        and worktree_absent
+        and (finished or delete_wt_only_pending)
     ):
         print(f"run '{run_id}' is already complete; worktree was deleted.")
         return 0
@@ -153,8 +159,7 @@ def run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
 
-    expected = set(runs.expected_steps(state_for_check))
-    active_steps = [s for s in STEPS if s.name in expected]
+    active_steps = [s for s in STEPS if s.name in set(expected)]
 
     _print_preamble(ctx, active_steps)
 
