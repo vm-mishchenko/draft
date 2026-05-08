@@ -8,6 +8,7 @@ from draft.runs import runs_base
 
 def register(subparsers):
     p = subparsers.add_parser("list", help="List the 15 most recent runs.")
+    p.add_argument("--json", action="store_true", default=False, help="Emit JSON.")
     p.set_defaults(func=run)
 
 
@@ -18,6 +19,34 @@ def _workspace_status(wt_dir: str) -> str:
         return "yes" if Path(wt_dir).is_dir() else "no"
     except OSError:
         return "-"
+
+
+def _row_data(run_dir: Path) -> dict:
+    running = _is_run_active(run_dir)
+    run_id = run_dir.name
+    project = run_dir.parent.name
+    state_path = run_dir / "state.json"
+    if not state_path.exists():
+        return {"run_id": run_id, "project": project, "state": "missing",
+                "stages_completed": None, "stages_total": None,
+                "running": running, "workspace": None, "branch": None, "pr_url": None}
+    try:
+        payload = json.loads(state_path.read_text())
+    except Exception:
+        return {"run_id": run_id, "project": project, "state": "corrupt",
+                "stages_completed": None, "stages_total": None,
+                "running": running, "workspace": None, "branch": None, "pr_url": None}
+    project = payload.get("data", {}).get("project", project) or project
+    stages_completed = len(payload.get("completed", []))
+    stages_total = len(runs.expected_steps(payload))
+    branch = payload.get("data", {}).get("branch") or None
+    pr_url = payload.get("data", {}).get("pr_url") or None
+    wt_dir = payload.get("data", {}).get("wt_dir") or ""
+    ws = _workspace_status(wt_dir)
+    workspace = None if ws == "-" else ws
+    return {"run_id": run_id, "project": project, "state": "ok",
+            "stages_completed": stages_completed, "stages_total": stages_total,
+            "running": running, "workspace": workspace, "branch": branch, "pr_url": pr_url}
 
 
 def _is_run_active(run_dir: Path) -> bool:
@@ -38,7 +67,10 @@ def _is_run_active(run_dir: Path) -> bool:
 def run(args) -> int:
     base = runs_base()
     if not base.exists():
-        print("no runs")
+        if getattr(args, "json", False):
+            print(json.dumps([], indent=2))
+        else:
+            print("no runs")
         return 0
 
     dirs = []
@@ -52,7 +84,15 @@ def run(args) -> int:
     dirs = sorted(dirs, key=lambda d: d.name, reverse=True)[:15]
 
     if not dirs:
-        print("no runs")
+        if getattr(args, "json", False):
+            print(json.dumps([], indent=2))
+        else:
+            print("no runs")
+        return 0
+
+    if getattr(args, "json", False):
+        rows = [_row_data(d) for d in dirs]
+        print(json.dumps(rows, indent=2))
         return 0
 
     header = f"{'RUN-ID':<18}  {'PROJECT':<20}  {'STAGES':<10}  {'RUNNING':<8}  {'WORKSPACE':<10}  {'BRANCH':<30}  PR"
@@ -60,27 +100,17 @@ def run(args) -> int:
     print("-" * len(header))
 
     for d in dirs:
-        running = "yes" if _is_run_active(d) else "-"
-        state_path = d / "state.json"
-        if not state_path.exists():
-            project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'-':<10}  {running:<8}  {'-':<10}  {'-':<30}  -")
-            continue
-        try:
-            payload = json.loads(state_path.read_text())
-        except Exception:
-            project = d.parent.name
-            print(f"{d.name:<18}  {project:<20}  {'corrupt':<10}  {running:<8}  {'-':<10}  {'-':<30}  -")
-            continue
-
-        total_steps = len(runs.expected_steps(payload))
-        project = payload.get("data", {}).get("project", d.parent.name) or d.parent.name
-        completed = len(payload.get("completed", []))
-        branch = payload.get("data", {}).get("branch", "-") or "-"
-        pr_url = payload.get("data", {}).get("pr_url", "") or "-"
-        wt_dir = payload.get("data", {}).get("wt_dir") or ""
-        workspace = _workspace_status(wt_dir)
-        stages = f"{completed}/{total_steps}"
-        print(f"{d.name:<18}  {project:<20}  {stages:<10}  {running:<8}  {workspace:<10}  {branch:<30}  {pr_url}")
+        row = _row_data(d)
+        running_str = "yes" if row["running"] else "-"
+        workspace_str = row["workspace"] if row["workspace"] is not None else "-"
+        branch_str = row["branch"] or "-"
+        pr_str = row["pr_url"] or "-"
+        if row["state"] == "missing":
+            stages_str = "-"
+        elif row["state"] == "corrupt":
+            stages_str = "corrupt"
+        else:
+            stages_str = f"{row['stages_completed']}/{row['stages_total']}"
+        print(f"{row['run_id']:<18}  {row['project']:<20}  {stages_str:<10}  {running_str:<8}  {workspace_str:<10}  {branch_str:<30}  {pr_str}")
 
     return 0
