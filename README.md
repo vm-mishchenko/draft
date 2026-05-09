@@ -206,11 +206,10 @@ Steps run in this order:
 - `implement-spec` — invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
 - `push-commits` — `git push -u origin HEAD`
 - `open-pr` — ask `claude` for a title and body, then `gh pr create --draft`
-- `view-pr` — resolve the PR URL via `gh pr view` (used when resuming a run that already pushed)
 - `babysit-pr` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
 - `delete-worktree` — remove the linked worktree with `git worktree remove --force`
 
-`--skip-pr` stops after `implement-spec` and skips `push-commits`, `open-pr`, `view-pr`, `babysit-pr`.
+`--skip-pr` stops after `implement-spec` and skips `push-commits`, `open-pr`, `babysit-pr`.
 
 `delete-worktree` is included only when `--delete-worktree` is set and `worktree_mode` is `worktree` or `reuse-existing`; it is skipped otherwise. If the worktree directory is already absent when the step runs, it succeeds without error (idempotent). This makes resume safe: re-running after a partial cleanup does not fail. Hooks at `steps.delete-worktree.hooks.<event>` are opt-in and fire only when the step is active; a skipped step fires no hooks.
 
@@ -260,7 +259,6 @@ Defaults per step:
 - `implement-spec`: `max_retries=10`, `timeout=1200`
 - `push-commits`: `max_retries=1`, `timeout=120`
 - `open-pr`: `max_retries=1`, `timeout=300`, `title_prefix=""`
-- `view-pr`: `max_retries=3`, `timeout=30`, `retry_delay=5`
 - `babysit-pr`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
 - `delete-worktree`: `max_retries=1`, `timeout=60`
 

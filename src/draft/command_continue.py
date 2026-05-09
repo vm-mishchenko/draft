@@ -174,7 +174,6 @@ def run(args) -> int:
             "implement-spec": 4,
             "push-commits": 5,
             "open-pr": 6,
-            "view-pr": 6,
         }.get(exc.step_name, 1)
         pid_file.unlink(missing_ok=True)
         return _exit_code
