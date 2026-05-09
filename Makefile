@@ -1,7 +1,7 @@
 VENV := .venv
 BIN  := $(VENV)/bin
 
-.PHONY: setup clean test
+.PHONY: setup clean test e2e
 
 setup:
 	python3 -m venv $(VENV)
@@ -16,4 +16,7 @@ clean:
 	rm -rf $(VENV) src/*.egg-info build dist
 
 test:
-	$(BIN)/pytest tests/
+	$(BIN)/pytest tests/ --ignore=tests/e2e
+
+e2e:
+	PATH="$(CURDIR)/$(BIN):$$PATH" $(BIN)/pytest tests/e2e/
