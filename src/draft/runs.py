@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-FULL_PIPELINE_STEPS = ("create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr")
+FULL_PIPELINE_STEPS = ("create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr")
 SKIP_PR_STEPS = ("create-worktree", "implement-spec")
 
 
@@ -17,7 +17,6 @@ def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool, d
         steps.append("push-commits")
         if pr_mode != "reuse":
             steps.append("open-pr")
-        steps.append("view-pr")
         steps.append("babysit-pr")
     if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
         steps.append("delete-worktree")

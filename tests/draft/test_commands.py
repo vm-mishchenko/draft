@@ -39,7 +39,7 @@ def _make_list_run(base, run_id, state):
     return run_dir
 
 
-def test_command_list_full_pipeline_shows_6(tmp_path, capsys):
+def test_command_list_full_pipeline_shows_5(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
@@ -51,7 +51,7 @@ def test_command_list_full_pipeline_shows_6(tmp_path, capsys):
 
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
-    assert "2/6" in capsys.readouterr().out
+    assert "2/5" in capsys.readouterr().out
 
 
 def test_command_list_skip_pr_shows_2(tmp_path, capsys):
@@ -69,7 +69,7 @@ def test_command_list_skip_pr_shows_2(tmp_path, capsys):
     assert "1/2" in capsys.readouterr().out
 
 
-def test_command_list_reuse_existing_shows_5(tmp_path, capsys):
+def test_command_list_reuse_existing_shows_4(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
@@ -81,10 +81,10 @@ def test_command_list_reuse_existing_shows_5(tmp_path, capsys):
 
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
-    assert "1/5" in capsys.readouterr().out
+    assert "1/4" in capsys.readouterr().out
 
 
-def test_command_list_reuse_pr_shows_5(tmp_path, capsys):
+def test_command_list_reuse_pr_shows_4(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
@@ -96,10 +96,10 @@ def test_command_list_reuse_pr_shows_5(tmp_path, capsys):
 
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
-    assert "2/5" in capsys.readouterr().out
+    assert "2/4" in capsys.readouterr().out
 
 
-def test_command_list_legacy_no_keys_shows_6(tmp_path, capsys):
+def test_command_list_legacy_no_keys_shows_5(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
@@ -111,7 +111,7 @@ def test_command_list_legacy_no_keys_shows_6(tmp_path, capsys):
 
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
-    assert "2/6" in capsys.readouterr().out
+    assert "2/5" in capsys.readouterr().out
 
 
 def test_command_list_missing_state_shows_dash(tmp_path, capsys):
@@ -544,7 +544,7 @@ def test_is_run_finished_full_pipeline(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {},
     }
     assert r.is_run_finished(state) is True
@@ -554,7 +554,7 @@ def test_is_run_finished_missing_pr_babysit(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr"],
         "data": {},
     }
     assert r.is_run_finished(state) is False
@@ -598,7 +598,7 @@ def _make_prune_args(**kwargs):
 
 def _full_state(branch="draft/feat"):
     return {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": branch},
     }
 
@@ -766,7 +766,7 @@ def test_prune_yes_delete_branch(tmp_path, capsys):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "draft/feat", "repo": str(repo_dir)},
     }
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=state)
@@ -869,7 +869,7 @@ def test_compose_active_steps_default():
     import draft.command_create as cmd
 
     active, skipped = cmd._compose_active_steps("worktree", "open", False)
-    assert [s.name for s in active] == ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"]
+    assert [s.name for s in active] == ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"]
     assert skipped == {"delete-worktree"}
 
 
@@ -886,7 +886,7 @@ def test_compose_active_steps_skip_pr():
 
     active, skipped = cmd._compose_active_steps("worktree", "skip", True)
     assert [s.name for s in active] == ["create-worktree", "implement-spec"]
-    assert skipped == {"push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"}
+    assert skipped == {"push-commits", "open-pr", "babysit-pr", "delete-worktree"}
 
 
 def test_compose_active_steps_pr_reuse_skips_pr_open():
@@ -895,7 +895,6 @@ def test_compose_active_steps_pr_reuse_skips_pr_open():
     active, skipped = cmd._compose_active_steps("worktree", "reuse", False)
     names = [s.name for s in active]
     assert "open-pr" not in names
-    assert "view-pr" in names
     assert "babysit-pr" in names
     assert "open-pr" in skipped
     assert "delete-worktree" in skipped
@@ -922,14 +921,14 @@ def test_expected_steps_no_worktree_open():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "no-worktree", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "babysit-pr")
 
 
 def test_expected_steps_pr_reuse():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "worktree", "pr_mode": "reuse"}}
-    assert r.expected_steps(state) == ("create-worktree", "implement-spec", "push-commits", "view-pr", "babysit-pr")
+    assert r.expected_steps(state) == ("create-worktree", "implement-spec", "push-commits", "babysit-pr")
 
 
 def test_expected_steps_no_worktree_skip_pr():
@@ -1322,7 +1321,7 @@ def test_compose_active_steps_reuse_existing_skips_worktree_create():
     active, skipped = cmd._compose_active_steps("reuse-existing", "open", False)
     names = [s.name for s in active]
     assert "create-worktree" not in names
-    assert names == ["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"]
+    assert names == ["implement-spec", "push-commits", "open-pr", "babysit-pr"]
     assert "create-worktree" in skipped
     assert "delete-worktree" in skipped
 
@@ -1332,7 +1331,7 @@ def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
 
     active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
     names = [s.name for s in active]
-    assert names == ["implement-spec", "push-commits", "view-pr", "babysit-pr"]
+    assert names == ["implement-spec", "push-commits", "babysit-pr"]
     assert skipped == {"create-worktree", "open-pr", "delete-worktree"}
 
 
@@ -1342,28 +1341,28 @@ def test_compose_active_steps_reuse_existing_with_skip_pr():
     active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
     names = [s.name for s in active]
     assert names == ["implement-spec"]
-    assert skipped == {"create-worktree", "push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"}
+    assert skipped == {"create-worktree", "push-commits", "open-pr", "babysit-pr", "delete-worktree"}
 
 
 def test_expected_steps_reuse_existing_open():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "babysit-pr")
 
 
 def test_expected_steps_reuse_existing_pr_reuse():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"}}
-    assert r.expected_steps(state) == ("implement-spec", "push-commits", "view-pr", "babysit-pr")
+    assert r.expected_steps(state) == ("implement-spec", "push-commits", "babysit-pr")
 
 
 def test_is_run_finished_reuse_existing():
     import draft.runs as r
 
     state = {
-        "completed": ["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
     }
     assert r.is_run_finished(state) is True
@@ -1381,7 +1380,7 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
     wt = tmp_path / "gone"  # does not exist
 
     state = _continue_state(
-        completed=["implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr", "delete-worktree"],
+        completed=["implement-spec", "push-commits", "open-pr", "babysit-pr", "delete-worktree"],
         wt_dir=str(wt),
         delete_worktree=True,
         worktree_mode="reuse-existing",
@@ -1902,7 +1901,7 @@ def test_status_done_all_steps_show_done(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "main", "wt_dir": None},
     }
     run_dir = _make_status_run(tmp_path, state=state)
@@ -1934,7 +1933,7 @@ def test_status_running_partial_shows_active(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "status:   running" in out
     lines = [l for l in out.splitlines() if l.strip()]
-    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"])]
+    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"])]
     statuses = [l.split()[-1] for l in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "active"
@@ -1958,7 +1957,7 @@ def test_status_stopped_partial_shows_stopped(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "status:   stopped" in out
     lines = [l for l in out.splitlines() if l.strip()]
-    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"])]
+    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"])]
     statuses = [l.split()[-1] for l in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "stopped"
@@ -1969,7 +1968,7 @@ def test_status_pr_url_printed_when_present(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
@@ -1987,7 +1986,7 @@ def test_status_pr_url_absent_not_printed(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "feat"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
@@ -2120,7 +2119,7 @@ def test_status_json_done_all_steps(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "main", "wt_dir": None},
     }
     run_dir = _make_status_run(tmp_path, state=state)
@@ -2198,7 +2197,7 @@ def test_status_json_pr_url_present(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "view-pr", "babysit-pr"],
+        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
         "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
