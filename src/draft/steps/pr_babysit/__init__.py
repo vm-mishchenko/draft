@@ -4,6 +4,9 @@ from pathlib import Path
 
 from pipeline import Step
 
+# seconds to wait before the first poll and after a push; not user-configurable, CI needs time to register a new commit
+INITIAL_PR_CHECK_DELAY = 15
+
 
 def _build_claude_cmd(ctx) -> list[str]:
     template = files("draft.steps.pr_babysit").joinpath("pr_babysit.md").read_text()
@@ -75,17 +78,18 @@ class PrBabysitStep(Step):
     name = "babysit-pr"
 
     def defaults(self) -> dict:
-        return {"max_retries": 100, "timeout": 1200, "retry_delay": 60, "checks_delay": 30}
+        return {"max_retries": 100, "timeout": 1200, "checks_delay": 60}
 
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         pr_url = ctx.get("pr_url", "")
         wt_dir = ctx.get("wt_dir")
 
-        engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
+        engine.sleep(INITIAL_PR_CHECK_DELAY, "waiting before pr-checks")
         with engine.stage(self.name) as s:
             for attempt in range(1, cfg["max_retries"] + 1):
                 s.update(f"{attempt}/{cfg['max_retries']}")
+                pushed_this_iter = False
 
                 try:
                     counts = _check_ci(pr_url)
@@ -130,9 +134,11 @@ class PrBabysitStep(Step):
                                 attempt=attempt,
                                 timeout=cfg["timeout"],
                             )
+                            pushed_this_iter = True
 
                 ctx.step_set(self.name, "attempts", attempt)
                 ctx.save()
-                engine.sleep(cfg["retry_delay"], "waiting before pr-checks")
+                next_delay = INITIAL_PR_CHECK_DELAY if pushed_this_iter else cfg["checks_delay"]
+                engine.sleep(next_delay, "waiting before pr-checks")
 
         print(f"babysit-pr: exhausted attempts. PR: {pr_url}")
