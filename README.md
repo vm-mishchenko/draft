@@ -8,6 +8,13 @@ CLI that takes a spec file (or inline prompt), runs it through an AI-powered pip
 - Run `make setup` and put the venv on your PATH (the command prints where it is)
 - Nuclear option: `make clean && make setup`
 
+## Requirements
+
+- Python 3.12+
+- `git` on `PATH`
+- [`claude`](https://docs.anthropic.com/en/docs/claude-code) CLI, authenticated
+- [`gh`](https://cli.github.com/) CLI, authenticated against the target repo
+
 ## Commands
 
 - [draft list](#draft-list) — list recent runs
@@ -202,12 +209,13 @@ A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/
 
 Steps run in this order:
 
-- `create-worktree` — create a linked git worktree on a fresh branch off the base branch
-- `implement-spec` — invoke `claude` with the spec, retry until it produces a clean tree with at least one commit, then run the `verify` hooks; if verification fails the errors are fed back into the next attempt
-- `push-commits` — `git push -u origin HEAD`
-- `open-pr` — ask `claude` for a title and body, then `gh pr create --draft`
-- `babysit-pr` — poll CI; when checks fail, hand them to `claude` to fix until everything is green
-- `delete-worktree` — remove the linked worktree with `git worktree remove --force`
+- `create-worktree` — prepare an isolated working copy on a fresh branch so the run never touches your current checkout
+- `implement-spec` — generate code from the spec, retry until the tree is clean with at least one commit, then run verification; failures feed back into the next attempt
+- `push-commits` — publish the branch to the remote
+- `open-pr` — draft a title and body from the spec and open a draft pull request
+- `view-pr` — locate the existing pull request when resuming a run that already pushed
+- `babysit-pr` — watch CI and feed failing checks back to the agent until everything goes green
+- `delete-worktree` — clean up the working copy once the run is done
 
 `--skip-pr` stops after `implement-spec` and skips `push-commits`, `open-pr`, `babysit-pr`.
 
@@ -225,7 +233,7 @@ steps:
   create-worktree:
     hooks:
       post:
-        - cmd: connect-global-agent
+        - cmd: pwd
   implement-spec:
     max_retries: 10
     timeout: 1200
