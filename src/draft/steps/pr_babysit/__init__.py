@@ -17,7 +17,17 @@ def _build_claude_cmd(ctx) -> list[str]:
                 spec = path.read_text()
             except OSError:
                 spec = ""
-    prompt = template.replace("{{PR_URL}}", pr_url).replace("{{SPEC}}", spec)
+    verify_errors = ctx.step_get("babysit-pr", "verify_errors", "")
+    if verify_errors:
+        verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
+    else:
+        verify_section = ""
+    prompt = (
+        template
+        .replace("{{PR_URL}}", pr_url)
+        .replace("{{SPEC}}", spec)
+        .replace("{{VERIFY_ERRORS}}", verify_section)
+    )
     return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read"]
 
 
@@ -38,6 +48,19 @@ def _check_ci(pr_url: str) -> dict[str, int]:
         else:
             counts["pending"] += 1
     return counts
+
+
+def _has_unpushed_commits(cwd: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "@{u}..HEAD"],
+        capture_output=True, text=True, cwd=cwd,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        return int(result.stdout.strip()) > 0
+    except ValueError:
+        return False
 
 
 def _is_branch_clean(cwd: str) -> bool:
@@ -92,6 +115,21 @@ class PrBabysitStep(Step):
                         attempt=attempt,
                         timeout=cfg["timeout"],
                     )
+                    if _is_branch_clean(wt_dir) and _has_unpushed_commits(wt_dir):
+                        results = lifecycle.run_hooks(self.name, "verify")
+                        failures = [r for r in results if r.rc != 0]
+                        if failures:
+                            errors = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
+                            ctx.step_set(self.name, "verify_errors", errors)
+                        else:
+                            ctx.step_set(self.name, "verify_errors", "")
+                            engine.run_command(
+                                cmd=["git", "push", "origin", "HEAD"],
+                                cwd=wt_dir,
+                                log_path=ctx.log_path(self.name),
+                                attempt=attempt,
+                                timeout=cfg["timeout"],
+                            )
 
                 ctx.step_set(self.name, "attempts", attempt)
                 ctx.save()

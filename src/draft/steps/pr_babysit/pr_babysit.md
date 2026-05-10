@@ -8,10 +8,13 @@ Your task:
 1. Look at the CI check failures using `gh pr checks` or by reading the repository
 2. Diagnose the root cause of each failure
 3. Fix the code to make the checks pass
-4. Commit your changes with a clear commit message
+4. Commit your changes with a clear commit message. Do not push.
 
 Focus only on fixing the failing checks. Do not make unrelated changes.
 
 ## Spec
 
 {{SPEC}}
+
+
+{{VERIFY_ERRORS}}
