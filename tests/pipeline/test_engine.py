@@ -88,7 +88,7 @@ def test_sleep_inside_stage_updates_status_no_countdown(capsys):
     with patch.object(sys.stdout, "isatty", return_value=False):
         with runner.stage("my-stage") as s:
             runner.sleep(0.01, "my-sleep-label")
-            assert s._status == "my-sleep-label"
+            assert s._status == "ok"  # prev_status restored after sleep
     captured = capsys.readouterr()
-    assert captured.out.rstrip().endswith("my-sleep-label")
+    assert captured.out.rstrip().endswith("ok")
     assert "s..." not in captured.out
