@@ -384,7 +384,7 @@ def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool, delet
     if worktree_mode in ("no-worktree", "reuse-existing"):
         skipped.add("create-worktree")
     if skip_pr:
-        skipped.update({"push-commits", "open-pr", "view-pr", "babysit-pr"})
+        skipped.update({"push-commits", "open-pr", "babysit-pr"})
     elif pr_mode == "reuse":
         skipped.add("open-pr")
     if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
@@ -569,7 +569,6 @@ def run(args) -> int:
             "implement-spec": 4,
             "push-commits": 5,
             "open-pr": 6,
-            "view-pr": 6,
         }.get(exc.step_name, 1)
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return _exit_code
