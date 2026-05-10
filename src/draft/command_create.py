@@ -189,6 +189,24 @@ def _reject_flag_conflicts(args) -> None:
         sys.exit(2)
 
 
+def _assert_spec_readable(spec_path: str) -> None:
+    p = Path(spec_path).expanduser()
+    try:
+        resolved = p.resolve(strict=True)
+    except FileNotFoundError:
+        print(f"error: spec file not found: {p.resolve()}", file=sys.stderr)
+        sys.exit(2)
+    except PermissionError:
+        print(f"error: cannot read spec file: {p.resolve()}", file=sys.stderr)
+        sys.exit(2)
+    if not resolved.is_file():
+        print(f"error: spec path is not a regular file: {resolved}", file=sys.stderr)
+        sys.exit(2)
+    if not os.access(resolved, os.R_OK):
+        print(f"error: cannot read spec file: {resolved}", file=sys.stderr)
+        sys.exit(2)
+
+
 def _current_head_branch(repo: str) -> str | None:
     result = subprocess.run(
         ["git", "symbolic-ref", "--short", "-q", "HEAD"],
@@ -428,6 +446,9 @@ def run(args) -> int:
         return 1
 
     _reject_flag_conflicts(args)
+
+    if args.spec_path and not args.prompt:
+        _assert_spec_readable(args.spec_path)
 
     # 1. Pre-flight
     _assert_git_repo()

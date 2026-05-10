@@ -862,6 +862,95 @@ def test_reject_flag_conflicts_no_op_when_clean():
     cmd._reject_flag_conflicts(_make_create_args())  # must not raise
 
 
+# --- create-modes: spec precheck ---
+
+
+def test_assert_spec_readable_accepts_existing_file(tmp_path):
+    import draft.command_create as cmd
+
+    spec = tmp_path / "spec.md"
+    spec.write_text("content")
+    cmd._assert_spec_readable(str(spec))  # must not raise
+
+
+def test_assert_spec_readable_missing_file(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._assert_spec_readable(str(tmp_path / "missing.md"))
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "spec file not found" in err
+    assert str(tmp_path / "missing.md") in err
+
+
+def test_assert_spec_readable_directory(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._assert_spec_readable(str(tmp_path))
+    assert exc.value.code == 2
+    assert "not a regular file" in capsys.readouterr().err
+
+
+def test_assert_spec_readable_broken_symlink(tmp_path, capsys):
+    import draft.command_create as cmd
+
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "ghost")
+    with pytest.raises(SystemExit) as exc:
+        cmd._assert_spec_readable(str(link))
+    assert exc.value.code == 2
+    assert "spec file not found" in capsys.readouterr().err
+
+
+def test_assert_spec_readable_unreadable_file(tmp_path, capsys):
+    import os
+    import draft.command_create as cmd
+
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses mode bits")
+    spec = tmp_path / "spec.md"
+    spec.write_text("content")
+    os.chmod(spec, 0o000)
+    try:
+        with pytest.raises(SystemExit) as exc:
+            cmd._assert_spec_readable(str(spec))
+        assert exc.value.code == 2
+        assert "cannot read spec file" in capsys.readouterr().err
+    finally:
+        os.chmod(spec, 0o600)
+
+
+def test_assert_spec_readable_relative_path(tmp_path, monkeypatch, capsys):
+    import draft.command_create as cmd
+
+    spec = tmp_path / "spec.md"
+    spec.write_text("content")
+    monkeypatch.chdir(tmp_path)
+    cmd._assert_spec_readable("spec.md")  # must not raise
+
+
+def test_assert_spec_readable_tilde_expansion(tmp_path, monkeypatch):
+    import draft.command_create as cmd
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    spec = tmp_path / "spec.md"
+    spec.write_text("content")
+    cmd._assert_spec_readable("~/spec.md")  # must not raise
+
+
+def test_run_exits_before_creating_run_dir(tmp_path, monkeypatch, capsys):
+    import draft.command_create as cmd
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    args = _make_create_args(spec_path=str(tmp_path / "missing.md"))
+    with pytest.raises(SystemExit) as exc:
+        cmd.run(args)
+    assert exc.value.code == 2
+    assert not (tmp_path / ".draft" / "runs").exists()
+
+
 # --- create-modes: _compose_active_steps ---
 
 
