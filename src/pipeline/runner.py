@@ -20,6 +20,7 @@ def _fmt_elapsed(seconds: float) -> str:
 class StageHandle:
     def __init__(self):
         self._status = "ok"
+        self._countdown_until: float | None = None
 
     def update(self, text: str) -> None:
         self._status = text
@@ -80,8 +81,11 @@ class Runner:
 
         def _tick():
             while not stop_event.is_set():
-                elapsed = _fmt_elapsed(time.monotonic() - start)
-                line = f"{padded} {elapsed:>7}  {handle._status}"
+                if handle._countdown_until is not None:
+                    slot = _fmt_elapsed(max(0.0, handle._countdown_until - time.monotonic()))
+                else:
+                    slot = _fmt_elapsed(time.monotonic() - start)
+                line = f"{padded} {slot:>7}  {handle._status}"
                 if is_tty:
                     sys.stdout.write(f"\r\033[K{line}")
                     sys.stdout.flush()
@@ -167,8 +171,15 @@ class Runner:
         if seconds <= 0:
             return
         if self._active_stage is not None:
-            self._active_stage.update(label)
-            time.sleep(seconds)
+            handle = self._active_stage
+            prev_status = handle._status
+            handle._status = label
+            handle._countdown_until = time.monotonic() + seconds
+            try:
+                time.sleep(seconds)
+            finally:
+                handle._countdown_until = None
+                handle._status = prev_status
             return
         is_tty = sys.stdout.isatty()
         padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
