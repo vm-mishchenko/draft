@@ -1,5 +1,6 @@
 import subprocess
 from importlib.resources import files
+from pathlib import Path
 
 from pipeline import Step
 
@@ -7,7 +8,16 @@ from pipeline import Step
 def _build_claude_cmd(ctx) -> list[str]:
     template = files("draft.steps.pr_babysit").joinpath("pr_babysit.md").read_text()
     pr_url = ctx.get("pr_url", "")
-    prompt = template.replace("{{PR_URL}}", pr_url)
+    spec_path = ctx.get("spec", "")
+    spec = ""
+    if spec_path:
+        path = Path(spec_path)
+        if path.is_file():
+            try:
+                spec = path.read_text()
+            except OSError:
+                spec = ""
+    prompt = template.replace("{{PR_URL}}", pr_url).replace("{{SPEC}}", spec)
     return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read"]
 
 

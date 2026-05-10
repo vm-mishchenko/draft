@@ -11,3 +11,7 @@ Your task:
 4. Commit your changes with a clear commit message
 
 Focus only on fixing the failing checks. Do not make unrelated changes.
+
+## Spec
+
+{{SPEC}}
