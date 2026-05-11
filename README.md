@@ -217,12 +217,12 @@ draft prune --all-projects --delete-branch --yes
 
 A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/<project>/<run-id>/<step>.log` and persists progress in `state.json`, so a failing run can be resumed with `draft continue`. Around every step `draft` fires lifecycle events that user-defined hooks can subscribe to.
 
-The `open-pr` step writes additional per-step logs: `open-pr-claude.log` (Claude output), `open-pr-git-diff.log` (captured `git diff` output), and `open-pr-git-log.log` (captured `git log` output). All three are written to the same run log directory.
+The `open-pr` step writes additional per-step logs: `open-pr-claude.log` (Claude output), `open-pr-git-diff.log` (captured `git diff` output), and `open-pr-git-log.log` (captured `git log` output). All three are written to the same run log directory. The `implement-spec` step writes `implement-spec-commit-msg.log` (commit-message agent and draft's git add/commit invocations).
 
 Steps run in this order:
 
 - `create-worktree` — prepare an isolated working copy on a fresh branch so the run never touches your current checkout
-- `implement-spec` — generate code from the spec, retry until the tree is clean with at least one commit, then run verification; failures feed back into the next attempt
+- `implement-spec` — generate code from the spec (the agent does not commit), then run verification; on green, a second agent run produces a commit message and draft creates the commit. Failures (no changes, verify, pre-commit hook) feed back into the next attempt.
 - `push-commits` — publish the branch to the remote
 - `open-pr` — draft a title and body from the spec and open a draft pull request
 - `babysit-pr` — watch CI and feed failing checks back to the agent until everything goes green
@@ -291,6 +291,7 @@ Set `implement-spec.prompt_template` to replace the built-in prompt with your ow
 
 - `{{SPEC}}` is required — draft substitutes the spec content here.
 - `{{VERIFY_ERRORS}}` is recommended — draft substitutes verify hook failures here on retries; omitting it means Claude will not see failure output and a warning is printed.
+- Your template must not instruct the agent to commit; draft creates the commit. Including a "commit your work" line will cause the agent to commit, leaving the working tree clean, and the step will loop until max_retries.
 
 **Path resolution**
 
@@ -371,4 +372,4 @@ Events available on every step:
 
 Step-specific events:
 
-- `implement-spec.verify` — invoked once `claude` produces a clean commit; non-zero output is fed back into the next `implement-spec` attempt as test failures
+- `implement-spec.verify` — invoked after the agent edits the working tree, before draft commits; non-zero output is fed back into the next implement-spec attempt as test failures, and the failing changes stay in the working tree.
