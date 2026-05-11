@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from draft.steps.code_spec import (
+from draft.steps.implement_spec import (
     _build_claude_cmd,
     _generate_commit_message,
     _has_changes,
@@ -12,7 +12,7 @@ from draft.steps.code_spec import (
     _render_verify_commands,
     _run_git_capture,
     _run_git_capture_allow_fail,
-    CodeSpecStep,
+    ImplementSpecStep,
 )
 from pipeline import StepError
 from pipeline.runner import TIMEOUT_EXIT
@@ -203,7 +203,7 @@ def test_render_verify_commands_multiline_cmd_verbatim():
 
 def test_bundled_commit_message_has_placeholders():
     from importlib.resources import files
-    content = files("draft.steps.code_spec").joinpath("commit_message.md").read_text()
+    content = files("draft.steps.implement_spec").joinpath("commit_message.md").read_text()
     assert "{{SPEC}}" in content
     assert "{{DIFF}}" in content
 
@@ -228,13 +228,13 @@ def test_template_loaded_once_across_retries(tmp_path):
             read_count += 1
         return original_read(self, *args, **kwargs)
 
-    step = CodeSpecStep()
+    step = ImplementSpecStep()
 
     with patch.object(Path, "read_text", counting_read):
-        with patch("draft.steps.code_spec._has_changes", return_value=True), \
-             patch("draft.steps.code_spec._generate_commit_message", return_value=("Add feature", False)), \
-             patch("draft.steps.code_spec._run_git_capture", return_value="abc123"), \
-             patch("draft.steps.code_spec._run_git_capture_allow_fail",
+        with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+             patch("draft.steps.implement_spec._generate_commit_message", return_value=("Add feature", False)), \
+             patch("draft.steps.implement_spec._run_git_capture", return_value="abc123"), \
+             patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                    return_value=subprocess.CompletedProcess([], 0, b"", b"")):
             step.run(ctx, engine, lifecycle)
 
@@ -268,11 +268,11 @@ def test_get_hooks_called_once_across_retries(tmp_path):
     lifecycle.get_hooks.return_value = [{"cmd": "make test"}]
     lifecycle.run_hooks.side_effect = run_hooks_side_effect
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Add feature", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="abc123"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Add feature", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="abc123"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
         step.run(ctx, engine, lifecycle)
 
@@ -290,11 +290,11 @@ def test_run_prompt_contains_verify_commands_when_configured(tmp_path):
     lifecycle.get_hooks.return_value = [{"cmd": "make test"}]
     lifecycle.run_hooks.return_value = []
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("msg", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("msg", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
         step.run(ctx, engine, lifecycle)
 
@@ -314,11 +314,11 @@ def test_run_prompt_no_verify_commands_section_when_empty(tmp_path):
     lifecycle.get_hooks.return_value = []
     lifecycle.run_hooks.return_value = []
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("msg", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("msg", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
         step.run(ctx, engine, lifecycle)
 
@@ -334,7 +334,7 @@ def test_custom_template_file_removed_before_step_runs(tmp_path):
     engine = _make_engine()
     lifecycle = MagicMock()
 
-    step = CodeSpecStep()
+    step = ImplementSpecStep()
     with pytest.raises(StepError) as exc_info:
         step.run(ctx, engine, lifecycle)
     assert exc_info.value.step_name == "implement-spec"
@@ -346,9 +346,9 @@ def test_no_changes_after_agent_loops_and_records_verify_error(tmp_path):
     engine = _make_engine()
     lifecycle = MagicMock()
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=False), \
-         patch("draft.steps.code_spec._generate_commit_message") as mock_gen:
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=False), \
+         patch("draft.steps.implement_spec._generate_commit_message") as mock_gen:
         with pytest.raises(StepError) as exc_info:
             step.run(ctx, engine, lifecycle)
 
@@ -382,11 +382,11 @@ def test_verify_failure_feeds_back_and_skips_commit(tmp_path):
     lifecycle.run_hooks.side_effect = hooks_side_effect
     engine = _make_engine()
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Add foo", False)) as mock_gen, \
-         patch("draft.steps.code_spec._run_git_capture", return_value="deadbeef\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Add foo", False)) as mock_gen, \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="deadbeef\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
         step.run(ctx, engine, lifecycle)
 
@@ -408,11 +408,11 @@ def test_commit_message_used_in_git_commit(tmp_path):
     lifecycle = MagicMock()
     lifecycle.run_hooks.return_value = []
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Subject line\n\nBody", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="abc\n") as mock_git, \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Subject line\n\nBody", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="abc\n") as mock_git, \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")) as mock_commit:
         step.run(ctx, engine, lifecycle)
 
@@ -429,11 +429,11 @@ def test_commit_message_fallback_recorded(tmp_path):
     lifecycle = MagicMock()
     lifecycle.run_hooks.return_value = []
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Implement spec", True)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Implement spec", True)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
         step.run(ctx, engine, lifecycle)
 
@@ -463,11 +463,11 @@ def test_pre_commit_hook_failure_feeds_back(tmp_path):
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Fix thing", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="sha123\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Fix thing", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="sha123\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
         step.run(ctx, engine, lifecycle)
 
     assert engine.run_command.call_count == 2
@@ -501,11 +501,11 @@ def test_pre_commit_hook_timeout_feeds_back(tmp_path):
             return subprocess.CompletedProcess(cmd, 0, b"", b"")
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message", return_value=("Fix thing", False)), \
-         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
-         patch("draft.steps.code_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message", return_value=("Fix thing", False)), \
+         patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.implement_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
         step.run(ctx, engine, lifecycle)
 
     calls = ctx.step_set.call_args_list
@@ -526,9 +526,9 @@ def test_max_retries_exhausted_raises_step_error(tmp_path):
     fail_result.output = "fail"
     lifecycle.run_hooks.return_value = [fail_result]
 
-    step = CodeSpecStep()
-    with patch("draft.steps.code_spec._has_changes", return_value=True), \
-         patch("draft.steps.code_spec._generate_commit_message") as mock_gen:
+    step = ImplementSpecStep()
+    with patch("draft.steps.implement_spec._has_changes", return_value=True), \
+         patch("draft.steps.implement_spec._generate_commit_message") as mock_gen:
         with pytest.raises(StepError) as exc_info:
             step.run(ctx, engine, lifecycle)
 

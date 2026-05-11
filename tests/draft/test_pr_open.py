@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-import draft.steps.pr_open as pr_open_mod
-from draft.steps.pr_open import PrOpenStep, STEP_DIR
+import draft.steps.open_pr as pr_open_mod
+from draft.steps.open_pr import OpenPrStep, STEP_DIR
 from pipeline import StepError
 from pipeline.runner import TIMEOUT_EXIT
 
@@ -57,7 +57,7 @@ def test_custom_body_path_used_in_prompt(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory()
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     first_call_cmd = engine.run_command.call_args_list[0].kwargs["cmd"]
     prompt = first_call_cmd[2]
@@ -72,7 +72,7 @@ def test_bundled_default_used_when_no_template(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory()
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     first_call_cmd = engine.run_command.call_args_list[0].kwargs["cmd"]
     prompt = first_call_cmd[2]
@@ -87,7 +87,7 @@ def test_missing_body_path_raises_step_error_without_claude(tmp_path, capsys):
     engine = _make_engine()
 
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
-        step = PrOpenStep()
+        step = OpenPrStep()
         with pytest.raises(StepError) as exc_info:
             step.run(ctx, engine, MagicMock())
 
@@ -113,7 +113,7 @@ def test_diff_content_in_prompt(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory(diff_stdout=diff_bytes)
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
     assert "diff --git a/x b/x" in prompt
@@ -129,7 +129,7 @@ def test_log_content_in_prompt(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory(log_stdout=log_bytes)
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
     assert "subject line" in prompt
@@ -144,7 +144,7 @@ def test_no_stale_placeholders_in_rendered_prompt(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory()
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
     for placeholder in ("{{PR_BODY_TEMPLATE}}", "{{GIT_DIFF}}", "{{GIT_LOG}}", "{{BASE_BRANCH}}", "{{PR_BODY_TEMPLATE_PATH}}"):
@@ -159,7 +159,7 @@ def test_subprocess_called_twice_before_claude(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory()
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     assert mock_sub.run.call_count == 2
     calls = mock_sub.run.call_args_list
@@ -181,7 +181,7 @@ def test_git_diff_log_files_written(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory(diff_stdout=diff_bytes, log_stdout=log_bytes)
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     diff_log = tmp_path / "open-pr-git-diff.log"
     git_log_file = tmp_path / "open-pr-git-log.log"
@@ -205,7 +205,7 @@ def test_git_diff_failure_raises_step_error(tmp_path, capsys):
         mock_sub.run.side_effect = fail_diff
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         with pytest.raises(StepError) as exc_info:
-            PrOpenStep().run(ctx, engine, MagicMock())
+            OpenPrStep().run(ctx, engine, MagicMock())
 
     assert exc_info.value.step_name == "open-pr"
     assert exc_info.value.exit_code == 128
@@ -230,7 +230,7 @@ def test_git_log_failure_raises_step_error(tmp_path):
         mock_sub.run.side_effect = fail_log
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         with pytest.raises(StepError) as exc_info:
-            PrOpenStep().run(ctx, engine, MagicMock())
+            OpenPrStep().run(ctx, engine, MagicMock())
 
     assert exc_info.value.exit_code == 1
     engine.run_command.assert_not_called()
@@ -248,7 +248,7 @@ def test_timeout_raises_step_error(tmp_path):
         mock_sub.run.side_effect = raise_timeout
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         with pytest.raises(StepError) as exc_info:
-            PrOpenStep().run(ctx, engine, MagicMock())
+            OpenPrStep().run(ctx, engine, MagicMock())
 
     assert exc_info.value.exit_code == TIMEOUT_EXIT
     diff_log = tmp_path / "open-pr-git-diff.log"
@@ -267,20 +267,20 @@ def test_non_utf8_template_does_not_raise(tmp_path):
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = _subprocess_factory()
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
-        PrOpenStep().run(ctx, engine, MagicMock())
+        OpenPrStep().run(ctx, engine, MagicMock())
 
     prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
     assert "�" in prompt
 
 
 def test_bundled_open_pr_md_contains_required_placeholders():
-    content = (STEP_DIR / "open-pr.md").read_text()
+    content = (STEP_DIR / "open_pr.md").read_text()
     for placeholder in ("<<<PR-TITLE>>>", "<<</PR-TITLE>>>", "<<<PR-BODY>>>", "<<</PR-BODY>>>",
                         "{{PR_BODY_TEMPLATE}}", "{{GIT_DIFF}}", "{{GIT_LOG}}"):
-        assert placeholder in content, f"missing {placeholder} in open-pr.md"
+        assert placeholder in content, f"missing {placeholder} in open_pr.md"
 
 
 def test_bundled_open_pr_md_no_old_placeholders():
-    content = (STEP_DIR / "open-pr.md").read_text()
+    content = (STEP_DIR / "open_pr.md").read_text()
     assert "{{BASE_BRANCH}}" not in content
     assert "{{PR_BODY_TEMPLATE_PATH}}" not in content

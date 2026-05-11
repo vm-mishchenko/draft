@@ -9,7 +9,7 @@ INITIAL_PR_CHECK_DELAY = 15
 
 
 def _build_claude_cmd(ctx) -> list[str]:
-    template = files("draft.steps.pr_babysit").joinpath("pr_babysit.md").read_text()
+    template = files("draft.steps.babysit_pr").joinpath("babysit_pr.md").read_text()
     pr_url = ctx.get("pr_url", "")
     spec_path = ctx.get("spec", "")
     spec = ""
@@ -74,7 +74,7 @@ def _is_branch_clean(cwd: str) -> bool:
     return result.stdout.strip() == ""
 
 
-class PrBabysitStep(Step):
+class BabysitPrStep(Step):
     name = "babysit-pr"
 
     def defaults(self) -> dict:

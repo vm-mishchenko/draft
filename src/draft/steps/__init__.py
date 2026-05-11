@@ -1,15 +1,15 @@
-from draft.steps.worktree_create import WorktreeCreateStep
-from draft.steps.code_spec import CodeSpecStep
-from draft.steps.push import PushStep
-from draft.steps.pr_open import PrOpenStep
-from draft.steps.pr_babysit import PrBabysitStep
+from draft.steps.create_worktree import CreateWorktreeStep
+from draft.steps.implement_spec import ImplementSpecStep
+from draft.steps.push_commits import PushCommitsStep
+from draft.steps.open_pr import OpenPrStep
+from draft.steps.babysit_pr import BabysitPrStep
 from draft.steps.delete_worktree import DeleteWorktreeStep
 
 STEPS = [
-    WorktreeCreateStep(),
-    CodeSpecStep(),
-    PushStep(),
-    PrOpenStep(),
-    PrBabysitStep(),
+    CreateWorktreeStep(),
+    ImplementSpecStep(),
+    PushCommitsStep(),
+    OpenPrStep(),
+    BabysitPrStep(),
     DeleteWorktreeStep(),
 ]

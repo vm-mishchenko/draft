@@ -1,7 +1,7 @@
 from pipeline import Step, StepError
 
 
-class PushStep(Step):
+class PushCommitsStep(Step):
     name = "push-commits"
 
     def defaults(self) -> dict:

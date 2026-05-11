@@ -37,7 +37,7 @@ def _branch_exists(repo: str, branch: str) -> bool:
     return bool(remote.stdout.strip())
 
 
-class WorktreeCreateStep(Step):
+class CreateWorktreeStep(Step):
     name = "create-worktree"
 
     def defaults(self) -> dict:

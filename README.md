@@ -310,7 +310,7 @@ steps:
     prompt_template: prompts/my_implement.md
 ```
 
-The default template lives at `src/draft/steps/code_spec/code_spec.md` — copy it as a starting point.
+The default template lives at `src/draft/steps/implement_spec/implement_spec.md` — copy it as a starting point.
 
 ### Custom PR body template
 
@@ -332,7 +332,7 @@ steps:
     pr_body_template: .draft/pr-template.md
 ```
 
-The bundled default lives at `src/draft/steps/pr_open/pull-request-template.md` — copy it as a starting point.
+The bundled default lives at `src/draft/steps/open_pr/pull-request-template.md` — copy it as a starting point.
 
 **Migration note**
 

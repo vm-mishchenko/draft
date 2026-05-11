@@ -1202,7 +1202,7 @@ def test_continue_drift_worktree_refuses(tmp_path, capsys):
 
 
 def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
-    from draft.steps.worktree_create import WorktreeCreateStep
+    from draft.steps.create_worktree import CreateWorktreeStep
     from pipeline import RunContext
 
     ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
@@ -1211,13 +1211,13 @@ def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
     ctx.set("wt_dir", "/tmp/wt")
     ctx.set("branch_source", "existing")
 
-    cmd = WorktreeCreateStep().cmd(ctx)
+    cmd = CreateWorktreeStep().cmd(ctx)
     assert cmd == ["git", "worktree", "add", "/tmp/wt", "foo"]
     assert "-b" not in cmd
 
 
 def test_worktree_create_new_branch_uses_dash_b(tmp_path):
-    from draft.steps.worktree_create import WorktreeCreateStep
+    from draft.steps.create_worktree import CreateWorktreeStep
     from pipeline import RunContext
 
     ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
@@ -1226,7 +1226,7 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
     ctx.set("wt_dir", "/tmp/wt")
     ctx.set("branch_source", "new")
 
-    cmd = WorktreeCreateStep().cmd(ctx)
+    cmd = CreateWorktreeStep().cmd(ctx)
     assert cmd == ["git", "worktree", "add", "/tmp/wt", "-b", "foo", "origin/main"]
 
 
