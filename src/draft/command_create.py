@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,12 @@ def register(subparsers):
         action="store_true",
         default=False,
         help="Remove the worktree on success (after pr-babysit green, or after commit if --skip-pr).",
+    )
+    p.add_argument(
+        "--run-id",
+        metavar="NAME",
+        default=None,
+        help="Custom run id (default: auto-generated timestamp).",
     )
     p.set_defaults(func=run)
 
@@ -176,6 +183,36 @@ def _apply_overrides(config: dict, overrides: list[str]) -> dict:
         step_name, key = key_path.split(".", 1)
         cfg.setdefault("steps", {}).setdefault(step_name, {})[key] = value
     return cfg
+
+
+_TIMESTAMP_RE = re.compile(r"^\d{6}-\d{6}$")
+_RUN_ID_CHARS_RE = re.compile(r"^[a-z0-9._-]+$")
+_RUN_ID_BORDER = frozenset("-_.")
+
+
+def _validate_run_id(run_id: str, project_name: str) -> None:
+    if not run_id:
+        print("error: --run-id must not be empty", file=sys.stderr)
+        sys.exit(2)
+    if len(run_id) > 64:
+        print(f"error: --run-id '{run_id}' exceeds 64 characters", file=sys.stderr)
+        sys.exit(2)
+    if not _RUN_ID_CHARS_RE.match(run_id):
+        print(f"error: --run-id '{run_id}' contains invalid characters (allowed: [a-z0-9._-])", file=sys.stderr)
+        sys.exit(2)
+    if run_id[0] in _RUN_ID_BORDER or run_id[-1] in _RUN_ID_BORDER:
+        print(f"error: --run-id '{run_id}' must not start or end with '-', '_', or '.'", file=sys.stderr)
+        sys.exit(2)
+    if ".." in run_id:
+        print(f"error: --run-id '{run_id}' must not contain '..'", file=sys.stderr)
+        sys.exit(2)
+    if _TIMESTAMP_RE.match(run_id):
+        print(f"error: --run-id '{run_id}' matches the reserved timestamp format (YYMMDD-HHMMSS)", file=sys.stderr)
+        sys.exit(2)
+    run_dir = runs.runs_base() / project_name / run_id
+    if run_dir.exists():
+        print(f"error: run '{run_id}' already exists in project '{project_name}'", file=sys.stderr)
+        sys.exit(2)
 
 
 # --- new helpers for create-modes ---
@@ -458,10 +495,14 @@ def run(args) -> int:
         _assert_on_path("gh")
 
     # 2. Run ID
-    run_id = time.strftime("%y%m%d-%H%M%S")
-
     repo = _repo_root()
     project_name = _project_name(repo)
+    if args.run_id:
+        _validate_run_id(args.run_id, project_name)
+        run_id = args.run_id
+    else:
+        run_id = time.strftime("%y%m%d-%H%M%S")
+
     base_branch = _resolve_base_branch(repo, args.from_branch)
 
     # 3. Resolve working branch (no side effects yet)

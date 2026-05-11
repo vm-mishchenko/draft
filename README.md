@@ -26,7 +26,7 @@ CLI that takes a spec file (or inline prompt), runs it through an AI-powered pip
 
 ### draft list
 
-List the 15 most recent runs across all projects.
+List the 15 most recent runs across all projects. Runs are ordered by `started_at` (from `state.json`), so custom run ids sort correctly by recency.
 
 ```
 draft list
@@ -59,6 +59,7 @@ draft create --prompt "TEXT"
 
 - `spec-path` — path to the spec file; omit when using `--prompt`
 - `--prompt TEXT` — inline prompt text instead of a spec file
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp; allowed characters: `[a-z0-9._-]`, 1–64 chars, must not start or end with `-`, `_`, or `.`, must not contain `..` or match `YYMMDD-HHMMSS`
 - `--from BRANCH` — base branch for the new worktree (default: `origin/main` or `origin/master`)
 - `--branch [NAME]` — use an existing local branch; omit `NAME` to use current `HEAD`
 - `--skip-pr` — stop after code generation; skip push and PR steps
@@ -67,6 +68,15 @@ draft create --prompt "TEXT"
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 
 `--branch` and `--from` are mutually exclusive. `--delete-worktree` and `--no-worktree` are mutually exclusive.
+
+**Example with custom run id**
+
+```
+draft create spec.md --run-id auth-refactor
+draft continue auth-refactor
+draft status auth-refactor
+draft delete auth-refactor
+```
 
 ### draft continue
 
@@ -78,7 +88,7 @@ draft continue [run-id]
 
 **Arguments**
 
-- `run-id` — run to resume; defaults to the most recent run
+- `run-id` — run to resume; defaults to the most recent run (determined by `started_at`, not id sort)
 
 ### draft delete
 

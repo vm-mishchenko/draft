@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 FULL_PIPELINE_STEPS = ("create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr")
@@ -40,20 +41,35 @@ def find_run_dir(run_id: str) -> Path | None:
     return None
 
 
+def _run_started_at(run_dir: Path) -> float | None:
+    state = load_state(run_dir)
+    if state is None:
+        return None
+    started = state.get("started_at", "")
+    if not started:
+        return None
+    try:
+        return datetime.fromisoformat(started).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def find_latest_run_dir() -> Path | None:
     base = runs_base()
     if not base.exists():
         return None
-    all_runs = []
+    candidates = []
     for project_dir in base.iterdir():
         if not project_dir.is_dir():
             continue
         for run_dir in project_dir.iterdir():
-            if run_dir.is_dir() and (run_dir / "state.json").exists():
-                all_runs.append(run_dir)
-    if not all_runs:
+            if not (run_dir.is_dir() and (run_dir / "state.json").exists()):
+                continue
+            started = _run_started_at(run_dir) or run_dir.stat().st_mtime
+            candidates.append((started, run_dir))
+    if not candidates:
         return None
-    return sorted(all_runs, key=lambda d: d.name, reverse=True)[0]
+    return max(candidates, key=lambda x: x[0])[1]
 
 
 def is_pid_alive(pid: int) -> bool:
