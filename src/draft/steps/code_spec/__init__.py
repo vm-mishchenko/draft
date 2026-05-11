@@ -1,10 +1,12 @@
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
 
 from pipeline import Step, StepError
+from pipeline.runner import TIMEOUT_EXIT
 
 
 def _format_event(line):
@@ -104,26 +106,101 @@ def _build_claude_cmd(ctx, template: str) -> list[str]:
     return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read", "--output-format", "stream-json", "--verbose"]
 
 
-def _is_branch_clean(cwd: str) -> bool:
+def _has_changes(cwd: str) -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         capture_output=True, text=True, cwd=cwd,
     )
-    return result.stdout.strip() == ""
+    return result.stdout.strip() != ""
 
 
-def _commits_ahead(cwd: str) -> int:
-    for remote_branch in ("origin/main", "origin/master"):
-        result = subprocess.run(
-            ["git", "rev-list", "--count", f"{remote_branch}..HEAD"],
-            capture_output=True, text=True, cwd=cwd,
+def _run_git_capture(cmd: list[str], cwd: str, timeout: float, log_path: Path) -> str:
+    try:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        with open(log_path, "ab") as f:
+            f.write(f"$ {' '.join(cmd)}\ntimed out after {timeout}s\n".encode())
+        raise StepError("implement-spec", TIMEOUT_EXIT)
+
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"$ {' '.join(cmd)}\n{stdout}")
+        if stderr:
+            f.write(stderr)
+    if result.returncode != 0:
+        raise StepError("implement-spec", result.returncode)
+    return stdout
+
+
+def _run_git_capture_allow_fail(cmd: list[str], cwd: str, timeout: float, log_path: Path) -> subprocess.CompletedProcess:
+    try:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        with open(log_path, "ab") as f:
+            f.write(f"$ {' '.join(cmd)}\ntimed out after {timeout}s\n".encode())
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=TIMEOUT_EXIT,
+            stdout=b"",
+            stderr=f"timed out after {timeout}s\n".encode(),
         )
-        if result.returncode == 0:
-            try:
-                return int(result.stdout.strip())
-            except ValueError:
-                continue
-    return 0
+
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"$ {' '.join(cmd)}\n{stdout}")
+        if stderr:
+            f.write(stderr)
+    return result
+
+
+def _run_claude_capture(cmd: list[str], cwd: str, timeout: float, log_path: Path, attempt: int) -> tuple[int, str]:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"=== commit-message attempt {attempt} @ {ts} ===\n")
+        f.write(f"$ {cmd[0]} -p <prompt omitted> ...\n")
+    try:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"timed out after {timeout}s\n\n")
+        return TIMEOUT_EXIT, ""
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(stdout)
+        if stderr:
+            f.write(stderr)
+        f.write(f"--- rc={result.returncode} ---\n\n")
+    return result.returncode, stdout
+
+
+def _generate_commit_message(spec: str, wt_dir: str, log_path: Path, timeout: float, max_attempts: int) -> tuple[str, bool]:
+    template = files("draft.steps.code_spec").joinpath("commit_message.md").read_text()
+    diff = _run_git_capture(["git", "diff", "HEAD"], wt_dir, 60, log_path)
+    status = _run_git_capture(["git", "status", "--porcelain"], wt_dir, 60, log_path)
+    diff_section = f"### git diff HEAD\n{diff}\n\n### git status --porcelain\n{status}"
+    prompt = template.replace("{{SPEC}}", spec).replace("{{DIFF}}", diff_section)
+    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Bash"]
+
+    for attempt in range(1, max_attempts + 1):
+        rc, stdout = _run_claude_capture(cmd, wt_dir, timeout, log_path, attempt)
+        msg = stdout.strip()
+        if rc == 0 and msg:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"--- selected commit message (attempt {attempt}) ---\n{msg}\n\n")
+            return msg, False
+
+    fallback = "Implement spec"
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"--- commit-message agent exhausted {max_attempts} attempts; falling back to '{fallback}' ---\n\n")
+    print(f"implement-spec: commit-message agent failed {max_attempts} times; using fallback '{fallback}'", file=sys.stderr)
+    return fallback, True
+
+
+def _format_pre_commit_errors(stdout: str, stderr: str) -> str:
+    return "## Pre-commit hook failures\n\n$ git commit\n" + (stdout + stderr).strip() + "\n"
 
 
 class CodeSpecStep(Step):
@@ -135,17 +212,20 @@ class CodeSpecStep(Step):
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
         wt_dir = ctx.get("wt_dir")
+        spec = ctx.get("spec", "")
+        commit_msg_log = ctx.run_dir / "implement-spec-commit-msg.log"
 
-        with engine.stage(self.name):
+        with engine.stage(self.name) as s:
             try:
-                template = _load_template(cfg)
+                impl_template = _load_template(cfg)
             except OSError as exc:
                 print(f"error: cannot read prompt_template: {exc}", file=sys.stderr)
                 raise StepError(self.name, 1)
 
             for attempt in range(1, cfg["max_retries"] + 1):
+                s.update(f"attempt {attempt}/{cfg['max_retries']} — implementing")
                 engine.run_command(
-                    cmd=_build_claude_cmd(ctx, template),
+                    cmd=_build_claude_cmd(ctx, impl_template),
                     cwd=wt_dir,
                     log_path=ctx.log_path(self.name),
                     attempt=attempt,
@@ -153,15 +233,49 @@ class CodeSpecStep(Step):
                     line_formatter=_format_event,
                 )
 
-                if _is_branch_clean(wt_dir) and _commits_ahead(wt_dir) > 0:
-                    results = lifecycle.run_hooks(self.name, "verify")
-                    failures = [r for r in results if r.rc != 0]
-                    if failures:
-                        errors = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
-                        ctx.step_set(self.name, "verify_errors", errors)
-                        continue
-                    ctx.step_set(self.name, "verify_errors", "")
+                if not _has_changes(wt_dir):
+                    ctx.step_set(self.name, "verify_errors",
+                        "agent produced no changes in the working tree; either the "
+                        "implementation was skipped or the agent committed despite "
+                        "the prompt instruction (the implementation prompt forbids commits)")
                     ctx.save()
-                    return
+                    continue
+
+                s.update(f"attempt {attempt}/{cfg['max_retries']} — verifying")
+                results = lifecycle.run_hooks(self.name, "verify")
+                failures = [r for r in results if r.rc != 0]
+                if failures:
+                    ctx.step_set(self.name, "verify_errors",
+                        "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures))
+                    ctx.save()
+                    continue
+
+                s.update(f"attempt {attempt}/{cfg['max_retries']} — writing commit")
+                message, used_fallback = _generate_commit_message(
+                    spec=spec,
+                    wt_dir=wt_dir,
+                    log_path=commit_msg_log,
+                    timeout=120,
+                    max_attempts=3,
+                )
+
+                _run_git_capture(["git", "add", "-A"], wt_dir, 60, commit_msg_log)
+                commit = _run_git_capture_allow_fail(
+                    ["git", "commit", "-m", message], wt_dir, 60, commit_msg_log,
+                )
+                if commit.returncode != 0:
+                    stdout_str = commit.stdout if isinstance(commit.stdout, str) else commit.stdout.decode("utf-8", errors="replace")
+                    stderr_str = commit.stderr if isinstance(commit.stderr, str) else commit.stderr.decode("utf-8", errors="replace")
+                    ctx.step_set(self.name, "verify_errors",
+                        _format_pre_commit_errors(stdout_str, stderr_str))
+                    ctx.save()
+                    continue
+
+                sha = _run_git_capture(["git", "rev-parse", "HEAD"], wt_dir, 30, commit_msg_log).strip()
+                ctx.step_set(self.name, "commit_sha", sha)
+                ctx.step_set(self.name, "commit_message_fallback", used_fallback)
+                ctx.step_set(self.name, "verify_errors", "")
+                ctx.save()
+                return
 
             raise StepError(self.name, 1)
