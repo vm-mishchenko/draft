@@ -35,29 +35,23 @@ class Step:
     name: str
 
     def defaults(self) -> dict:
-        return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        return {"timeout": None}
 
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
     def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None):
         cfg = ctx.config(self.name)
-        last_rc = 1
         with runner.stage(self.name):
-            for attempt in range(1, cfg["max_retries"] + 1):
-                rc = runner.run_command(
-                    cmd=self.cmd(ctx),
-                    cwd=ctx.get("cwd"),
-                    log_path=ctx.log_path(self.name),
-                    attempt=attempt,
-                    timeout=cfg["timeout"],
-                )
-                if rc == 0:
-                    return
-                last_rc = rc
-                if attempt < cfg["max_retries"]:
-                    runner.sleep(cfg["retry_delay"])
-            raise StepError(self.name, last_rc)
+            rc = runner.run_command(
+                cmd=self.cmd(ctx),
+                cwd=ctx.get("cwd"),
+                log_path=ctx.log_path(self.name),
+                attempt=1,
+                timeout=cfg.get("timeout"),
+            )
+            if rc != 0:
+                raise StepError(self.name, rc)
 
 
 class Pipeline:

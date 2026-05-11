@@ -14,7 +14,7 @@ def tmp_run_dir(tmp_path):
 
 
 def make_ctx(tmp_run_dir):
-    return RunContext("260505-120000", tmp_run_dir, step_configs={"my-step": {"max_retries": 3}})
+    return RunContext("260505-120000", tmp_run_dir, step_configs={"my-step": {"timeout": 5}})
 
 
 def test_save_and_load_roundtrip(tmp_run_dir):
@@ -65,5 +65,5 @@ def test_log_path(tmp_run_dir):
 
 def test_config_returns_step_config(tmp_run_dir):
     ctx = make_ctx(tmp_run_dir)
-    assert ctx.config("my-step") == {"max_retries": 3}
+    assert ctx.config("my-step") == {"timeout": 5}
     assert ctx.config("unknown-step") == {}

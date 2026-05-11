@@ -36,7 +36,7 @@ def test_custom_body_path_used_in_prompt(tmp_path):
     tpl = tmp_path / "my_template.md"
     tpl.write_text("## Summary\n")
 
-    cfg = {"max_retries": 1, "timeout": 300, "retry_delay": 0, "title_prefix": "", "pr_body_template": str(tpl)}
+    cfg = {"timeout": 300, "title_prefix": "", "pr_body_template": str(tpl)}
     ctx = _make_ctx(cfg)
     engine = _make_engine()
 
@@ -49,7 +49,7 @@ def test_custom_body_path_used_in_prompt(tmp_path):
 
 
 def test_bundled_default_used_when_no_template(tmp_path):
-    cfg = {"max_retries": 1, "timeout": 300, "retry_delay": 0, "title_prefix": ""}
+    cfg = {"timeout": 300, "title_prefix": ""}
     ctx = _make_ctx(cfg)
     engine = _make_engine()
 
@@ -64,7 +64,7 @@ def test_bundled_default_used_when_no_template(tmp_path):
 
 def test_missing_body_path_raises_step_error_without_claude(tmp_path, capsys):
     missing = tmp_path / "gone.md"
-    cfg = {"max_retries": 1, "timeout": 300, "retry_delay": 0, "title_prefix": "", "pr_body_template": str(missing)}
+    cfg = {"timeout": 300, "title_prefix": "", "pr_body_template": str(missing)}
     ctx = _make_ctx(cfg)
     engine = _make_engine()
 

@@ -11,9 +11,9 @@ def test_load_config_merges_global_and_project(tmp_path):
     global_dir.mkdir(parents=True)
     (global_dir / "config.yaml").write_text(textwrap.dedent("""\
         steps:
-          code-spec:
+          implement-spec:
             max_retries: 3
-          push:
+          push-commits:
             timeout: 60
     """))
 
@@ -22,21 +22,19 @@ def test_load_config_merges_global_and_project(tmp_path):
     project_dir.mkdir(parents=True)
     (project_dir / "config.yaml").write_text(textwrap.dedent("""\
         steps:
-          code-spec:
+          implement-spec:
             max_retries: 7
     """))
 
-    # patch Path.home() won't work easily; test _deep_merge directly via load_config internals
-    from draft import config as cfg_module
     import unittest.mock as mock
 
     with mock.patch.object(Path, "home", return_value=tmp_path / "home"):
         result = load_config(str(repo_dir))
 
     # project wins
-    assert result["steps"]["code-spec"]["max_retries"] == 7
+    assert result["steps"]["implement-spec"]["max_retries"] == 7
     # global-only key preserved
-    assert result["steps"]["push"]["timeout"] == 60
+    assert result["steps"]["push-commits"]["timeout"] == 60
 
 
 def test_load_config_malformed_yaml_raises(tmp_path):
@@ -52,30 +50,30 @@ def test_load_config_malformed_yaml_raises(tmp_path):
 
 
 def test_step_config_merges_defaults_and_overrides():
-    config = {"steps": {"code-spec": {"max_retries": 5, "timeout": 600}}}
-    defaults = {"max_retries": 10, "timeout": 1200, "retry_delay": 0}
-    result = step_config(config, "code-spec", defaults)
-    assert result == {"max_retries": 5, "timeout": 600, "retry_delay": 0}
+    config = {"steps": {"implement-spec": {"max_retries": 5, "timeout": 600}}}
+    defaults = {"max_retries": 10, "timeout": 1200}
+    result = step_config(config, "implement-spec", defaults)
+    assert result == {"max_retries": 5, "timeout": 600}
 
 
 def test_step_config_strips_hooks():
     config = {
         "steps": {
-            "code-spec": {
+            "implement-spec": {
                 "max_retries": 5,
                 "hooks": {"pre": [{"cmd": "echo hi"}]},
             }
         }
     }
-    defaults = {"max_retries": 10, "timeout": None, "retry_delay": 0}
-    result = step_config(config, "code-spec", defaults)
+    defaults = {"max_retries": 10, "timeout": None}
+    result = step_config(config, "implement-spec", defaults)
     assert "hooks" not in result
     assert result["max_retries"] == 5
 
 
 def test_step_config_no_overrides_uses_defaults():
     config = {}
-    defaults = {"max_retries": 1, "timeout": None, "retry_delay": 0}
+    defaults = {"timeout": None}
     result = step_config(config, "missing-step", defaults)
     assert result == defaults
 
@@ -98,7 +96,7 @@ def test_validate_config_no_steps_is_ok():
 
 
 def test_validate_config_no_hooks_is_ok():
-    validate_config({"steps": {"s": {"max_retries": 3}}})
+    validate_config({"steps": {"implement-spec": {"max_retries": 3}}})
 
 
 def test_validate_config_rejects_retry():
@@ -139,6 +137,32 @@ def test_validate_config_rejects_non_dict_entry():
 def test_validate_config_rejects_non_list_event():
     with pytest.raises(ConfigError):
         validate_config({"steps": {"s": {"hooks": {"pre": "echo hi"}}}})
+
+
+def test_validate_config_rejects_retry_delay_on_any_step():
+    for step in ("implement-spec", "babysit-pr", "create-worktree"):
+        with pytest.raises(ConfigError) as exc:
+            validate_config({"steps": {step: {"retry_delay": 0}}})
+        assert step in str(exc.value)
+        assert "retry_delay" in str(exc.value)
+
+
+def test_validate_config_rejects_max_retries_on_single_shot_steps():
+    for step in ("create-worktree", "push-commits", "open-pr", "delete-worktree"):
+        with pytest.raises(ConfigError) as exc:
+            validate_config({"steps": {step: {"max_retries": 2}}})
+        assert step in str(exc.value)
+        assert "runs once" in str(exc.value)
+
+
+def test_validate_config_accepts_max_retries_on_looping_steps():
+    validate_config({"steps": {"implement-spec": {"max_retries": 5}}})
+    validate_config({"steps": {"babysit-pr": {"max_retries": 50}}})
+
+
+def test_validate_config_non_mapping_step_value_is_skipped():
+    validate_config({"steps": {"create-worktree": None}})
+    validate_config({"steps": {"create-worktree": ["list"]}})
 
 
 # --- resolve_prompt_template ---
