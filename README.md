@@ -217,6 +217,8 @@ draft prune --all-projects --delete-branch --yes
 
 A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/<project>/<run-id>/<step>.log` and persists progress in `state.json`, so a failing run can be resumed with `draft continue`. Around every step `draft` fires lifecycle events that user-defined hooks can subscribe to.
 
+The `open-pr` step writes additional per-step logs: `open-pr-claude.log` (Claude output), `open-pr-git-diff.log` (captured `git diff` output), and `open-pr-git-log.log` (captured `git log` output). All three are written to the same run log directory.
+
 Steps run in this order:
 
 - `create-worktree` — prepare an isolated working copy on a fresh branch so the run never touches your current checkout
@@ -268,7 +270,7 @@ Step-specific fields:
 - `implement-spec.max_retries` — maximum implementation attempts before failing the step
 - `babysit-pr.max_retries` — maximum babysit iterations before giving up
 - `open-pr.title_prefix` — string prepended to the PR title
-- `open-pr.pr_body_template` — path to a file the agent reads as structural guidance for the PR body; supports `~` and is resolved relative to the project root
+- `open-pr.pr_body_template` — path to a file used as structural guidance for the PR body; supports `~` and is resolved relative to the project root; contents are inlined into the prompt (not passed as a path)
 - `babysit-pr.checks_delay` — seconds to wait before the next CI poll
 - `implement-spec.prompt_template` — path to a file that fully replaces the built-in implement-spec prompt; supports `~` and is resolved relative to the project root
 
@@ -310,7 +312,7 @@ The default template lives at `src/draft/steps/code_spec/code_spec.md` — copy 
 
 ### Custom PR body template
 
-Set `open-pr.pr_body_template` to give the agent a file with structural guidance for the PR body. The file is passed as a path for the agent to read; its contents are not substituted or interpolated.
+Set `open-pr.pr_body_template` to give the agent a file with structural guidance for the PR body. Before invoking Claude, `draft` precomputes the body template content, `git diff <base>..HEAD`, and `git log <base>..HEAD --format=%s%n%n%b`, and inlines all three directly into the prompt — Claude does not read any files or run any git commands itself. Note that prompt size grows linearly with diff and log length on branches with many changes.
 
 **Path resolution**
 
