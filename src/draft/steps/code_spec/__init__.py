@@ -95,14 +95,32 @@ def _load_template(cfg: dict) -> str:
     return files("draft.steps.code_spec").joinpath("code_spec.md").read_text()
 
 
-def _build_claude_cmd(ctx, template: str) -> list[str]:
+def _render_verify_commands(entries: list[dict]) -> str:
+    cmds = [e["cmd"] for e in entries if isinstance(e, dict) and e.get("cmd")]
+    if not cmds:
+        return ""
+    block = "\n".join(cmds)
+    return (
+        "## Verify commands\n\n"
+        "Draft will run the following after your changes. "
+        "Run them yourself before finishing if practical.\n\n"
+        f"```bash\n{block}\n```"
+    )
+
+
+def _build_claude_cmd(ctx, template: str, verify_commands: str) -> list[str]:
     spec = ctx.get("spec", "")
     verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
     if verify_errors:
         verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
     else:
         verify_section = ""
-    prompt = template.replace("{{SPEC}}", spec).replace("{{VERIFY_ERRORS}}", verify_section)
+    prompt = (
+        template
+        .replace("{{SPEC}}", spec)
+        .replace("{{VERIFY_COMMANDS}}", verify_commands)
+        .replace("{{VERIFY_ERRORS}}", verify_section)
+    )
     return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read", "--output-format", "stream-json", "--verbose"]
 
 
@@ -222,10 +240,12 @@ class CodeSpecStep(Step):
                 print(f"error: cannot read prompt_template: {exc}", file=sys.stderr)
                 raise StepError(self.name, 1)
 
+            verify_commands = _render_verify_commands(lifecycle.get_hooks(self.name, "verify"))
+
             for attempt in range(1, cfg["max_retries"] + 1):
                 s.update(f"attempt {attempt}/{cfg['max_retries']} — implementing")
                 engine.run_command(
-                    cmd=_build_claude_cmd(ctx, impl_template),
+                    cmd=_build_claude_cmd(ctx, impl_template, verify_commands),
                     cwd=wt_dir,
                     log_path=ctx.log_path(self.name),
                     attempt=attempt,

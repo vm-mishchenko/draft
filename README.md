@@ -290,6 +290,7 @@ Set `implement-spec.prompt_template` to replace the built-in prompt with your ow
 **Template contract**
 
 - `{{SPEC}}` is required — draft substitutes the spec content here.
+- `{{VERIFY_COMMANDS}}` is optional — draft substitutes the list of configured `steps.implement-spec.hooks.verify` commands here as a fenced bash block; omit it to suppress the section (no warning). The rendered block is informational; the agent is encouraged but not required to run the commands before finishing.
 - `{{VERIFY_ERRORS}}` is recommended — draft substitutes verify hook failures here on retries; omitting it means Claude will not see failure output and a warning is printed.
 - Your template must not instruct the agent to commit; draft creates the commit. Including a "commit your work" line will cause the agent to commit, leaving the working tree clean, and the step will loop until max_retries.
 
