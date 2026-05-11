@@ -2395,3 +2395,117 @@ def test_validate_overrides_malformed_is_ignored():
     import draft.command_create as cmd
 
     cmd._validate_overrides(["foo"])  # must not raise
+
+
+# --- command_init ---
+
+def _run_init(tmp_path):
+    import draft.command_init as ci
+    with patch("draft.command_init._repo_root", return_value=str(tmp_path)):
+        return ci.run(object())
+
+
+def test_init_happy_path(tmp_path, capsys):
+    import yaml
+    result = _run_init(tmp_path)
+    assert result == 0
+    target = tmp_path / ".draft" / "config.yaml"
+    assert target.exists()
+    out = capsys.readouterr().out
+    assert out.strip() == str(target)
+
+
+def test_init_pipeline_order(tmp_path):
+    import yaml
+    _run_init(tmp_path)
+    data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
+    assert list(data["steps"].keys()) == [
+        "create-worktree",
+        "implement-spec",
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+        "delete-worktree",
+    ]
+
+
+def test_init_values_match_defaults(tmp_path):
+    import yaml
+    from draft.steps import STEPS
+    from draft.config import _LOOPING_STEPS
+    _run_init(tmp_path)
+    data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
+    for step in STEPS:
+        d = step.defaults()
+        cfg = data["steps"][step.name]
+        if "timeout" in d:
+            assert cfg["timeout"] == d["timeout"]
+        if step.name in _LOOPING_STEPS and "max_retries" in d:
+            assert cfg["max_retries"] == d["max_retries"]
+        if step.name not in _LOOPING_STEPS:
+            assert "max_retries" not in cfg
+
+
+def test_init_already_exists(tmp_path, capsys):
+    draft_dir = tmp_path / ".draft"
+    draft_dir.mkdir()
+    target = draft_dir / "config.yaml"
+    target.write_text("existing content")
+
+    result = _run_init(tmp_path)
+    assert result == 1
+    err = capsys.readouterr().err
+    assert str(target) in err
+    assert "delete" in err
+    assert target.read_text() == "existing content"
+
+
+def test_init_draft_is_file(tmp_path, capsys):
+    draft_file = tmp_path / ".draft"
+    draft_file.write_text("not a dir")
+
+    result = _run_init(tmp_path)
+    assert result == 1
+    err = capsys.readouterr().err
+    assert "not a directory" in err
+    assert draft_file.read_text() == "not a dir"
+
+
+def test_init_not_in_git_repo(tmp_path, capsys):
+    import subprocess
+    import draft.command_init as ci
+    with patch("draft.command_init._repo_root", side_effect=subprocess.CalledProcessError(128, "git")):
+        result = ci.run(object())
+    assert result == 1
+    assert "git repository" in capsys.readouterr().err
+    assert not (tmp_path / ".draft").exists()
+
+
+def test_init_round_trip_load_config(tmp_path):
+    import yaml
+    from draft.config import load_config
+    _run_init(tmp_path)
+    cfg = load_config(str(tmp_path))
+    data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
+    assert cfg["steps"] == data["steps"]
+
+
+def test_init_argparse_wiring():
+    import argparse
+    import draft.command_init as ci
+    parser = argparse.ArgumentParser()
+    subs = parser.add_subparsers()
+    ci.register(subs)
+    args = parser.parse_args(["init"])
+    assert args.func is ci.run
+
+
+def test_init_cli_has_init_subcommand():
+    import argparse
+    import draft.cli as cli_mod
+    import draft.command_init as ci
+    parser = argparse.ArgumentParser()
+    subs = parser.add_subparsers()
+    ci.register(subs)
+    choices = subs.choices
+    assert "init" in choices
