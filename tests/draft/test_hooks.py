@@ -228,3 +228,80 @@ def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
 
     assert len(results) == 1
     assert results[0].rc == 2
+
+
+# --- HookRunner.get_hooks ---
+
+def test_get_hooks_returns_configured_entries(tmp_path):
+    config = {
+        "steps": {
+            "implement-spec": {
+                "hooks": {
+                    "verify": [{"cmd": "make test"}, {"cmd": "make lint"}]
+                }
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+    result = runner.get_hooks("implement-spec", "verify")
+    assert result == [{"cmd": "make test"}, {"cmd": "make lint"}]
+
+
+def test_get_hooks_returns_empty_for_unknown_step(tmp_path):
+    config = {"steps": {"implement-spec": {"hooks": {"verify": [{"cmd": "make test"}]}}}}
+    runner = _runner(config, tmp_path, tmp_path)
+    assert runner.get_hooks("unknown-step", "verify") == []
+
+
+def test_get_hooks_returns_empty_for_known_step_no_hooks_key(tmp_path):
+    config = {"steps": {"implement-spec": {"timeout": 60}}}
+    runner = _runner(config, tmp_path, tmp_path)
+    assert runner.get_hooks("implement-spec", "verify") == []
+
+
+def test_get_hooks_returns_empty_for_known_step_missing_event(tmp_path):
+    config = {"steps": {"implement-spec": {"hooks": {"pre": [{"cmd": "echo hi"}]}}}}
+    runner = _runner(config, tmp_path, tmp_path)
+    assert runner.get_hooks("implement-spec", "verify") == []
+
+
+def test_get_hooks_does_not_invoke_subprocess(tmp_path):
+    import subprocess as sp
+    config = {
+        "steps": {
+            "implement-spec": {
+                "hooks": {"verify": [{"cmd": "make test"}]}
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+    original_run = sp.run
+    called = []
+
+    def spy(*args, **kwargs):
+        called.append(args)
+        return original_run(*args, **kwargs)
+
+    import unittest.mock as mock
+    with mock.patch("subprocess.run", side_effect=spy):
+        runner.get_hooks("implement-spec", "verify")
+
+    assert called == []
+
+
+# --- DraftLifecycle.get_hooks ---
+
+def test_lifecycle_get_hooks_delegates_to_runner(tmp_path):
+    config = {
+        "steps": {
+            "implement-spec": {
+                "hooks": {
+                    "verify": [{"cmd": "make test"}]
+                }
+            }
+        }
+    }
+    runner = _runner(config, tmp_path, tmp_path)
+    lifecycle = DraftLifecycle(runner)
+    result = lifecycle.get_hooks("implement-spec", "verify")
+    assert result == [{"cmd": "make test"}]

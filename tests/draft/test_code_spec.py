@@ -9,6 +9,7 @@ from draft.steps.code_spec import (
     _generate_commit_message,
     _has_changes,
     _load_template,
+    _render_verify_commands,
     _run_git_capture,
     _run_git_capture_allow_fail,
     CodeSpecStep,
@@ -56,14 +57,14 @@ def test_load_template_returns_custom_content(tmp_path):
 
 def test_build_claude_cmd_substitutes_spec(tmp_path):
     tpl = tmp_path / "tpl.md"
-    tpl.write_text("Spec: {{SPEC}} Errors: {{VERIFY_ERRORS}}")
+    tpl.write_text("Spec: {{SPEC}} Commands: {{VERIFY_COMMANDS}} Errors: {{VERIFY_ERRORS}}")
     template = tpl.read_text()
 
     ctx = MagicMock()
     ctx.get.return_value = "my spec content"
     ctx.step_get.return_value = ""
 
-    cmd = _build_claude_cmd(ctx, template)
+    cmd = _build_claude_cmd(ctx, template, "")
     prompt = cmd[2]
     assert "my spec content" in prompt
     assert "{{SPEC}}" not in prompt
@@ -74,16 +75,130 @@ def test_build_claude_cmd_uses_bundled_template():
     ctx = MagicMock()
     ctx.get.return_value = "the spec"
     ctx.step_get.return_value = ""
-    cmd = _build_claude_cmd(ctx, bundled)
+    cmd = _build_claude_cmd(ctx, bundled, "")
     prompt = cmd[2]
     assert "the spec" in prompt
     assert "{{SPEC}}" not in prompt
+
+
+def test_build_claude_cmd_substitutes_verify_commands(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = ""
+
+    verify_commands = "## Verify commands\n\n```bash\nmake test\n```"
+    cmd = _build_claude_cmd(ctx, template, verify_commands)
+    prompt = cmd[2]
+    assert "make test" in prompt
+    assert "{{VERIFY_COMMANDS}}" not in prompt
+
+
+def test_build_claude_cmd_empty_verify_commands_collapses_marker(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = ""
+
+    cmd = _build_claude_cmd(ctx, template, "")
+    prompt = cmd[2]
+    assert "{{VERIFY_COMMANDS}}" not in prompt
+    assert "## Verify commands" not in prompt
+
+
+def test_build_claude_cmd_template_without_verify_commands_marker(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = ""
+
+    cmd = _build_claude_cmd(ctx, template, "## Verify commands\n\n```bash\nmake test\n```")
+    prompt = cmd[2]
+    assert "spec" in prompt
+    assert "{{SPEC}}" not in prompt
+
+
+def test_build_claude_cmd_all_substitutions_work_together(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "my spec"
+    ctx.step_get.return_value = "errors here"
+
+    verify_commands = "## Verify commands\n\n```bash\nmake test\n```"
+    cmd = _build_claude_cmd(ctx, template, verify_commands)
+    prompt = cmd[2]
+    assert "my spec" in prompt
+    assert "make test" in prompt
+    assert "errors here" in prompt
+    assert "{{SPEC}}" not in prompt
+    assert "{{VERIFY_COMMANDS}}" not in prompt
+    assert "{{VERIFY_ERRORS}}" not in prompt
 
 
 def test_bundled_code_spec_no_commit_instruction():
     bundled = _load_template({})
     assert "Commit your work" not in bundled
     assert "must not run `git commit`" in bundled
+
+
+def test_bundled_code_spec_has_verify_commands_marker():
+    bundled = _load_template({})
+    assert "{{VERIFY_COMMANDS}}" in bundled
+
+
+def test_render_verify_commands_empty_list():
+    assert _render_verify_commands([]) == ""
+
+
+def test_render_verify_commands_none_like_input():
+    assert _render_verify_commands([]) == ""
+
+
+def test_render_verify_commands_single_entry():
+    result = _render_verify_commands([{"cmd": "make test"}])
+    assert "## Verify commands" in result
+    assert "Run them yourself before finishing if practical" in result
+    assert "```bash" in result
+    assert "make test" in result
+
+
+def test_render_verify_commands_multiple_entries_in_order():
+    result = _render_verify_commands([{"cmd": "make lint"}, {"cmd": "make test"}])
+    assert result.index("make lint") < result.index("make test")
+    assert result.count("```bash") == 1
+
+
+def test_render_verify_commands_ignores_timeout():
+    result = _render_verify_commands([{"cmd": "make test", "timeout": 120}])
+    assert "120" not in result
+    assert "timeout" not in result
+
+
+def test_render_verify_commands_skips_entry_without_cmd():
+    result = _render_verify_commands([{"timeout": 30}])
+    assert result == ""
+
+
+def test_render_verify_commands_skips_entry_with_empty_cmd():
+    result = _render_verify_commands([{"cmd": ""}])
+    assert result == ""
+
+
+def test_render_verify_commands_multiline_cmd_verbatim():
+    result = _render_verify_commands([{"cmd": "step1\nstep2"}])
+    assert "step1\nstep2" in result
 
 
 def test_bundled_commit_message_has_placeholders():
@@ -124,6 +239,91 @@ def test_template_loaded_once_across_retries(tmp_path):
             step.run(ctx, engine, lifecycle)
 
     assert read_count == 1
+
+
+def test_get_hooks_called_once_across_retries(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}\n")
+
+    cfg = {"max_retries": 2, "timeout": 60, "prompt_template": str(tpl)}
+    ctx = _make_ctx(cfg, spec="s", tmp_path=tmp_path)
+    engine = _make_engine()
+
+    fail_result = MagicMock()
+    fail_result.rc = 1
+    fail_result.cmd = "make test"
+    fail_result.output = "boom"
+
+    verify_call_count = 0
+
+    def run_hooks_side_effect(step_name, event):
+        nonlocal verify_call_count
+        if event == "verify":
+            verify_call_count += 1
+            if verify_call_count == 1:
+                return [fail_result]
+        return []
+
+    lifecycle = MagicMock()
+    lifecycle.get_hooks.return_value = [{"cmd": "make test"}]
+    lifecycle.run_hooks.side_effect = run_hooks_side_effect
+
+    step = CodeSpecStep()
+    with patch("draft.steps.code_spec._has_changes", return_value=True), \
+         patch("draft.steps.code_spec._generate_commit_message", return_value=("Add feature", False)), \
+         patch("draft.steps.code_spec._run_git_capture", return_value="abc123"), \
+         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+               return_value=subprocess.CompletedProcess([], 0, b"", b"")):
+        step.run(ctx, engine, lifecycle)
+
+    lifecycle.get_hooks.assert_called_once_with("implement-spec", "verify")
+
+
+def test_run_prompt_contains_verify_commands_when_configured(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}\n")
+
+    cfg = {"max_retries": 1, "timeout": 60, "prompt_template": str(tpl)}
+    ctx = _make_ctx(cfg, spec="s", tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.get_hooks.return_value = [{"cmd": "make test"}]
+    lifecycle.run_hooks.return_value = []
+
+    step = CodeSpecStep()
+    with patch("draft.steps.code_spec._has_changes", return_value=True), \
+         patch("draft.steps.code_spec._generate_commit_message", return_value=("msg", False)), \
+         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+               return_value=subprocess.CompletedProcess([], 0, b"", b"")):
+        step.run(ctx, engine, lifecycle)
+
+    prompt = engine.run_command.call_args[1]["cmd"][2]
+    assert "## Verify commands" in prompt
+    assert "make test" in prompt
+
+
+def test_run_prompt_no_verify_commands_section_when_empty(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}\n")
+
+    cfg = {"max_retries": 1, "timeout": 60, "prompt_template": str(tpl)}
+    ctx = _make_ctx(cfg, spec="s", tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.get_hooks.return_value = []
+    lifecycle.run_hooks.return_value = []
+
+    step = CodeSpecStep()
+    with patch("draft.steps.code_spec._has_changes", return_value=True), \
+         patch("draft.steps.code_spec._generate_commit_message", return_value=("msg", False)), \
+         patch("draft.steps.code_spec._run_git_capture", return_value="sha\n"), \
+         patch("draft.steps.code_spec._run_git_capture_allow_fail",
+               return_value=subprocess.CompletedProcess([], 0, b"", b"")):
+        step.run(ctx, engine, lifecycle)
+
+    prompt = engine.run_command.call_args[1]["cmd"][2]
+    assert "## Verify commands" not in prompt
 
 
 def test_custom_template_file_removed_before_step_runs(tmp_path):

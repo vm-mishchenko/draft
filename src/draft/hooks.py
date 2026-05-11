@@ -65,6 +65,9 @@ class HookRunner:
         self._run_dir = Path(run_dir)
         self._engine = engine
 
+    def get_hooks(self, step_name: str, event: str) -> list[dict]:
+        return list(self._steps_config.get(step_name, {}).get("hooks", {}).get(event, []) or [])
+
     def run(self, step_name: str, event: str) -> list[HookResult]:
         entries = (
             self._steps_config
@@ -156,3 +159,6 @@ class DraftLifecycle(PipelineLifecycle):
 
     def run_hooks(self, step_name: str, event: str) -> list[HookResult]:
         return self._hooks.run(step_name, event)
+
+    def get_hooks(self, step_name: str, event: str) -> list[dict]:
+        return self._hooks.get_hooks(step_name, event)
