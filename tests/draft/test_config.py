@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from draft.config import ConfigError, load_config, resolve_prompt_template, step_config, validate_config
+from draft.config import ConfigError, load_config, resolve_pr_body_template, resolve_prompt_template, step_config, validate_config
 
 
 def test_load_config_merges_global_and_project(tmp_path):
@@ -248,3 +248,113 @@ def test_resolve_prompt_template_empty_string_value(tmp_path):
     config = _make_config("")
     with pytest.raises(ConfigError):
         resolve_prompt_template(config, str(tmp_path))
+
+
+# --- resolve_pr_body_template ---
+
+def _make_pr_config(path_value):
+    return {"steps": {"open-pr": {"pr_body_template": path_value}}}
+
+
+def test_resolve_pr_body_template_no_key_returns_unchanged():
+    config = {"steps": {"open-pr": {"title_prefix": "foo"}}}
+    result = resolve_pr_body_template(config, "/some/repo")
+    assert result == config
+
+
+def test_resolve_pr_body_template_no_steps_returns_unchanged():
+    config = {}
+    result = resolve_pr_body_template(config, "/some/repo")
+    assert result == config
+
+
+def test_resolve_pr_body_template_relative_path_resolved(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "pr_template.md"
+    tpl.write_text("## Summary\n")
+
+    config = _make_pr_config("pr_template.md")
+    result = resolve_pr_body_template(config, str(repo))
+    assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
+
+
+def test_resolve_pr_body_template_tilde_path_expanded(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    tpl = home / "pr_template.md"
+    tpl.write_text("## Summary\n")
+    monkeypatch.setenv("HOME", str(home))
+
+    config = _make_pr_config("~/pr_template.md")
+    result = resolve_pr_body_template(config, str(tmp_path / "repo"))
+    assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
+
+
+def test_resolve_pr_body_template_absolute_path(tmp_path):
+    tpl = tmp_path / "pr_template.md"
+    tpl.write_text("## Summary\n")
+
+    config = _make_pr_config(str(tpl))
+    result = resolve_pr_body_template(config, "/unrelated/repo")
+    assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
+
+
+def test_resolve_pr_body_template_path_is_directory(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = _make_pr_config(str(repo))
+    with pytest.raises(ConfigError, match=str(repo.resolve())):
+        resolve_pr_body_template(config, str(repo))
+
+
+def test_resolve_pr_body_template_path_missing(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    missing = repo / "nonexistent.md"
+    config = _make_pr_config(str(missing))
+    with pytest.raises(ConfigError, match=str(missing.resolve())):
+        resolve_pr_body_template(config, str(repo))
+
+
+def test_resolve_pr_body_template_empty_file(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "empty.md"
+    tpl.write_text("")
+    config = _make_pr_config(str(tpl))
+    with pytest.raises(ConfigError):
+        resolve_pr_body_template(config, str(repo))
+
+
+def test_resolve_pr_body_template_non_utf8(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "bad.md"
+    tpl.write_bytes(b"\xff\xfe invalid utf-8 \x80\x81")
+    config = _make_pr_config(str(tpl))
+    with pytest.raises(ConfigError, match="UTF-8"):
+        resolve_pr_body_template(config, str(repo))
+
+
+def test_resolve_pr_body_template_non_string_value(tmp_path):
+    config = _make_pr_config(42)
+    with pytest.raises(ConfigError):
+        resolve_pr_body_template(config, str(tmp_path))
+
+
+def test_resolve_pr_body_template_empty_string_value(tmp_path):
+    config = _make_pr_config("")
+    with pytest.raises(ConfigError):
+        resolve_pr_body_template(config, str(tmp_path))
+
+
+def test_resolve_pr_body_template_valid_rewrites_to_absolute(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "template.md"
+    tpl.write_text("## Summary\n")
+
+    config = _make_pr_config("template.md")
+    result = resolve_pr_body_template(config, str(repo))
+    assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
