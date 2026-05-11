@@ -20,7 +20,7 @@ def _make_ctx(cfg, spec="my spec", verify_errors=""):
 
 
 def test_load_template_returns_bundled_default_when_no_path():
-    cfg = {"max_retries": 1, "timeout": 60, "retry_delay": 0}
+    cfg = {"timeout": 60}
     result = _load_template(cfg)
     assert "{{SPEC}}" in result
 
@@ -28,7 +28,7 @@ def test_load_template_returns_bundled_default_when_no_path():
 def test_load_template_returns_custom_content(tmp_path):
     tpl = tmp_path / "custom.md"
     tpl.write_text("Custom {{SPEC}} template {{VERIFY_ERRORS}}")
-    cfg = {"max_retries": 1, "timeout": 60, "retry_delay": 0, "prompt_template": str(tpl)}
+    cfg = {"timeout": 60, "prompt_template": str(tpl)}
     result = _load_template(cfg)
     assert result == "Custom {{SPEC}} template {{VERIFY_ERRORS}}"
 
@@ -63,7 +63,7 @@ def test_template_loaded_once_across_retries(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}\n")
 
-    cfg = {"max_retries": 3, "timeout": 60, "retry_delay": 0, "prompt_template": str(tpl)}
+    cfg = {"max_retries": 3, "timeout": 60, "prompt_template": str(tpl)}
 
     ctx = _make_ctx(cfg, spec="s")
     engine = MagicMock()
@@ -95,7 +95,7 @@ def test_template_loaded_once_across_retries(tmp_path):
 
 def test_custom_template_file_removed_before_step_runs(tmp_path):
     tpl = tmp_path / "gone.md"
-    cfg = {"max_retries": 1, "timeout": 60, "retry_delay": 0, "prompt_template": str(tpl)}
+    cfg = {"max_retries": 1, "timeout": 60, "prompt_template": str(tpl)}
 
     ctx = _make_ctx(cfg)
     engine = MagicMock()

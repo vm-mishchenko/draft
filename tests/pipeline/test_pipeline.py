@@ -21,7 +21,7 @@ class AlwaysOkStep(Step):
     name = "ok-step"
 
     def defaults(self):
-        return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        return {"timeout": None}
 
     def cmd(self, ctx):
         return ["true"]
@@ -31,30 +31,16 @@ class AlwaysFailStep(Step):
     name = "fail-step"
 
     def defaults(self):
-        return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        return {"timeout": None}
 
     def cmd(self, ctx):
-        return ["false"]
-
-
-class CountingStep(Step):
-    name = "counting-step"
-
-    def __init__(self):
-        self.call_count = 0
-
-    def defaults(self):
-        return {"max_retries": 3, "timeout": None, "retry_delay": 0}
-
-    def cmd(self, ctx):
-        self.call_count += 1
         return ["false"]
 
 
 # --- Pipeline tests ---
 
 def test_pipeline_skips_completed_steps(tmp_path):
-    ctx = make_ctx(tmp_path, {"ok-step": {"max_retries": 1, "timeout": None, "retry_delay": 0}})
+    ctx = make_ctx(tmp_path, {"ok-step": {"timeout": None}})
     ctx.mark_done("ok-step")
     ctx.save()
 
@@ -62,7 +48,7 @@ def test_pipeline_skips_completed_steps(tmp_path):
 
     class TrackStep(Step):
         name = "ok-step"
-        def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        def defaults(self): return {"timeout": None}
         def run(self, ctx, engine, lifecycle=None): ran.append(self.name)
 
     Pipeline([TrackStep()]).run(ctx, Runner())
@@ -70,13 +56,13 @@ def test_pipeline_skips_completed_steps(tmp_path):
 
 
 def test_pipeline_step_error_propagates_with_lifecycle(tmp_path):
-    ctx = make_ctx(tmp_path, {"fail-step": {"max_retries": 1, "timeout": None, "retry_delay": 0}})
+    ctx = make_ctx(tmp_path, {"fail-step": {"timeout": None}})
 
     lc = MagicMock(spec=PipelineLifecycle)
 
     class ImmediateFailStep(Step):
         name = "fail-step"
-        def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        def defaults(self): return {"timeout": None}
         def run(self, ctx, engine, lifecycle=None): raise StepError("fail-step", 1)
 
     with pytest.raises(StepError):
@@ -89,7 +75,7 @@ def test_pipeline_step_error_propagates_with_lifecycle(tmp_path):
 
 
 def test_pipeline_lifecycle_order(tmp_path):
-    ctx = make_ctx(tmp_path, {"ok-step": {"max_retries": 1, "timeout": None, "retry_delay": 0}})
+    ctx = make_ctx(tmp_path, {"ok-step": {"timeout": None}})
     events = []
 
     class RecordingLifecycle(PipelineLifecycle):
@@ -100,38 +86,59 @@ def test_pipeline_lifecycle_order(tmp_path):
 
     class OkStep(Step):
         name = "ok-step"
-        def defaults(self): return {"max_retries": 1, "timeout": None, "retry_delay": 0}
+        def defaults(self): return {"timeout": None}
         def run(self, ctx, engine, lifecycle=None): pass
 
     Pipeline([OkStep()]).run(ctx, Runner(), lifecycle=RecordingLifecycle())
     assert events == ["before", "success", "after"]
 
 
-def test_step_default_run_retries_on_failure(tmp_path):
-    step_configs = {"counting-step": {"max_retries": 3, "timeout": None, "retry_delay": 0}}
-    ctx = make_ctx(tmp_path, step_configs)
-    step = CountingStep()
-    engine = Runner()
-
-    with pytest.raises(StepError) as exc_info:
-        step.run(ctx, engine)
-
-    assert exc_info.value.step_name == "counting-step"
-    assert step.call_count == 3
-
-
-def test_step_default_run_raises_after_max_retries(tmp_path):
-    step_configs = {"fail-step": {"max_retries": 2, "timeout": None, "retry_delay": 0}}
-    ctx = make_ctx(tmp_path, step_configs)
+def test_step_default_run_is_one_shot(tmp_path):
+    class OkCmd(Step):
+        name = "ok-step"
+        def defaults(self): return {"timeout": None}
+        def cmd(self, ctx): return ["true"]
 
     class FailCmd(Step):
         name = "fail-step"
-        def defaults(self): return {"max_retries": 2, "timeout": None, "retry_delay": 0}
+        def defaults(self): return {"timeout": None}
         def cmd(self, ctx): return ["false"]
 
+    ok_dir = tmp_path / "ok"
+    ok_dir.mkdir()
+    ctx_ok = make_ctx(ok_dir, {"ok-step": {"timeout": None}})
+    OkCmd().run(ctx_ok, Runner())
+
+    fail_dir = tmp_path / "fail"
+    fail_dir.mkdir()
+    ctx_fail = make_ctx(fail_dir, {"fail-step": {"timeout": None}})
     with pytest.raises(StepError) as exc_info:
-        FailCmd().run(ctx, Runner())
+        FailCmd().run(ctx_fail, Runner())
     assert exc_info.value.exit_code != 0
+    assert exc_info.value.step_name == "fail-step"
+
+    mock_runner = MagicMock()
+    stage_cm = MagicMock()
+    stage_cm.__enter__ = MagicMock(return_value=MagicMock())
+    stage_cm.__exit__ = MagicMock(return_value=False)
+    mock_runner.stage.return_value = stage_cm
+    mock_runner.run_command.return_value = 7
+
+    mock_dir = tmp_path / "mock"
+    mock_dir.mkdir()
+    ctx_mock = make_ctx(mock_dir, {"fail-step": {"timeout": None}})
+    with pytest.raises(StepError) as exc_info2:
+        FailCmd().run(ctx_mock, mock_runner)
+    assert exc_info2.value.exit_code == 7
+    assert mock_runner.run_command.call_count == 1
+
+
+def test_step_defaults_is_timeout_only():
+    class MyStep(Step):
+        name = "my-step"
+        def cmd(self, ctx): return []
+
+    assert MyStep().defaults() == {"timeout": None}
 
 
 def test_engine_timeout_returns_timeout_exit(tmp_path):

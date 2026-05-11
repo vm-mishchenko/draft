@@ -115,15 +115,25 @@ def resolve_pr_body_template(config: dict, repo: str) -> dict:
 
 
 _HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
+_FORBIDDEN_STEP_KEYS = frozenset({"retry_delay"})
+_LOOPING_STEPS = frozenset({"implement-spec", "babysit-pr"})
+
+
+def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
+    for key in step_cfg.keys():
+        if key in _FORBIDDEN_STEP_KEYS:
+            raise ConfigError(
+                f"'{key}' is no longer supported (the pipeline-level retry "
+                f"concept was removed). Remove it from steps.{step_name}."
+            )
+        if key == "max_retries" and step_name not in _LOOPING_STEPS:
+            raise ConfigError(
+                f"'max_retries' has no effect on steps.{step_name} because "
+                f"the step runs once. Remove it."
+            )
 
 
 def validate_config(config: dict) -> None:
-    """Validate hook entries.
-
-    Recognised hook fields are exactly `cmd` and `timeout`. Any other key
-    (e.g. `retry`, `name`) is rejected. `cmd` is required and must be a
-    non-empty string. Raises ConfigError on first violation.
-    """
     steps = config.get("steps")
     if steps is None:
         return
@@ -133,6 +143,7 @@ def validate_config(config: dict) -> None:
     for step_name, step_cfg in steps.items():
         if not isinstance(step_cfg, dict):
             continue
+        _validate_step_keys(step_name, {k: v for k, v in step_cfg.items() if k != "hooks"})
         hooks = step_cfg.get("hooks")
         if hooks is None:
             continue

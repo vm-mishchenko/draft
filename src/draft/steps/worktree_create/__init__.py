@@ -41,7 +41,7 @@ class WorktreeCreateStep(Step):
     name = "create-worktree"
 
     def defaults(self) -> dict:
-        return {"max_retries": 1, "timeout": 60, "retry_delay": 0}
+        return {"timeout": 60}
 
     def cmd(self, ctx) -> list[str]:
         if ctx.get("branch_source") == "existing":

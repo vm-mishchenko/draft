@@ -5,7 +5,7 @@ class PushStep(Step):
     name = "push-commits"
 
     def defaults(self) -> dict:
-        return {"max_retries": 1, "timeout": 120, "retry_delay": 0}
+        return {"timeout": 120}
 
     def cmd(self, ctx) -> list[str]:
         return ["git", "push", "-u", "origin", "HEAD"]

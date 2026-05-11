@@ -130,7 +130,7 @@ class CodeSpecStep(Step):
     name = "implement-spec"
 
     def defaults(self) -> dict:
-        return {"max_retries": 10, "timeout": 1200, "retry_delay": 0}
+        return {"max_retries": 10, "timeout": 1200}
 
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)
@@ -163,8 +163,5 @@ class CodeSpecStep(Step):
                     ctx.step_set(self.name, "verify_errors", "")
                     ctx.save()
                     return
-
-                if attempt < cfg["max_retries"]:
-                    engine.sleep(cfg["retry_delay"])
 
             raise StepError(self.name, 1)

@@ -36,7 +36,7 @@ class PrOpenStep(Step):
     name = "open-pr"
 
     def defaults(self) -> dict:
-        return {"max_retries": 1, "timeout": 300, "retry_delay": 0, "title_prefix": ""}
+        return {"timeout": 300, "title_prefix": ""}
 
     def run(self, ctx, engine, lifecycle):
         cfg = ctx.config(self.name)

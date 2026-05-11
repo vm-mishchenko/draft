@@ -1205,7 +1205,7 @@ def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
     from draft.steps.worktree_create import WorktreeCreateStep
     from pipeline import RunContext
 
-    ctx = RunContext("rid", tmp_path, {"create-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
     ctx.set("branch", "foo")
     ctx.set("base_branch", "origin/main")
     ctx.set("wt_dir", "/tmp/wt")
@@ -1220,7 +1220,7 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
     from draft.steps.worktree_create import WorktreeCreateStep
     from pipeline import RunContext
 
-    ctx = RunContext("rid", tmp_path, {"create-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
     ctx.set("branch", "foo")
     ctx.set("base_branch", "origin/main")
     ctx.set("wt_dir", "/tmp/wt")
@@ -1654,7 +1654,7 @@ def test_delete_worktree_step_path_missing_succeeds(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
     from pipeline import RunContext, Runner
 
-    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(tmp_path / "nonexistent"))
 
     DeleteWorktreeStep().run(ctx, Runner(), None)  # must not raise
@@ -1664,7 +1664,7 @@ def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
     from draft.steps.delete_worktree import DeleteWorktreeStep
     from pipeline import RunContext, Runner, StepError
 
-    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", "")
 
     with pytest.raises(StepError):
@@ -1678,7 +1678,7 @@ def test_delete_worktree_step_git_success(tmp_path):
 
     wt = tmp_path / "wt"
     wt.mkdir()
-    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(wt))
 
     with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
@@ -1699,7 +1699,7 @@ def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path
 
     wt = tmp_path / "wt"
     wt.mkdir()
-    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(wt))
 
     with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
@@ -1715,7 +1715,7 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
 
     wt = tmp_path / "wt"
     wt.mkdir()
-    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"max_retries": 1, "timeout": 60}})
+    ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(wt))
 
     with patch("draft.steps.delete_worktree.subprocess.run") as mock_run:
@@ -2349,3 +2349,49 @@ def test_status_json_no_json_unchanged(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "run-id" in out
     assert "status" in out
+
+
+# --- _validate_overrides ---
+
+
+def test_validate_overrides_rejects_max_retries_on_single_shot_step(capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._validate_overrides(["push-commits.max_retries=3"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "push-commits" in err
+    assert "max_retries" in err
+
+
+def test_validate_overrides_rejects_retry_delay_on_implement_spec(capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._validate_overrides(["implement-spec.retry_delay=0"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "retry_delay" in err
+
+
+def test_validate_overrides_rejects_retry_delay_on_babysit_pr(capsys):
+    import draft.command_create as cmd
+
+    with pytest.raises(SystemExit) as exc:
+        cmd._validate_overrides(["babysit-pr.retry_delay=10"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "retry_delay" in err
+
+
+def test_validate_overrides_accepts_max_retries_on_implement_spec():
+    import draft.command_create as cmd
+
+    cmd._validate_overrides(["implement-spec.max_retries=3"])  # must not raise
+
+
+def test_validate_overrides_malformed_is_ignored():
+    import draft.command_create as cmd
+
+    cmd._validate_overrides(["foo"])  # must not raise

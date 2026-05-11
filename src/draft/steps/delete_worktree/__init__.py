@@ -14,7 +14,7 @@ class DeleteWorktreeStep(Step):
     name = "delete-worktree"
 
     def defaults(self) -> dict:
-        return {"max_retries": 1, "timeout": 60}
+        return {"timeout": 60}
 
     def run(self, ctx, engine, lifecycle):
         with engine.stage(self.name):

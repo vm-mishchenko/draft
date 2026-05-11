@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from draft import runs
-from draft.config import ConfigError, load_config, resolve_pr_body_template, resolve_prompt_template, step_config, validate_config
+from draft.config import ConfigError, _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS, load_config, resolve_pr_body_template, resolve_prompt_template, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Runner, RunContext, StepError
@@ -170,6 +170,28 @@ def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     except Exception:
         pass
     return f"draft-{run_id}"
+
+
+def _validate_overrides(overrides: list[str]) -> None:
+    for override in overrides:
+        if "=" not in override or "." not in override.split("=")[0]:
+            continue
+        key_path = override.split("=", 1)[0]
+        step_name, key = key_path.split(".", 1)
+        if key in _FORBIDDEN_STEP_KEYS:
+            print(
+                f"error: '{key}' is no longer supported (the pipeline-level retry "
+                f"concept was removed). Remove it from steps.{step_name}.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if key == "max_retries" and step_name not in _LOOPING_STEPS:
+            print(
+                f"error: 'max_retries' has no effect on steps.{step_name} because "
+                f"the step runs once. Remove it.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
 
 
 def _apply_overrides(config: dict, overrides: list[str]) -> dict:
@@ -571,6 +593,7 @@ def run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return 1
+    _validate_overrides(args.overrides)
     config = _apply_overrides(config, args.overrides)
     try:
         validate_config(config)

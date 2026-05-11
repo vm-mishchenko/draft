@@ -261,25 +261,25 @@ steps:
 
 Common fields (all steps):
 
-- `max_retries` — attempts before failing the step
 - `timeout` — per-attempt timeout in seconds
-- `retry_delay` — seconds to wait between retries
 
 Step-specific fields:
 
+- `implement-spec.max_retries` — maximum implementation attempts before failing the step
+- `babysit-pr.max_retries` — maximum babysit iterations before giving up
 - `open-pr.title_prefix` — string prepended to the PR title
 - `open-pr.pr_body_template` — path to a file the agent reads as structural guidance for the PR body; supports `~` and is resolved relative to the project root
-- `babysit-pr.checks_delay` — seconds to wait before the first CI poll
+- `babysit-pr.checks_delay` — seconds to wait before the next CI poll
 - `implement-spec.prompt_template` — path to a file that fully replaces the built-in implement-spec prompt; supports `~` and is resolved relative to the project root
 
 Defaults per step:
 
-- `create-worktree`: `max_retries=1`, `timeout=60`
+- `create-worktree`: `timeout=60`
 - `implement-spec`: `max_retries=10`, `timeout=1200`
-- `push-commits`: `max_retries=1`, `timeout=120`
-- `open-pr`: `max_retries=1`, `timeout=300`, `title_prefix=""`
-- `babysit-pr`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
-- `delete-worktree`: `max_retries=1`, `timeout=60`
+- `push-commits`: `timeout=120`
+- `open-pr`: `timeout=300`, `title_prefix=""`
+- `babysit-pr`: `max_retries=100`, `timeout=1200`, `checks_delay=30`
+- `delete-worktree`: `timeout=60`
 
 ### Custom implement-spec prompt
 
@@ -333,6 +333,10 @@ The bundled default lives at `src/draft/steps/pr_open/pull-request-template.md` 
 **Migration note**
 
 In previous versions, draft automatically looked for a PR body template at `<repo>/.draft/pull-request-template.md` and `~/.draft/pull-request-template.md`. This convention-path search has been removed. If you relied on either path, add an explicit `steps.open-pr.pr_body_template` entry pointing to the same file.
+
+**Migration note: retry fields removed**
+
+`retry_delay` has been removed from all steps. `max_retries` has been removed from `create-worktree`, `push-commits`, `open-pr`, and `delete-worktree` — those steps run exactly once. Setting either field on an unsupported step now fails preflight with a clear error message (exit 3 for YAML config, exit 2 for `--set`).
 
 ## Hooks
 
