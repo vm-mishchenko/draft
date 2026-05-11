@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from draft.config import ConfigError, load_config, step_config, validate_config
+from draft.config import ConfigError, load_config, resolve_prompt_template, step_config, validate_config
 
 
 def test_load_config_merges_global_and_project(tmp_path):
@@ -139,3 +139,112 @@ def test_validate_config_rejects_non_dict_entry():
 def test_validate_config_rejects_non_list_event():
     with pytest.raises(ConfigError):
         validate_config({"steps": {"s": {"hooks": {"pre": "echo hi"}}}})
+
+
+# --- resolve_prompt_template ---
+
+_VALID_TEMPLATE = "{{SPEC}}\n{{VERIFY_ERRORS}}\n"
+
+
+def _make_config(path_value):
+    return {"steps": {"implement-spec": {"prompt_template": path_value}}}
+
+
+def test_resolve_prompt_template_no_key_returns_unchanged():
+    config = {"steps": {"implement-spec": {"max_retries": 5}}}
+    result = resolve_prompt_template(config, "/some/repo")
+    assert result == config
+
+
+def test_resolve_prompt_template_relative_path_resolved(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "my_prompt.md"
+    tpl.write_text(_VALID_TEMPLATE)
+
+    config = _make_config("my_prompt.md")
+    result = resolve_prompt_template(config, str(repo))
+    assert result["steps"]["implement-spec"]["prompt_template"] == str(tpl.resolve())
+
+
+def test_resolve_prompt_template_tilde_path_expanded(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    tpl = home / "prompt.md"
+    tpl.write_text(_VALID_TEMPLATE)
+    monkeypatch.setenv("HOME", str(home))
+
+    config = _make_config("~/prompt.md")
+    result = resolve_prompt_template(config, str(tmp_path / "repo"))
+    assert result["steps"]["implement-spec"]["prompt_template"] == str(tpl.resolve())
+
+
+def test_resolve_prompt_template_path_is_directory(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = _make_config(str(repo))
+    with pytest.raises(ConfigError, match=str(repo.resolve())):
+        resolve_prompt_template(config, str(repo))
+
+
+def test_resolve_prompt_template_path_missing(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    missing = repo / "nonexistent.md"
+    config = _make_config(str(missing))
+    with pytest.raises(ConfigError, match=str(missing.resolve())):
+        resolve_prompt_template(config, str(repo))
+
+
+def test_resolve_prompt_template_empty_file(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "empty.md"
+    tpl.write_text("")
+    config = _make_config(str(tpl))
+    with pytest.raises(ConfigError):
+        resolve_prompt_template(config, str(repo))
+
+
+def test_resolve_prompt_template_non_utf8(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "bad.md"
+    tpl.write_bytes(b"\xff\xfe invalid utf-8 \x80\x81")
+    config = _make_config(str(tpl))
+    with pytest.raises(ConfigError, match="UTF-8"):
+        resolve_prompt_template(config, str(repo))
+
+
+def test_resolve_prompt_template_missing_spec_marker(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "prompt.md"
+    tpl.write_text("{{VERIFY_ERRORS}}\nno spec marker here\n")
+    config = _make_config(str(tpl))
+    with pytest.raises(ConfigError, match="SPEC"):
+        resolve_prompt_template(config, str(repo))
+
+
+def test_resolve_prompt_template_missing_verify_errors_warns(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    tpl = repo / "prompt.md"
+    tpl.write_text("{{SPEC}}\nno verify errors marker\n")
+    config = _make_config(str(tpl))
+    resolve_prompt_template(config, str(repo))
+    captured = capsys.readouterr()
+    assert "warning" in captured.err
+    assert "VERIFY_ERRORS" in captured.err
+
+
+def test_resolve_prompt_template_non_string_value(tmp_path):
+    config = _make_config(42)
+    with pytest.raises(ConfigError):
+        resolve_prompt_template(config, str(tmp_path))
+
+
+def test_resolve_prompt_template_empty_string_value(tmp_path):
+    config = _make_config("")
+    with pytest.raises(ConfigError):
+        resolve_prompt_template(config, str(tmp_path))

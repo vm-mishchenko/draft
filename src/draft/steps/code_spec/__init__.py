@@ -1,6 +1,8 @@
 import json
 import subprocess
+import sys
 from importlib.resources import files
+from pathlib import Path
 
 from pipeline import Step, StepError
 
@@ -84,10 +86,16 @@ def _summarize_tool_input(name, inp):
     return compact[:100]
 
 
-def _build_claude_cmd(ctx) -> list[str]:
+def _load_template(cfg: dict) -> str:
+    path = cfg.get("prompt_template")
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    return files("draft.steps.code_spec").joinpath("code_spec.md").read_text()
+
+
+def _build_claude_cmd(ctx, template: str) -> list[str]:
     spec = ctx.get("spec", "")
     verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
-    template = files("draft.steps.code_spec").joinpath("code_spec.md").read_text()
     if verify_errors:
         verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
     else:
@@ -129,9 +137,15 @@ class CodeSpecStep(Step):
         wt_dir = ctx.get("wt_dir")
 
         with engine.stage(self.name):
+            try:
+                template = _load_template(cfg)
+            except OSError as exc:
+                print(f"error: cannot read prompt_template: {exc}", file=sys.stderr)
+                raise StepError(self.name, 1)
+
             for attempt in range(1, cfg["max_retries"] + 1):
                 engine.run_command(
-                    cmd=_build_claude_cmd(ctx),
+                    cmd=_build_claude_cmd(ctx, template),
                     cwd=wt_dir,
                     log_path=ctx.log_path(self.name),
                     attempt=attempt,
