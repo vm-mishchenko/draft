@@ -259,6 +259,7 @@ Step-specific fields:
 
 - `open-pr.title_prefix` — string prepended to the PR title
 - `babysit-pr.checks_delay` — seconds to wait before the first CI poll
+- `implement-spec.prompt_template` — path to a file that fully replaces the built-in implement-spec prompt; supports `~` and is resolved relative to the project root
 
 Defaults per step:
 
@@ -268,6 +269,33 @@ Defaults per step:
 - `open-pr`: `max_retries=1`, `timeout=300`, `title_prefix=""`
 - `babysit-pr`: `max_retries=100`, `timeout=1200`, `retry_delay=60`, `checks_delay=30`
 - `delete-worktree`: `max_retries=1`, `timeout=60`
+
+### Custom implement-spec prompt
+
+Set `implement-spec.prompt_template` to replace the built-in prompt with your own file.
+
+**Template contract**
+
+- `{{SPEC}}` is required — draft substitutes the spec content here.
+- `{{VERIFY_ERRORS}}` is recommended — draft substitutes verify hook failures here on retries; omitting it means Claude will not see failure output and a warning is printed.
+
+**Path resolution**
+
+The path is expanded with `~` support, then resolved relative to the project root (the directory containing `.draft/`). The resolved absolute path is snapshotted into `state.json` at `draft create` time; `draft continue` uses that snapshot. If the file is removed between create and continue, the step fails with an error naming the path.
+
+**Precedence**
+
+Default built-in → `~/.draft/config.yaml` → `.draft/config.yaml` → `--set implement-spec.prompt_template=<path>`
+
+**Example**
+
+```yaml
+steps:
+  implement-spec:
+    prompt_template: prompts/my_implement.md
+```
+
+The default template lives at `src/draft/steps/code_spec/code_spec.md` — copy it as a starting point.
 
 ## Hooks
 

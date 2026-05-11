@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from draft import runs
-from draft.config import ConfigError, load_config, step_config, validate_config
+from draft.config import ConfigError, load_config, resolve_prompt_template, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Runner, RunContext, StepError
@@ -533,6 +533,7 @@ def run(args) -> int:
     config = _apply_overrides(config, args.overrides)
     try:
         validate_config(config)
+        config = resolve_prompt_template(config, repo)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         (run_dir / "draft.pid").unlink(missing_ok=True)

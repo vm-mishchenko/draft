@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import yaml
@@ -49,6 +50,41 @@ def step_config(config: dict, step_name: str, step_defaults: dict) -> dict:
 
 def load_hook_config(config: dict) -> dict:
     return config.get("steps", {})
+
+
+def resolve_prompt_template(config: dict, repo: str) -> dict:
+    raw = config.get("steps", {}).get("implement-spec", {}).get("prompt_template")
+    if raw is None:
+        return config
+    if not isinstance(raw, str) or not raw.strip():
+        raise ConfigError("steps.implement-spec.prompt_template must be a non-empty string")
+
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = Path(repo) / p
+    abs_path = p.resolve()
+
+    if not abs_path.is_file():
+        raise ConfigError(f"prompt_template not a regular file: {abs_path}")
+    try:
+        text = abs_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"prompt_template is not UTF-8: {abs_path}: {exc}")
+    except OSError as exc:
+        raise ConfigError(f"cannot read prompt_template {abs_path}: {exc}")
+    if not text:
+        raise ConfigError(f"prompt_template is empty: {abs_path}")
+    if "{{SPEC}}" not in text:
+        raise ConfigError(f"prompt_template missing required marker {{{{SPEC}}}}: {abs_path}")
+    if "{{VERIFY_ERRORS}}" not in text:
+        print(
+            f"warning: prompt_template lacks {{{{VERIFY_ERRORS}}}}; "
+            f"retries will not receive verify feedback: {abs_path}",
+            file=sys.stderr,
+        )
+
+    config["steps"]["implement-spec"]["prompt_template"] = str(abs_path)
+    return config
 
 
 _HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
