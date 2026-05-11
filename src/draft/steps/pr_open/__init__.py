@@ -11,16 +11,9 @@ class _ParseError(Exception):
     pass
 
 
-def _resolve_pr_body_path(repo: str) -> str:
-    candidates = [
-        Path(repo) / ".draft" / "pull-request-template.md",
-        Path.home() / ".draft" / "pull-request-template.md",
-        STEP_DIR / "pull-request-template.md",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return str(path.resolve())
-    raise FileNotFoundError("pull-request-template.md not found")
+def _select_body_path(cfg: dict) -> Path:
+    raw = cfg.get("pr_body_template")
+    return Path(raw) if raw else STEP_DIR / "pull-request-template.md"
 
 
 def _parse_title_body(text: str) -> tuple[str, str]:
@@ -53,12 +46,15 @@ class PrOpenStep(Step):
         title_prefix = cfg.get("title_prefix", "")
         wt_dir = ctx.get("wt_dir")
 
-        body_path = _resolve_pr_body_path(repo)
+        body_path = _select_body_path(cfg)
+        if not body_path.is_file():
+            print(f"open-pr: pr_body_template missing: {body_path}", file=sys.stderr)
+            raise StepError(self.name, 1)
         prompt = (
             (STEP_DIR / "open-pr.md")
             .read_text()
             .replace("{{BASE_BRANCH}}", base_branch)
-            .replace("{{PR_BODY_TEMPLATE_PATH}}", body_path)
+            .replace("{{PR_BODY_TEMPLATE_PATH}}", str(body_path.resolve()))
         )
 
         claude_log = ctx.log_path("open-pr-claude")

@@ -258,6 +258,7 @@ Common fields (all steps):
 Step-specific fields:
 
 - `open-pr.title_prefix` — string prepended to the PR title
+- `open-pr.pr_body_template` — path to a file the agent reads as structural guidance for the PR body; supports `~` and is resolved relative to the project root
 - `babysit-pr.checks_delay` — seconds to wait before the first CI poll
 - `implement-spec.prompt_template` — path to a file that fully replaces the built-in implement-spec prompt; supports `~` and is resolved relative to the project root
 
@@ -296,6 +297,32 @@ steps:
 ```
 
 The default template lives at `src/draft/steps/code_spec/code_spec.md` — copy it as a starting point.
+
+### Custom PR body template
+
+Set `open-pr.pr_body_template` to give the agent a file with structural guidance for the PR body. The file is passed as a path for the agent to read; its contents are not substituted or interpolated.
+
+**Path resolution**
+
+The path is expanded with `~` support, then resolved relative to the project root (the directory containing `.draft/`). The resolved absolute path is snapshotted into `state.json` at `draft create` time; `draft continue` uses that snapshot. If the file is removed between create and continue, the step fails with an error naming the path.
+
+**Precedence**
+
+Bundled default → `~/.draft/config.yaml` → `.draft/config.yaml` → `--set open-pr.pr_body_template=<path>`
+
+**Example**
+
+```yaml
+steps:
+  open-pr:
+    pr_body_template: .draft/pr-template.md
+```
+
+The bundled default lives at `src/draft/steps/pr_open/pull-request-template.md` — copy it as a starting point.
+
+**Migration note**
+
+In previous versions, draft automatically looked for a PR body template at `<repo>/.draft/pull-request-template.md` and `~/.draft/pull-request-template.md`. This convention-path search has been removed. If you relied on either path, add an explicit `steps.open-pr.pr_body_template` entry pointing to the same file.
 
 ## Hooks
 

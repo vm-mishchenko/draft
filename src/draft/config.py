@@ -87,6 +87,33 @@ def resolve_prompt_template(config: dict, repo: str) -> dict:
     return config
 
 
+def resolve_pr_body_template(config: dict, repo: str) -> dict:
+    raw = config.get("steps", {}).get("open-pr", {}).get("pr_body_template")
+    if raw is None:
+        return config
+    if not isinstance(raw, str) or not raw.strip():
+        raise ConfigError("steps.open-pr.pr_body_template must be a non-empty string")
+
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = Path(repo) / p
+    abs_path = p.resolve()
+
+    if not abs_path.is_file():
+        raise ConfigError(f"pr_body_template not a regular file: {abs_path}")
+    try:
+        text = abs_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"pr_body_template is not UTF-8: {abs_path}: {exc}")
+    except OSError as exc:
+        raise ConfigError(f"cannot read pr_body_template {abs_path}: {exc}")
+    if not text:
+        raise ConfigError(f"pr_body_template is empty: {abs_path}")
+
+    config["steps"]["open-pr"]["pr_body_template"] = str(abs_path)
+    return config
+
+
 _HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
 
 
