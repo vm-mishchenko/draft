@@ -144,7 +144,7 @@ def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
 
 
 def _unique_branch(repo: str, branch: str) -> str:
-    from draft.steps.worktree_create import _branch_exists
+    from draft.steps.create_worktree import _branch_exists
     i = 1
     candidate = branch
     while _branch_exists(repo, candidate):
@@ -156,7 +156,7 @@ def _unique_branch(repo: str, branch: str) -> str:
 def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     from importlib.resources import files
     try:
-        template = files("draft.steps.code_spec").joinpath("branch_slug.md").read_text()
+        template = files("draft.steps.implement_spec").joinpath("branch_slug.md").read_text()
         full_prompt = template.replace("{{PROMPT}}", prompt_text)
         result = subprocess.run(
             ["claude", "-p", full_prompt],

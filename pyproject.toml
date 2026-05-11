@@ -17,9 +17,9 @@ dev = ["pytest"]
 draft = "draft.cli:main"
 
 [tool.setuptools.package-data]
-"draft.steps.code_spec" = ["*.md"]
-"draft.steps.pr_open" = ["*.md"]
-"draft.steps.pr_babysit" = ["*.md"]
+"draft.steps.implement_spec" = ["*.md"]
+"draft.steps.open_pr" = ["*.md"]
+"draft.steps.babysit_pr" = ["*.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

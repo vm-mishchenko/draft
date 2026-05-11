@@ -92,7 +92,7 @@ def _load_template(cfg: dict) -> str:
     path = cfg.get("prompt_template")
     if path:
         return Path(path).read_text(encoding="utf-8")
-    return files("draft.steps.code_spec").joinpath("code_spec.md").read_text()
+    return files("draft.steps.implement_spec").joinpath("implement_spec.md").read_text()
 
 
 def _render_verify_commands(entries: list[dict]) -> str:
@@ -195,7 +195,7 @@ def _run_claude_capture(cmd: list[str], cwd: str, timeout: float, log_path: Path
 
 
 def _generate_commit_message(spec: str, wt_dir: str, log_path: Path, timeout: float, max_attempts: int) -> tuple[str, bool]:
-    template = files("draft.steps.code_spec").joinpath("commit_message.md").read_text()
+    template = files("draft.steps.implement_spec").joinpath("commit_message.md").read_text()
     diff = _run_git_capture(["git", "diff", "HEAD"], wt_dir, 60, log_path)
     status = _run_git_capture(["git", "status", "--porcelain"], wt_dir, 60, log_path)
     diff_section = f"### git diff HEAD\n{diff}\n\n### git status --porcelain\n{status}"
@@ -221,7 +221,7 @@ def _format_pre_commit_errors(stdout: str, stderr: str) -> str:
     return "## Pre-commit hook failures\n\n$ git commit\n" + (stdout + stderr).strip() + "\n"
 
 
-class CodeSpecStep(Step):
+class ImplementSpecStep(Step):
     name = "implement-spec"
 
     def defaults(self) -> dict:

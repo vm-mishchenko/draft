@@ -57,7 +57,7 @@ def _run_git_capture(cmd: list[str], cwd: str, timeout: float, log_path: Path) -
     return stdout
 
 
-class PrOpenStep(Step):
+class OpenPrStep(Step):
     name = "open-pr"
 
     def defaults(self) -> dict:
@@ -93,7 +93,7 @@ class PrOpenStep(Step):
             )
 
             prompt = (
-                (STEP_DIR / "open-pr.md")
+                (STEP_DIR / "open_pr.md")
                 .read_text()
                 .replace("{{PR_BODY_TEMPLATE}}", template_text)
                 .replace("{{GIT_DIFF}}", git_diff)
