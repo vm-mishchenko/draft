@@ -274,13 +274,13 @@ def test_non_utf8_template_does_not_raise(tmp_path):
 
 
 def test_bundled_open_pr_md_contains_required_placeholders():
-    content = (STEP_DIR / "open-pr.md").read_text()
+    content = (STEP_DIR / "open_pr.md").read_text()
     for placeholder in ("<<<PR-TITLE>>>", "<<</PR-TITLE>>>", "<<<PR-BODY>>>", "<<</PR-BODY>>>",
                         "{{PR_BODY_TEMPLATE}}", "{{GIT_DIFF}}", "{{GIT_LOG}}"):
-        assert placeholder in content, f"missing {placeholder} in open-pr.md"
+        assert placeholder in content, f"missing {placeholder} in open_pr.md"
 
 
 def test_bundled_open_pr_md_no_old_placeholders():
-    content = (STEP_DIR / "open-pr.md").read_text()
+    content = (STEP_DIR / "open_pr.md").read_text()
     assert "{{BASE_BRANCH}}" not in content
     assert "{{PR_BODY_TEMPLATE_PATH}}" not in content
