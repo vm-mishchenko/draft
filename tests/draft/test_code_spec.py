@@ -1259,7 +1259,6 @@ def test_bundled_suggest_checks_has_required_markers():
     assert "{{SPEC}}" in content
     assert "{{CHANGED_FILES}}" in content
     assert "{{STATIC_CHECKS}}" in content
-    assert "{{PER_CHECK_TIMEOUT}}" in content
 
 
 def test_bundled_suggest_checks_no_diff_marker():

@@ -23,7 +23,6 @@ Based on the spec and changed files, suggest additional verification commands th
 **Constraints:**
 - Do not suggest any command already listed in the static checks above
 - Commands run with `shell=True` in the worktree directory
-- Each command must complete within {{PER_CHECK_TIMEOUT}} seconds
 - Only suggest commands that are likely already available in this repository
 - Prefer targeted checks (specific files or modules) over broad ones
 - Do not suggest commands that modify files, write to disk, or have side effects beyond exit code
@@ -33,10 +32,10 @@ Based on the spec and changed files, suggest additional verification commands th
 
 ## Output format
 
-Output a JSON array only, with no other text before or after it. Each entry must have a `cmd` field (non-empty string). You may include a `timeout` field (positive integer, seconds). Do not include a `rationale` field or any other field.
+Output a JSON array only, with no other text before or after it. Each entry must have a `cmd` field (non-empty string). Do not include a `rationale` field or any other field.
 
 If no additional checks are warranted, output an empty array.
 
 Example:
 
-[{"cmd": "python -m pytest tests/test_foo.py -x", "timeout": 60}]
+[{"cmd": "python -m pytest tests/test_foo.py -x"}]

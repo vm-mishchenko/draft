@@ -160,7 +160,6 @@ def _suggest_checks(
         suggest_template.replace("{{SPEC}}", spec)
         .replace("{{CHANGED_FILES}}", changed_files.strip())
         .replace("{{STATIC_CHECKS}}", static_bullets)
-        .replace("{{PER_CHECK_TIMEOUT}}", str(cfg["per_check_timeout"]))
     )
     result = engine.run_llm(
         prompt=prompt,
