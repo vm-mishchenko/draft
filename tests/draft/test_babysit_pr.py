@@ -1,10 +1,14 @@
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from draft.steps.babysit_pr import (
     BabysitPrStep,
+    _build_prompt,
+    _check_ci,
     _generate_commit_message,
+    _render_check_failures,
     _render_verify_commands,
 )
 from pipeline.runner import LLMResult
@@ -107,7 +111,7 @@ def test_prompt_contains_verify_commands_when_configured(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -137,7 +141,7 @@ def test_prompt_no_verify_commands_section_when_empty(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -170,7 +174,7 @@ def test_ci_green_branch_clean_returns_without_git(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 3, "failure": 0, "pending": 0},
+            return_value=({"success": 3, "failure": 0, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._is_branch_clean", return_value=True),
     ):
@@ -192,8 +196,8 @@ def test_no_changes_after_agent_sets_verify_errors_and_continues(tmp_path):
         nonlocal call_count
         call_count += 1
         if call_count <= 2:
-            return {"success": 0, "failure": 1, "pending": 0}
-        return {"success": 1, "failure": 0, "pending": 0}
+            return {"success": 0, "failure": 1, "pending": 0}, []
+        return {"success": 1, "failure": 0, "pending": 0}, []
 
     step = BabysitPrStep()
     with (
@@ -235,7 +239,7 @@ def test_verify_hooks_fail_sets_errors_no_commit(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -267,7 +271,7 @@ def test_verify_passes_commits_and_pushes(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -311,7 +315,7 @@ def test_commit_message_fallback_used_and_recorded(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -355,7 +359,7 @@ def test_pre_commit_hook_failure_sets_verify_errors_no_push(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -408,7 +412,7 @@ def test_get_hooks_called_once_across_attempts(tmp_path):
     with (
         patch(
             "draft.steps.babysit_pr._check_ci",
-            return_value={"success": 0, "failure": 1, "pending": 0},
+            return_value=({"success": 0, "failure": 1, "pending": 0}, []),
         ),
         patch("draft.steps.babysit_pr._has_changes", return_value=True),
         patch(
@@ -517,3 +521,213 @@ def test_generate_commit_message_logs_to_file(tmp_path):
     content = log.read_text()
     assert "--- selected commit message (attempt 2) ---" in content
     assert "Fix CI" in content
+
+
+# --- _check_ci tests ---
+
+
+def _gh_checks_output(entries):
+    return json.dumps(entries).encode()
+
+
+def test_check_ci_one_failure_one_pending():
+    raw = [
+        {"name": "test-job", "state": "failure", "link": "https://ci/1"},
+        {"name": "build-job", "state": "in_progress", "link": ""},
+    ]
+    result = MagicMock()
+    result.stdout = json.dumps(raw)
+    with patch("subprocess.run", return_value=result):
+        counts, entries = _check_ci("https://github.com/org/repo/pull/1")
+
+    assert counts == {"success": 0, "failure": 1, "pending": 1}
+    failure = next(e for e in entries if e["name"] == "test-job")
+    assert failure["state"] == "failure"
+    assert failure["conclusion"] == "failure"
+    assert failure["link"] == "https://ci/1"
+    pending = next(e for e in entries if e["name"] == "build-job")
+    assert pending["state"] == "pending"
+
+
+def test_check_ci_empty_json():
+    result = MagicMock()
+    result.stdout = "[]"
+    with patch("subprocess.run", return_value=result):
+        counts, entries = _check_ci("https://github.com/org/repo/pull/1")
+
+    assert counts == {"success": 0, "failure": 0, "pending": 0}
+    assert entries == []
+
+
+def test_check_ci_subprocess_raises():
+    with patch("subprocess.run", side_effect=Exception("gh not found")):
+        try:
+            _check_ci("https://github.com/org/repo/pull/1")
+            raised = False
+        except Exception:
+            raised = True
+    assert raised
+
+
+# --- _render_check_failures tests ---
+
+
+def test_render_check_failures_all_success_returns_empty():
+    entries = [
+        {"name": "job", "state": "success", "conclusion": "success", "link": ""},
+    ]
+    assert _render_check_failures(entries) == ""
+
+
+def test_render_check_failures_mixed_entries():
+    entries = [
+        {"name": "job-ok", "state": "success", "conclusion": "success", "link": ""},
+        {
+            "name": "job-pending",
+            "state": "pending",
+            "conclusion": "in_progress",
+            "link": "",
+        },
+        {
+            "name": "job-fail1",
+            "state": "failure",
+            "conclusion": "failure",
+            "link": "https://ci/1",
+        },
+        {
+            "name": "job-fail2",
+            "state": "failure",
+            "conclusion": "timed_out",
+            "link": "https://ci/2",
+        },
+    ]
+    result = _render_check_failures(entries)
+    assert result.startswith("## Failing checks\n\n")
+    assert "job-fail1 (failure) https://ci/1" in result
+    assert "job-fail2 (timed_out) https://ci/2" in result
+    assert "job-ok" not in result
+    assert "job-pending" not in result
+
+
+def test_render_check_failures_no_link():
+    entries = [
+        {
+            "name": "job-fail",
+            "state": "failure",
+            "conclusion": "action_required",
+            "link": "",
+        },
+    ]
+    result = _render_check_failures(entries)
+    assert "job-fail (action_required)" in result
+    assert result.count("job-fail (action_required)") == 1
+    assert "job-fail (action_required) " not in result
+
+
+def test_render_check_failures_whitespace_in_name():
+    entries = [
+        {
+            "name": "job  name\nwith  spaces",
+            "state": "failure",
+            "conclusion": "failure",
+            "link": "",
+        },
+    ]
+    result = _render_check_failures(entries)
+    assert "job name with spaces (failure)" in result
+
+
+# --- _build_prompt tests ---
+
+
+def _make_build_ctx():
+    ctx = MagicMock()
+    ctx.get.side_effect = lambda key, default=None: {
+        "pr_url": "https://github.com/org/repo/pull/42",
+        "spec": "",
+    }.get(key, default)
+    ctx.step_get.return_value = ""
+    return ctx
+
+
+def test_build_prompt_with_failed_checks_contains_block():
+    ctx = _make_build_ctx()
+    failed = [
+        {
+            "name": "test-job",
+            "state": "failure",
+            "conclusion": "failure",
+            "link": "https://ci/1",
+        },
+    ]
+    prompt = _build_prompt(ctx, "", failed)
+    assert "## Failing checks" in prompt
+    assert "test-job" in prompt
+    assert "{{CHECK_FAILURES}}" not in prompt
+
+
+def test_build_prompt_with_empty_failed_checks_no_block():
+    ctx = _make_build_ctx()
+    prompt = _build_prompt(ctx, "", [])
+    assert "## Failing checks" not in prompt
+    assert "{{CHECK_FAILURES}}" not in prompt
+
+
+# --- End-to-end flow with failed_checks ---
+
+
+def test_e2e_run_llm_receives_failing_checks_block(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "checks_delay": 60}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = _make_lifecycle()
+
+    failed_entry = {
+        "name": "ci-check",
+        "state": "failure",
+        "conclusion": "failure",
+        "link": "https://ci/42",
+    }
+    counts = {"success": 0, "failure": 1, "pending": 0}
+
+    step = BabysitPrStep()
+    with (
+        patch(
+            "draft.steps.babysit_pr._check_ci", return_value=(counts, [failed_entry])
+        ),
+        patch("draft.steps.babysit_pr._has_changes", return_value=True),
+        patch(
+            "draft.steps.babysit_pr._generate_commit_message",
+            return_value=("Fix CI", False),
+        ),
+        patch("draft.steps.babysit_pr._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.babysit_pr._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    prompt = engine.run_llm.call_args_list[0][1]["prompt"]
+    assert "## Failing checks" in prompt
+    assert "ci-check" in prompt
+    assert "https://ci/42" in prompt
+
+
+def test_e2e_no_agent_run_when_no_failures(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "checks_delay": 60}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = _make_lifecycle()
+
+    step = BabysitPrStep()
+    with (
+        patch(
+            "draft.steps.babysit_pr._check_ci",
+            return_value=({"success": 0, "failure": 0, "pending": 1}, []),
+        ),
+        patch("draft.steps.babysit_pr._is_branch_clean", return_value=False),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    engine.run_llm.assert_not_called()
