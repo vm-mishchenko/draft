@@ -136,6 +136,54 @@ def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
                 f"the step runs once. Remove it."
             )
 
+    if step_name == "implement-spec":
+        if "suggest_extra_checks" in step_cfg:
+            val = step_cfg["suggest_extra_checks"]
+            if not isinstance(val, bool):
+                raise ConfigError(
+                    "steps.implement-spec.suggest_extra_checks must be a bool (true or false)"
+                )
+        if "max_checks" in step_cfg:
+            val = step_cfg["max_checks"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (0 <= val <= 20)
+            ):
+                raise ConfigError(
+                    "steps.implement-spec.max_checks must be an int between 0 and 20"
+                )
+        if "per_check_timeout" in step_cfg:
+            val = step_cfg["per_check_timeout"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 180)
+            ):
+                raise ConfigError(
+                    "steps.implement-spec.per_check_timeout must be an int between 1 and 180"
+                )
+        if "suggester_timeout" in step_cfg:
+            val = step_cfg["suggester_timeout"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 600)
+            ):
+                raise ConfigError(
+                    "steps.implement-spec.suggester_timeout must be an int between 1 and 600"
+                )
+        if "suggester_total_budget" in step_cfg:
+            val = step_cfg["suggester_total_budget"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 3600)
+            ):
+                raise ConfigError(
+                    "steps.implement-spec.suggester_total_budget must be an int between 1 and 3600"
+                )
+
 
 def validate_config(config: dict) -> None:
     steps = config.get("steps")

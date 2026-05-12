@@ -398,3 +398,95 @@ def test_resolve_pr_body_template_valid_rewrites_to_absolute(tmp_path):
     config = _make_pr_config("template.md")
     result = resolve_pr_body_template(config, str(repo))
     assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
+
+
+# --- validate_config: implement-spec suggester keys ---
+
+
+def test_validate_suggest_extra_checks_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggest_extra_checks": "yes"}}})
+
+
+def test_validate_suggest_extra_checks_int_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggest_extra_checks": 1}}})
+
+
+def test_validate_suggest_extra_checks_none_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggest_extra_checks": None}}})
+
+
+def test_validate_suggest_extra_checks_false_accepted():
+    validate_config({"steps": {"implement-spec": {"suggest_extra_checks": False}}})
+
+
+def test_validate_suggest_extra_checks_true_accepted():
+    validate_config({"steps": {"implement-spec": {"suggest_extra_checks": True}}})
+
+
+def test_validate_max_checks_negative_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"max_checks": -1}}})
+
+
+def test_validate_max_checks_over_limit_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"max_checks": 21}}})
+
+
+def test_validate_max_checks_zero_accepted():
+    validate_config({"steps": {"implement-spec": {"max_checks": 0}}})
+
+
+def test_validate_max_checks_twenty_accepted():
+    validate_config({"steps": {"implement-spec": {"max_checks": 20}}})
+
+
+def test_validate_per_check_timeout_over_limit_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"per_check_timeout": 181}}})
+
+
+def test_validate_per_check_timeout_zero_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"per_check_timeout": 0}}})
+
+
+def test_validate_per_check_timeout_valid_accepted():
+    validate_config({"steps": {"implement-spec": {"per_check_timeout": 120}}})
+
+
+def test_validate_suggester_timeout_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggester_timeout": "120"}}})
+
+
+def test_validate_suggester_timeout_over_limit_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggester_timeout": 601}}})
+
+
+def test_validate_suggester_timeout_valid_accepted():
+    validate_config({"steps": {"implement-spec": {"suggester_timeout": 120}}})
+
+
+def test_validate_suggester_total_budget_valid_accepted():
+    validate_config({"steps": {"implement-spec": {"suggester_total_budget": 600}}})
+
+
+def test_validate_suggester_total_budget_zero_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggester_total_budget": 0}}})
+
+
+def test_validate_suggester_total_budget_over_limit_rejected():
+    with pytest.raises(ConfigError):
+        validate_config({"steps": {"implement-spec": {"suggester_total_budget": 3601}}})
+
+
+def test_validate_suggester_keys_on_other_step_silently_allowed():
+    validate_config(
+        {"steps": {"babysit-pr": {"max_checks": 99, "suggest_extra_checks": "yes"}}}
+    )

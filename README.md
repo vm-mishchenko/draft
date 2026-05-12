@@ -327,6 +327,20 @@ Step-specific events:
 
 - `implement-spec.verify` — invoked after the agent edits the working tree, before draft commits; non-zero output is fed back into the next implement-spec attempt as test failures, and the failing changes stay in the working tree.
 
+### LLM-suggested extra checks
+
+After every static verify hook passes on an attempt, `implement-spec` (by default) makes one additional LLM call to propose a small set of spec-scoped lightweight checks, then runs them as an extra gate before committing. Any failure is fed back to the implement agent for the next retry, exactly like a static verify failure.
+
+**Security note:** the LLM-suggested commands run verbatim in the worktree under `shell=True`. This is the same threat model as user-configured verify hooks, except the commands originate from the LLM rather than the user. The suggester is given only `Read` tool access; it cannot execute the commands it proposes. All commands are logged to `implement-spec.suggested.log` before execution. To opt out:
+
+```yaml
+steps:
+  implement-spec:
+    suggest_extra_checks: false
+```
+
+When `suggest_extra_checks` is `false`, no extra LLM call is made, no additional log files are created, and behaviour is identical to before this feature was introduced.
+
 ### Custom implement-spec prompt
 
 Set `implement-spec.prompt_template` to replace the built-in prompt with your own file.

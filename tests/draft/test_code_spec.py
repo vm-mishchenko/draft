@@ -4,22 +4,36 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from draft.hooks import HookResult
 from draft.steps.implement_spec import (
     ImplementSpecStep,
+    _filter_dupes,
+    _format_suggested_failures,
     _generate_commit_message,
     _load_template,
+    _parse_suggestions,
     _render_prompt,
     _render_verify_commands,
+    _run_suggested_checks,
 )
 from pipeline import StepError
 from pipeline.runner import TIMEOUT_EXIT, LLMResult
 
 _BUNDLED_MARKER = "{{SPEC}}"
 
+_SUGGEST_DISABLED_DEFAULTS = {
+    "suggest_extra_checks": False,
+    "max_checks": 5,
+    "per_check_timeout": 120,
+    "suggester_timeout": 120,
+    "suggester_total_budget": 300,
+}
+
 
 def _make_ctx(cfg, spec="my spec", verify_errors="", tmp_path=None):
+    full_cfg = {**_SUGGEST_DISABLED_DEFAULTS, **cfg}
     ctx = MagicMock()
-    ctx.config.return_value = cfg
+    ctx.config.return_value = full_cfg
     ctx.get.side_effect = lambda key, default=None: {"wt_dir": "/wt", "spec": spec}.get(
         key, default
     )
@@ -703,3 +717,548 @@ def test_generate_commit_message_logs_to_file(tmp_path):
     content = log.read_text()
     assert "--- selected commit message (attempt 2) ---" in content
     assert "Add feature" in content
+
+
+# --- _parse_suggestions tests ---
+
+
+def test_parse_suggestions_empty_array():
+    assert _parse_suggestions("[]") == []
+
+
+def test_parse_suggestions_invalid_json():
+    assert _parse_suggestions("not json") == []
+
+
+def test_parse_suggestions_top_level_not_array():
+    assert _parse_suggestions('{"cmd":"x"}') == []
+
+
+def test_parse_suggestions_filters_empty_and_missing_cmd():
+    result = _parse_suggestions('[{"cmd":"a"},{"cmd":""},{"timeout":5}]')
+    assert result == [{"cmd": "a"}]
+
+
+def test_parse_suggestions_coerces_string_timeout():
+    result = _parse_suggestions('[{"cmd":"a","timeout":"60"}]')
+    assert result == [{"cmd": "a", "timeout": 60}]
+
+
+def test_parse_suggestions_drops_nonpositive_timeout():
+    assert _parse_suggestions('[{"cmd":"a","timeout":-1}]') == []
+
+
+def test_parse_suggestions_drops_zero_timeout():
+    assert _parse_suggestions('[{"cmd":"a","timeout":0}]') == []
+
+
+# --- _filter_dupes tests ---
+
+
+def test_filter_dupes_whitespace_normalization():
+    result = _filter_dupes([{"cmd": "ruff  check  src"}], ["ruff check src"])
+    assert result == []
+
+
+def test_filter_dupes_different_args_kept():
+    result = _filter_dupes([{"cmd": "ruff check ."}], ["ruff check src"])
+    assert result == [{"cmd": "ruff check ."}]
+
+
+# --- _format_suggested_failures tests ---
+
+
+def test_format_suggested_failures_structure():
+    failures = [HookResult(cmd="pytest -x", rc=1, output="E\n", duration=0.5)]
+    text = _format_suggested_failures(failures)
+    assert text.startswith("## Suggested check failures")
+    assert "$ pytest -x" in text
+    assert "E" in text
+
+
+# --- _run_suggested_checks tests ---
+
+
+def _make_run_suggested_cfg(**overrides):
+    cfg = {
+        "per_check_timeout": 120,
+        "suggester_total_budget": 300,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _make_hook_result(cmd="echo ok", rc=0, output="ok\n", duration=1.0):
+    return HookResult(cmd=cmd, rc=rc, output=output, duration=duration)
+
+
+def test_run_suggested_checks_all_pass(tmp_path):
+    suggested = [{"cmd": "echo ok"}, {"cmd": "echo hi"}]
+    cfg = _make_run_suggested_cfg()
+
+    engine = MagicMock()
+    ticker_ctx = MagicMock()
+    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    ticker_ctx.__exit__ = MagicMock(return_value=False)
+    engine.tty_ticker.return_value = ticker_ctx
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=_make_hook_result(rc=0),
+    ):
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+
+    assert failures == []
+    log_content = (tmp_path / "implement-spec.suggested.log").read_text()
+    assert "--- exit 0" in log_content
+
+
+def test_run_suggested_checks_first_failure_short_circuits(tmp_path):
+    suggested = [{"cmd": "false"}, {"cmd": "echo ok"}]
+    cfg = _make_run_suggested_cfg()
+
+    engine = MagicMock()
+    ticker_ctx = MagicMock()
+    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    ticker_ctx.__exit__ = MagicMock(return_value=False)
+    engine.tty_ticker.return_value = ticker_ctx
+
+    fail_result = _make_hook_result(cmd="false", rc=1, output="fail\n")
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=fail_result,
+    ) as mock_hook:
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+
+    assert len(failures) == 1
+    assert failures[0].rc == 1
+    assert mock_hook.call_count == 1
+
+
+def test_run_suggested_checks_timeout_capped(tmp_path):
+    suggested = [{"cmd": "slow", "timeout": 300}]
+    cfg = _make_run_suggested_cfg(per_check_timeout=120)
+
+    engine = MagicMock()
+    ticker_ctx = MagicMock()
+    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    ticker_ctx.__exit__ = MagicMock(return_value=False)
+    engine.tty_ticker.return_value = ticker_ctx
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=_make_hook_result(),
+    ) as mock_hook:
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+
+    mock_hook.assert_called_once_with("slow", 120, "/wt")
+
+
+def test_run_suggested_checks_default_timeout_used(tmp_path):
+    suggested = [{"cmd": "echo ok"}]
+    cfg = _make_run_suggested_cfg(per_check_timeout=90)
+
+    engine = MagicMock()
+    ticker_ctx = MagicMock()
+    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    ticker_ctx.__exit__ = MagicMock(return_value=False)
+    engine.tty_ticker.return_value = ticker_ctx
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=_make_hook_result(),
+    ) as mock_hook:
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+
+    mock_hook.assert_called_once_with("echo ok", 90, "/wt")
+
+
+def test_run_suggested_checks_budget_exhausted(tmp_path):
+    suggested = [{"cmd": "long"}, {"cmd": "next"}]
+    cfg = _make_run_suggested_cfg(suggester_total_budget=5)
+
+    engine = MagicMock()
+    ticker_ctx = MagicMock()
+    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    ticker_ctx.__exit__ = MagicMock(return_value=False)
+    engine.tty_ticker.return_value = ticker_ctx
+
+    long_result = _make_hook_result(cmd="long", rc=0, duration=10.0)
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=long_result,
+    ) as mock_hook:
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+
+    assert failures == []
+    assert mock_hook.call_count == 1
+    log_content = (tmp_path / "implement-spec.suggested.log").read_text()
+    assert "skipped (budget exhausted)" in log_content
+
+
+# --- Integration tests for ImplementSpecStep.run with suggest_extra_checks ---
+
+
+def _make_suggest_cfg(**overrides):
+    cfg = {
+        "max_retries": 2,
+        "timeout": 60,
+        "suggest_extra_checks": True,
+        "max_checks": 5,
+        "per_check_timeout": 120,
+        "suggester_timeout": 120,
+        "suggester_total_budget": 300,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def test_suggest_disabled_static_passes_no_suggester_called(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "suggest_extra_checks": False}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run_sugg,
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+    mock_run_sugg.assert_not_called()
+    keys_written = [c.args[1] for c in ctx.step_set.call_args_list]
+    assert "suggested_checks" not in keys_written
+
+
+def test_suggest_disabled_static_fails_no_suggester_called(tmp_path):
+    cfg = {"max_retries": 2, "timeout": 60, "suggest_extra_checks": False}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+
+    fail_result = MagicMock()
+    fail_result.rc = 1
+    fail_result.cmd = "make test"
+    fail_result.output = "boom"
+
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = [fail_result]
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        pytest.raises(StepError),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+
+
+def test_suggest_enabled_static_fails_no_suggester_called(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=1)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+
+    fail_result = MagicMock()
+    fail_result.rc = 1
+    fail_result.cmd = "make test"
+    fail_result.output = "boom"
+
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = [fail_result]
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        pytest.raises(StepError),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+
+
+def test_suggest_enabled_empty_list_commit_path_runs(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=1)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks", return_value=[]),
+        patch("draft.steps.implement_spec._run_suggested_checks", return_value=[]),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    calls = ctx.step_set.call_args_list
+    suggested_calls = [c for c in calls if c.args[1] == "suggested_checks"]
+    assert any(c.args[2] == [] for c in suggested_calls)
+
+
+def test_suggest_enabled_check_passes_commit_runs(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=1)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch(
+            "draft.steps.implement_spec._suggest_checks",
+            return_value=[{"cmd": "echo ok"}],
+        ),
+        patch("draft.steps.implement_spec._run_suggested_checks", return_value=[]),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    calls = ctx.step_set.call_args_list
+    commit_sha_calls = [c for c in calls if c.args[1] == "commit_sha"]
+    assert len(commit_sha_calls) == 1
+
+
+def test_suggest_enabled_check_fails_verify_errors_set_commit_not_taken(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    fail_result = HookResult(cmd="false", rc=1, output="fail\n", duration=0.1)
+    sugg_call_count = 0
+
+    def run_suggested_side(suggested, wt_dir, run_dir, eng, c):
+        nonlocal sugg_call_count
+        sugg_call_count += 1
+        if sugg_call_count == 1:
+            return [fail_result]
+        return []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch(
+            "draft.steps.implement_spec._suggest_checks",
+            return_value=[{"cmd": "false"}],
+        ),
+        patch(
+            "draft.steps.implement_spec._run_suggested_checks",
+            side_effect=run_suggested_side,
+        ),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    calls = ctx.step_set.call_args_list
+    verify_calls = [c for c in calls if c.args[1] == "verify_errors"]
+    assert any("Suggested check failures" in str(c.args[2]) for c in verify_calls)
+    commit_sha_calls = [c for c in calls if c.args[1] == "commit_sha"]
+    assert len(commit_sha_calls) == 1
+
+
+def test_suggest_invalid_json_treated_as_empty_commit_runs(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=1)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    engine.run_llm.side_effect = [
+        LLMResult(rc=0, final_text="implementing"),
+        LLMResult(rc=0, final_text="not json"),
+    ]
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="file.py\n"),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    calls = ctx.step_set.call_args_list
+    commit_sha_calls = [c for c in calls if c.args[1] == "commit_sha"]
+    assert len(commit_sha_calls) == 1
+
+
+def test_suggest_llm_rc1_with_valid_json_used(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=1)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    engine.run_llm.side_effect = [
+        LLMResult(rc=0, final_text="implementing"),
+        LLMResult(rc=1, final_text='[{"cmd":"echo ok"}]'),
+    ]
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="file.py\n"),
+        patch(
+            "draft.steps.implement_spec._run_suggested_checks", return_value=[]
+        ) as mock_run_sugg,
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_run_sugg.assert_called_once()
+    suggested_arg = mock_run_sugg.call_args[0][0]
+    assert suggested_arg == [{"cmd": "echo ok"}]
+
+
+def test_suggest_max_retries_exhausted_raises_step_error(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    fail_result = HookResult(cmd="false", rc=1, output="fail\n", duration=0.1)
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch(
+            "draft.steps.implement_spec._suggest_checks",
+            return_value=[{"cmd": "false"}],
+        ),
+        patch(
+            "draft.steps.implement_spec._run_suggested_checks",
+            return_value=[fail_result],
+        ),
+        pytest.raises(StepError) as exc_info,
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    assert exc_info.value.step_name == "implement-spec"
+
+
+def test_suggest_template_loaded_once_across_retries(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=3)
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    load_count = 0
+
+    def counting_load():
+        nonlocal load_count
+        load_count += 1
+        return "suggest template"
+
+    step = ImplementSpecStep()
+    with (
+        patch(
+            "draft.steps.implement_spec._load_suggest_template",
+            side_effect=counting_load,
+        ),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._suggest_checks", return_value=[]),
+        patch("draft.steps.implement_spec._run_suggested_checks", return_value=[]),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    assert load_count == 1
+
+
+# --- Template content tests ---
+
+
+def test_bundled_suggest_checks_has_required_markers():
+    from importlib.resources import files
+
+    content = (
+        files("draft.steps.implement_spec").joinpath("suggest_checks.md").read_text()
+    )
+    assert "{{SPEC}}" in content
+    assert "{{CHANGED_FILES}}" in content
+    assert "{{STATIC_CHECKS}}" in content
+    assert "{{PER_CHECK_TIMEOUT}}" in content
+
+
+def test_bundled_suggest_checks_has_no_diff_marker():
+    from importlib.resources import files
+
+    content = (
+        files("draft.steps.implement_spec").joinpath("suggest_checks.md").read_text()
+    )
+    assert "{{DIFF}}" not in content
