@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pipeline.metrics import now_human
 
-HEARTBEAT_INTERVAL_SECONDS = 10
+HEARTBEAT_INTERVAL_SECONDS = 5
 HEARTBEAT_FILENAME = "heartbeat"
 
 
