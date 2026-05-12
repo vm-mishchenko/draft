@@ -2,6 +2,7 @@ import json
 import sys
 
 from draft import runs
+from pipeline import RunMetrics, fmt_duration
 
 
 def register(subparsers):
@@ -53,6 +54,10 @@ def run(args) -> int:
         return 1
 
     data = state.get("data", {})
+    sessions = state.get("sessions", [])
+    started_at = sessions[0].get("started_at") if sessions else None
+    finished_at = sessions[-1].get("finished_at") if sessions else None
+    total_seconds = RunMetrics(sessions, run_dir).aggregates()["total_runtime_seconds"]
 
     if runs.is_run_finished(state):
         run_status = "done"
@@ -85,6 +90,10 @@ def run(args) -> int:
             "status": run_status,
             "worktree": worktree,
             "pr_url": pr_url,
+            "logs": str(run_dir),
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "total_runtime_seconds": total_seconds,
             "steps": step_rows,
         }
         print(json.dumps(result, indent=2))
@@ -97,6 +106,10 @@ def run(args) -> int:
     print(f"worktree: {worktree or '-'}")
     if pr_url:
         print(f"pr:       {pr_url}")
+    print(f"logs:          {run_dir}")
+    print(f"started:       {started_at or '-'}")
+    print(f"finished:      {finished_at or '-'}")
+    print(f"total runtime: {fmt_duration(total_seconds)}")
 
     print()
     print(f"{'STEP':<24}{'STATUS'}")
