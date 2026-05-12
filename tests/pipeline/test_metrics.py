@@ -6,8 +6,8 @@ import pipeline.metrics as metrics_module
 from pipeline.metrics import (
     KnownMetric,
     RunMetrics,
-    SessionHandle,
-    StepHandle,
+    SessionMetrics,
+    StepMetrics,
     _resolve_name,
     now_human,
     parse_human,
@@ -24,30 +24,30 @@ def test_now_human_round_trip():
 
 def test_step_handle_set_and_add(tmp_path):
     session_dict = {"steps": []}
-    session = SessionHandle(session_dict)
-    m = session.step_begin("my-step")
+    session_metrics = SessionMetrics(session_dict)
+    step_metrics = session_metrics.step_begin("my-step")
 
-    m.set("k", 1)
-    assert m._dict["data"]["k"] == 1
+    step_metrics.set("k", 1)
+    assert step_metrics._dict["data"]["k"] == 1
 
-    m.add("k", 2)
-    assert m._dict["data"]["k"] == 3
+    step_metrics.add("k", 2)
+    assert step_metrics._dict["data"]["k"] == 3
 
-    m.set("k", "string")
+    step_metrics.set("k", "string")
     with pytest.raises(TypeError):
-        m.add("k", 1)
+        step_metrics.add("k", 1)
 
 
 def test_step_handle_validates_name(tmp_path):
     session_dict = {"steps": []}
-    session = SessionHandle(session_dict)
-    m = session.step_begin("my-step")
+    session_metrics = SessionMetrics(session_dict)
+    step_metrics = session_metrics.step_begin("my-step")
 
     with pytest.raises(ValueError):
-        m.set("BAD-name", 1)
+        step_metrics.set("BAD-name", 1)
 
-    m.set("good_name_1", 1)
-    assert m._dict["data"]["good_name_1"] == 1
+    step_metrics.set("good_name_1", 1)
+    assert step_metrics._dict["data"]["good_name_1"] == 1
 
 
 def test_step_handle_rejects_string_shadowing_known(monkeypatch):
@@ -64,12 +64,12 @@ def test_step_handle_rejects_string_shadowing_known(monkeypatch):
 
 def test_handle_closed_raises_after_end(tmp_path):
     session_dict = {"steps": []}
-    session = SessionHandle(session_dict)
-    m = session.step_begin("my-step")
-    m.end(0)
+    session_metrics = SessionMetrics(session_dict)
+    step_metrics = session_metrics.step_begin("my-step")
+    step_metrics.end(0)
 
     with pytest.raises(RuntimeError, match="handle closed"):
-        m.set("k", 1)
+        step_metrics.set("k", 1)
 
 
 def test_session_begin_reconciles_open_prior(tmp_path):

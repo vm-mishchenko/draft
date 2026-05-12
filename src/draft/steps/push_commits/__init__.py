@@ -10,7 +10,7 @@ class PushCommitsStep(Step):
     def cmd(self, ctx) -> list[str]:
         return ["git", "push", "-u", "origin", "HEAD"]
 
-    def run(self, ctx, runner, lifecycle, metrics=None):
+    def run(self, ctx, runner, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
         with runner.stage(self.name):
             rc = runner.run_command(

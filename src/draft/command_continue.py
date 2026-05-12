@@ -170,7 +170,7 @@ def run(args) -> int:
 
     active_steps = [s for s in STEPS if s.name in set(expected)]
 
-    session = ctx.metrics.session_begin("continue")
+    session_metrics = ctx.metrics.session_begin("continue")
     ctx.save()
 
     _print_preamble(ctx, active_steps)
@@ -181,7 +181,7 @@ def run(args) -> int:
     hb = Heartbeat(run_dir / "heartbeat").start()
     rc = 0
     try:
-        Pipeline(active_steps).run(ctx, engine, lifecycle, session)
+        Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
@@ -190,7 +190,7 @@ def run(args) -> int:
         raise
     finally:
         hb.stop()
-        session.end(rc)
+        session_metrics.end(rc)
         ctx.save()
         pid_file.unlink(missing_ok=True)
 

@@ -227,7 +227,7 @@ class ImplementSpecStep(Step):
     def defaults(self) -> dict:
         return {"max_retries": 10, "timeout": 1200}
 
-    def run(self, ctx, engine, lifecycle, metrics=None):
+    def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
         wt_dir = ctx.get("wt_dir")
         spec = ctx.get("spec", "")

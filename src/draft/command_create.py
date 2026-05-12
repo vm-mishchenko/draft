@@ -645,7 +645,7 @@ def run(args) -> int:
     # 13. Session + preamble
     from pipeline import Pipeline
     pid_file = run_dir / "draft.pid"
-    session = ctx.metrics.session_begin("create")
+    session_metrics = ctx.metrics.session_begin("create")
     ctx.save()
     started_at = ctx._sessions[-1]["started_at"]
     _print_preamble(run_id, branch, wt_dir, run_dir, started_at, STEPS, skipped_names, worktree_mode)
@@ -660,7 +660,7 @@ def run(args) -> int:
     hb = Heartbeat(run_dir / "heartbeat").start()
     rc = 0
     try:
-        Pipeline(active_steps).run(ctx, engine, lifecycle, session)
+        Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
         rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
@@ -669,7 +669,7 @@ def run(args) -> int:
         raise
     finally:
         hb.stop()
-        session.end(rc)
+        session_metrics.end(rc)
         ctx.save()
         pid_file.unlink(missing_ok=True)
 
