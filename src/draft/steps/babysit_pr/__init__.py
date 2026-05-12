@@ -80,7 +80,7 @@ class BabysitPrStep(Step):
     def defaults(self) -> dict:
         return {"max_retries": 100, "timeout": 1200, "checks_delay": 60}
 
-    def run(self, ctx, engine, lifecycle):
+    def run(self, ctx, engine, lifecycle, metrics=None):
         cfg = ctx.config(self.name)
         pr_url = ctx.get("pr_url", "")
         wt_dir = ctx.get("wt_dir")

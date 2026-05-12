@@ -12,9 +12,16 @@ from draft.config import ConfigError, _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS, load
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Runner, RunContext, StepError
+from pipeline.heartbeat import Heartbeat
 
 
 _BRANCH_HEAD_SENTINEL = ""
+
+_STEP_EXIT_CODES = {
+    "implement-spec": 4,
+    "push-commits": 5,
+    "open-pr": 6,
+}
 
 
 def register(subparsers):
@@ -622,14 +629,12 @@ def run(args) -> int:
     ctx.set("repo", repo)
     ctx.set("spec", spec)
     ctx.set("project", project_name)
-    ctx.set("started_at", ctx.started_at)
     ctx.set("skip_pr", args.skip_pr)
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("pr_mode", pr_mode)
     ctx.set("delete_worktree", args.delete_worktree)
     if pr_url is not None:
         ctx.set("pr_url", pr_url)
-    ctx.save()
 
     # 12. In-place checkout (worktree_mode == no-worktree)
     if worktree_mode == "no-worktree":
@@ -637,8 +642,13 @@ def run(args) -> int:
     else:
         Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
 
-    # 13. Preamble
-    _print_preamble(run_id, branch, wt_dir, run_dir, ctx.started_at, STEPS, skipped_names, worktree_mode)
+    # 13. Session + preamble
+    from pipeline import Pipeline
+    pid_file = run_dir / "draft.pid"
+    session = ctx.metrics.session_begin("create")
+    ctx.save()
+    started_at = ctx._sessions[-1]["started_at"]
+    _print_preamble(run_id, branch, wt_dir, run_dir, started_at, STEPS, skipped_names, worktree_mode)
 
     # 14. Lifecycle + engine
     engine = Runner()
@@ -647,23 +657,26 @@ def run(args) -> int:
     )
 
     # 15. Run pipeline
+    hb = Heartbeat(run_dir / "heartbeat").start()
+    rc = 0
     try:
-        from pipeline import Pipeline
-        Pipeline(active_steps).run(ctx, engine, lifecycle)
+        Pipeline(active_steps).run(ctx, engine, lifecycle, session)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
-        _exit_code = {
-            "implement-spec": 4,
-            "push-commits": 5,
-            "open-pr": 6,
-        }.get(exc.step_name, 1)
-        (run_dir / "draft.pid").unlink(missing_ok=True)
-        return _exit_code
+        rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
+    except BaseException:
+        rc = -1
+        raise
+    finally:
+        hb.stop()
+        session.end(rc)
+        ctx.save()
+        pid_file.unlink(missing_ok=True)
 
     # 16. Done
-    if args.skip_pr and not (args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
-        print(f"done. (push and PR skipped; worktree left at {wt_dir})")
-    else:
-        print("done.")
-    (run_dir / "draft.pid").unlink(missing_ok=True)
-    return 0
+    if rc == 0:
+        if args.skip_pr and not (args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+            print(f"done. (push and PR skipped; worktree left at {wt_dir})")
+        else:
+            print("done.")
+    return rc

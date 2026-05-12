@@ -40,7 +40,7 @@ class Step:
     def cmd(self, ctx: "RunContext") -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None):
+    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None, metrics=None):
         cfg = ctx.config(self.name)
         with runner.stage(self.name):
             rc = runner.run_command(
@@ -58,19 +58,28 @@ class Pipeline:
     def __init__(self, steps: list[Step]):
         self.steps = steps
 
-    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: PipelineLifecycle | None = None):
+    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None", session):
         lc = lifecycle or PipelineLifecycle()
         for step in self.steps:
             if ctx.is_completed(step.name):
                 continue
             lc.before_step(step, ctx)
+            m = session.step_begin(step.name)
+            ctx.save()
             try:
-                step.run(ctx, runner, lc)
+                step.run(ctx, runner, lc, m)
                 ctx.mark_done(step.name)
+                m.end(0)
                 ctx.save()
                 lc.on_step_success(step, ctx)
             except StepError as exc:
+                m.end(exc.exit_code)
+                ctx.save()
                 lc.on_step_error(step, ctx, exc)
+                raise
+            except BaseException:
+                m.end(-1)
+                ctx.save()
                 raise
             finally:
                 lc.after_step(step, ctx)

@@ -2,8 +2,9 @@ import json
 import os
 import shutil
 import subprocess
-from datetime import datetime
 from pathlib import Path
+
+from pipeline.metrics import parse_human
 
 FULL_PIPELINE_STEPS = ("create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr")
 SKIP_PR_STEPS = ("create-worktree", "implement-spec")
@@ -45,11 +46,14 @@ def _run_started_at(run_dir: Path) -> float | None:
     state = load_state(run_dir)
     if state is None:
         return None
-    started = state.get("started_at", "")
+    sessions = state.get("sessions", [])
+    if not sessions:
+        return None
+    started = sessions[0].get("started_at")
     if not started:
         return None
     try:
-        return datetime.fromisoformat(started).timestamp()
+        return parse_human(started).timestamp()
     except (ValueError, TypeError):
         return None
 
