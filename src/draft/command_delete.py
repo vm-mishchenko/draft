@@ -24,7 +24,9 @@ def run(args) -> int:
         print(f"error: run '{args.run_id}' not found", file=sys.stderr)
         return 1
 
-    result = runs.delete_run(run_dir, delete_branch=getattr(args, "delete_branch", False))
+    result = runs.delete_run(
+        run_dir, delete_branch=getattr(args, "delete_branch", False)
+    )
 
     if result["status"] == "active":
         pid = result["pid"]

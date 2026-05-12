@@ -1,7 +1,4 @@
 import json
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +11,9 @@ def tmp_run_dir(tmp_path):
 
 
 def make_ctx(tmp_run_dir):
-    return RunContext("260505-120000", tmp_run_dir, step_configs={"my-step": {"timeout": 5}})
+    return RunContext(
+        "260505-120000", tmp_run_dir, step_configs={"my-step": {"timeout": 5}}
+    )
 
 
 def test_save_and_load_roundtrip(tmp_run_dir):

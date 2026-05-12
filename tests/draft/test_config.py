@@ -3,28 +3,39 @@ from pathlib import Path
 
 import pytest
 
-from draft.config import ConfigError, load_config, resolve_pr_body_template, resolve_prompt_template, step_config, validate_config
+from draft.config import (
+    ConfigError,
+    load_config,
+    resolve_pr_body_template,
+    resolve_prompt_template,
+    step_config,
+    validate_config,
+)
 
 
 def test_load_config_merges_global_and_project(tmp_path):
     global_dir = tmp_path / "home" / ".draft"
     global_dir.mkdir(parents=True)
-    (global_dir / "config.yaml").write_text(textwrap.dedent("""\
+    (global_dir / "config.yaml").write_text(
+        textwrap.dedent("""\
         steps:
           implement-spec:
             max_retries: 3
           push-commits:
             timeout: 60
-    """))
+    """)
+    )
 
     repo_dir = tmp_path / "repo"
     project_dir = repo_dir / ".draft"
     project_dir.mkdir(parents=True)
-    (project_dir / "config.yaml").write_text(textwrap.dedent("""\
+    (project_dir / "config.yaml").write_text(
+        textwrap.dedent("""\
         steps:
           implement-spec:
             max_retries: 7
-    """))
+    """)
+    )
 
     import unittest.mock as mock
 
@@ -44,9 +55,12 @@ def test_load_config_malformed_yaml_raises(tmp_path):
     (project_dir / "config.yaml").write_text("steps: [invalid: yaml: here")
 
     import unittest.mock as mock
-    with mock.patch.object(Path, "home", return_value=tmp_path / "nonexistent"):
-        with pytest.raises(ConfigError):
-            load_config(str(repo_dir))
+
+    with (
+        mock.patch.object(Path, "home", return_value=tmp_path / "nonexistent"),
+        pytest.raises(ConfigError),
+    ):
+        load_config(str(repo_dir))
 
 
 def test_step_config_merges_defaults_and_overrides():
@@ -79,6 +93,7 @@ def test_step_config_no_overrides_uses_defaults():
 
 
 # --- validate_config ---
+
 
 def test_validate_config_accepts_cmd_only():
     validate_config({"steps": {"s": {"hooks": {"pre": [{"cmd": "echo hi"}]}}}})
@@ -275,6 +290,7 @@ def test_resolve_prompt_template_empty_string_value(tmp_path):
 
 
 # --- resolve_pr_body_template ---
+
 
 def _make_pr_config(path_value):
     return {"steps": {"open-pr": {"pr_body_template": path_value}}}

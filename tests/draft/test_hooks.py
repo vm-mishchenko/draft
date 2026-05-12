@@ -31,6 +31,7 @@ def _runner(config, cwd, run_dir, engine=None) -> HookRunner:
 
 # --- log file shape ---
 
+
 def test_log_file_has_header_body_footer(tmp_path):
     out_file = tmp_path / "out.txt"
     config = {
@@ -95,6 +96,7 @@ def test_log_file_truncated_on_re_invocation(tmp_path):
 
 # --- empty / missing ---
 
+
 def test_no_hooks_no_log_file(tmp_path):
     _runner({}, tmp_path, tmp_path).run("nonexistent", "pre")
     assert not (tmp_path / "nonexistent.pre.log").exists()
@@ -107,6 +109,7 @@ def test_empty_event_no_log_file(tmp_path):
 
 
 # --- cwd missing ---
+
 
 def test_missing_cwd_skips_with_status_no_log(tmp_path):
     config = {
@@ -134,6 +137,7 @@ def test_missing_cwd_skips_with_status_no_log(tmp_path):
 
 # --- failure / fail-fast ---
 
+
 def test_first_failure_stops_event_returns_results(tmp_path):
     marker = tmp_path / "ran-second"
     config = {
@@ -160,15 +164,7 @@ def test_first_failure_stops_event_returns_results(tmp_path):
 
 
 def test_timeout_returns_failed_result(tmp_path):
-    config = {
-        "steps": {
-            "step": {
-                "hooks": {
-                    "pre": [{"cmd": "sleep 5", "timeout": 1}]
-                }
-            }
-        }
-    }
+    config = {"steps": {"step": {"hooks": {"pre": [{"cmd": "sleep 5", "timeout": 1}]}}}}
     [result] = _runner(config, tmp_path, tmp_path).run("step", "pre")
 
     assert result.rc == 124
@@ -178,6 +174,7 @@ def test_timeout_returns_failed_result(tmp_path):
 
 # --- duration ---
 
+
 def test_hook_result_carries_duration(tmp_path):
     config = {"steps": {"s": {"hooks": {"pre": [{"cmd": "true"}]}}}}
     [result] = _runner(config, tmp_path, tmp_path).run("s", "pre")
@@ -186,6 +183,7 @@ def test_hook_result_carries_duration(tmp_path):
 
 
 # --- DraftLifecycle wraps + raises ---
+
 
 def test_lifecycle_before_step_raises_on_failure(tmp_path):
     config = {"steps": {"s": {"hooks": {"pre": [{"cmd": "exit 5"}]}}}}
@@ -215,9 +213,7 @@ def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
     config = {
         "steps": {
             "implement-spec": {
-                "hooks": {
-                    "verify": [{"cmd": "exit 2"}, {"cmd": "true"}]
-                }
+                "hooks": {"verify": [{"cmd": "exit 2"}, {"cmd": "true"}]}
             }
         }
     }
@@ -232,13 +228,12 @@ def test_lifecycle_run_hooks_returns_failed_results_without_raising(tmp_path):
 
 # --- HookRunner.get_hooks ---
 
+
 def test_get_hooks_returns_configured_entries(tmp_path):
     config = {
         "steps": {
             "implement-spec": {
-                "hooks": {
-                    "verify": [{"cmd": "make test"}, {"cmd": "make lint"}]
-                }
+                "hooks": {"verify": [{"cmd": "make test"}, {"cmd": "make lint"}]}
             }
         }
     }
@@ -248,7 +243,9 @@ def test_get_hooks_returns_configured_entries(tmp_path):
 
 
 def test_get_hooks_returns_empty_for_unknown_step(tmp_path):
-    config = {"steps": {"implement-spec": {"hooks": {"verify": [{"cmd": "make test"}]}}}}
+    config = {
+        "steps": {"implement-spec": {"hooks": {"verify": [{"cmd": "make test"}]}}}
+    }
     runner = _runner(config, tmp_path, tmp_path)
     assert runner.get_hooks("unknown-step", "verify") == []
 
@@ -267,12 +264,9 @@ def test_get_hooks_returns_empty_for_known_step_missing_event(tmp_path):
 
 def test_get_hooks_does_not_invoke_subprocess(tmp_path):
     import subprocess as sp
+
     config = {
-        "steps": {
-            "implement-spec": {
-                "hooks": {"verify": [{"cmd": "make test"}]}
-            }
-        }
+        "steps": {"implement-spec": {"hooks": {"verify": [{"cmd": "make test"}]}}}
     }
     runner = _runner(config, tmp_path, tmp_path)
     original_run = sp.run
@@ -283,6 +277,7 @@ def test_get_hooks_does_not_invoke_subprocess(tmp_path):
         return original_run(*args, **kwargs)
 
     import unittest.mock as mock
+
     with mock.patch("subprocess.run", side_effect=spy):
         runner.get_hooks("implement-spec", "verify")
 
@@ -291,15 +286,10 @@ def test_get_hooks_does_not_invoke_subprocess(tmp_path):
 
 # --- DraftLifecycle.get_hooks ---
 
+
 def test_lifecycle_get_hooks_delegates_to_runner(tmp_path):
     config = {
-        "steps": {
-            "implement-spec": {
-                "hooks": {
-                    "verify": [{"cmd": "make test"}]
-                }
-            }
-        }
+        "steps": {"implement-spec": {"hooks": {"verify": [{"cmd": "make test"}]}}}
     }
     runner = _runner(config, tmp_path, tmp_path)
     lifecycle = DraftLifecycle(runner)

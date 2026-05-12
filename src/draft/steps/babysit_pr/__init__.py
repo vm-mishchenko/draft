@@ -26,8 +26,7 @@ def _build_claude_cmd(ctx) -> list[str]:
     else:
         verify_section = ""
     prompt = (
-        template
-        .replace("{{PR_URL}}", pr_url)
+        template.replace("{{PR_URL}}", pr_url)
         .replace("{{SPEC}}", spec)
         .replace("{{VERIFY_ERRORS}}", verify_section)
     )
@@ -38,7 +37,8 @@ def _check_ci(pr_url: str) -> dict[str, int]:
     """Returns counts keyed by state group: success, failure, pending."""
     result = subprocess.run(
         ["gh", "pr", "checks", pr_url, "--json", "state", "-q", ".[].state"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         timeout=60,
     )
     counts: dict[str, int] = {"success": 0, "failure": 0, "pending": 0}
@@ -46,7 +46,14 @@ def _check_ci(pr_url: str) -> dict[str, int]:
         state = line.strip().lower()
         if state in ("success", "completed"):
             counts["success"] += 1
-        elif state in ("failure", "failed", "action_required", "timed_out", "cancelled", "startup_failure"):
+        elif state in (
+            "failure",
+            "failed",
+            "action_required",
+            "timed_out",
+            "cancelled",
+            "startup_failure",
+        ):
             counts["failure"] += 1
         else:
             counts["pending"] += 1
@@ -56,7 +63,9 @@ def _check_ci(pr_url: str) -> dict[str, int]:
 def _has_unpushed_commits(cwd: str) -> bool:
     result = subprocess.run(
         ["git", "rev-list", "--count", "@{u}..HEAD"],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
     if result.returncode != 0:
         return False
@@ -69,7 +78,9 @@ def _has_unpushed_commits(cwd: str) -> bool:
 def _is_branch_clean(cwd: str) -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
     return result.stdout.strip() == ""
 
@@ -103,13 +114,16 @@ class BabysitPrStep(Step):
                     f"{counts['pending']} pending"
                 )
 
-                if counts["failure"] == 0 and counts["pending"] == 0:
-                    if _is_branch_clean(wt_dir):
-                        ctx.step_set(self.name, "attempts", attempt)
-                        ctx.save()
-                        s.update(f"green ({attempt} checks)")
-                        print(f"PR is green: {pr_url}")
-                        return
+                if (
+                    counts["failure"] == 0
+                    and counts["pending"] == 0
+                    and _is_branch_clean(wt_dir)
+                ):
+                    ctx.step_set(self.name, "attempts", attempt)
+                    ctx.save()
+                    s.update(f"green ({attempt} checks)")
+                    print(f"PR is green: {pr_url}")
+                    return
 
                 if counts["failure"] > 0:
                     engine.run_command(
@@ -123,7 +137,9 @@ class BabysitPrStep(Step):
                         results = lifecycle.run_hooks(self.name, "verify")
                         failures = [r for r in results if r.rc != 0]
                         if failures:
-                            errors = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
+                            errors = "\n\n".join(
+                                f"$ {r.cmd}\n{r.output}" for r in failures
+                            )
                             ctx.step_set(self.name, "verify_errors", errors)
                         else:
                             ctx.step_set(self.name, "verify_errors", "")
@@ -138,7 +154,9 @@ class BabysitPrStep(Step):
 
                 ctx.step_set(self.name, "attempts", attempt)
                 ctx.save()
-                next_delay = INITIAL_PR_CHECK_DELAY if pushed_this_iter else cfg["checks_delay"]
+                next_delay = (
+                    INITIAL_PR_CHECK_DELAY if pushed_this_iter else cfg["checks_delay"]
+                )
                 engine.sleep(next_delay, "waiting before pr-checks")
 
         print(f"babysit-pr: exhausted attempts. PR: {pr_url}")

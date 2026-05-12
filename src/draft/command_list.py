@@ -27,15 +27,31 @@ def _row_data(run_dir: Path) -> dict:
     project = run_dir.parent.name
     state_path = run_dir / "state.json"
     if not state_path.exists():
-        return {"run_id": run_id, "project": project, "state": "missing",
-                "stages_completed": None, "stages_total": None,
-                "running": running, "workspace": None, "branch": None, "pr_url": None}
+        return {
+            "run_id": run_id,
+            "project": project,
+            "state": "missing",
+            "stages_completed": None,
+            "stages_total": None,
+            "running": running,
+            "workspace": None,
+            "branch": None,
+            "pr_url": None,
+        }
     try:
         payload = json.loads(state_path.read_text())
     except Exception:
-        return {"run_id": run_id, "project": project, "state": "corrupt",
-                "stages_completed": None, "stages_total": None,
-                "running": running, "workspace": None, "branch": None, "pr_url": None}
+        return {
+            "run_id": run_id,
+            "project": project,
+            "state": "corrupt",
+            "stages_completed": None,
+            "stages_total": None,
+            "running": running,
+            "workspace": None,
+            "branch": None,
+            "pr_url": None,
+        }
     project = payload.get("data", {}).get("project", project) or project
     stages_completed = len(payload.get("completed", []))
     stages_total = len(runs.expected_steps(payload))
@@ -44,9 +60,17 @@ def _row_data(run_dir: Path) -> dict:
     wt_dir = payload.get("data", {}).get("wt_dir") or ""
     ws = _workspace_status(wt_dir)
     workspace = None if ws == "-" else ws
-    return {"run_id": run_id, "project": project, "state": "ok",
-            "stages_completed": stages_completed, "stages_total": stages_total,
-            "running": running, "workspace": workspace, "branch": branch, "pr_url": pr_url}
+    return {
+        "run_id": run_id,
+        "project": project,
+        "state": "ok",
+        "stages_completed": stages_completed,
+        "stages_total": stages_total,
+        "running": running,
+        "workspace": workspace,
+        "branch": branch,
+        "pr_url": pr_url,
+    }
 
 
 def _is_run_active(run_dir: Path) -> bool:
@@ -111,6 +135,8 @@ def run(args) -> int:
             stages_str = "corrupt"
         else:
             stages_str = f"{row['stages_completed']}/{row['stages_total']}"
-        print(f"{row['run_id']:<18}  {row['project']:<20}  {stages_str:<10}  {running_str:<8}  {workspace_str:<10}  {branch_str:<30}  {pr_str}")
+        print(
+            f"{row['run_id']:<18}  {row['project']:<20}  {stages_str:<10}  {running_str:<8}  {workspace_str:<10}  {branch_str:<30}  {pr_str}"
+        )
 
     return 0

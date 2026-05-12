@@ -1,7 +1,7 @@
-import os
+import contextlib
 import re
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 _HUMAN_FMT = "%Y-%m-%d %H:%M:%S UTC"
@@ -9,16 +9,17 @@ _NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 
 def now_human() -> str:
-    return datetime.now(timezone.utc).strftime(_HUMAN_FMT)
+    return datetime.now(UTC).strftime(_HUMAN_FMT)
 
 
 def parse_human(s: str) -> datetime:
     dt = datetime.strptime(s, _HUMAN_FMT)
-    return dt.replace(tzinfo=timezone.utc)
+    return dt.replace(tzinfo=UTC)
 
 
-class KnownMetric(str, Enum):
+class KnownMetric(StrEnum):
     """Enumeration of well-known metric keys; extend to add reserved names."""
+
     pass
 
 
@@ -39,6 +40,7 @@ def _resolve_name(name) -> str:
 
 class StepMetrics:
     """Mutable view into a single step entry; closed after `end()` is called."""
+
     def __init__(self, step_dict: dict):
         self._dict = step_dict
         self._closed = False
@@ -69,6 +71,7 @@ class StepMetrics:
 
 class SessionMetrics:
     """Mutable view into a single session entry; produces StepMetrics for each step."""
+
     def __init__(self, session_dict: dict):
         self._dict = session_dict
         self._closed = False
@@ -96,6 +99,7 @@ class SessionMetrics:
 
 class RunMetrics:
     """Top-level metrics object for a run; owns the sessions list and reconciles crash state."""
+
     def __init__(self, sessions: list, run_dir: Path):
         self._sessions = sessions
         self._run_dir = run_dir
@@ -114,39 +118,32 @@ class RunMetrics:
 
     def _reconcile_unclosed(self):
         from pipeline.heartbeat import HEARTBEAT_FILENAME
+
         hb_path = self._run_dir / HEARTBEAT_FILENAME
         if not self._sessions or self._sessions[-1]["finished_at"] is not None:
-            try:
+            with contextlib.suppress(OSError):
                 hb_path.unlink(missing_ok=True)
-            except OSError:
-                pass
             return
 
         last = self._sessions[-1]
         ts = None
 
-        try:
+        with contextlib.suppress(OSError, ValueError):
             ts = parse_human(hb_path.read_text().strip())
-        except (OSError, ValueError):
-            pass
 
         if ts is None:
             step_times = []
             for step in last.get("steps", []):
                 fat = step.get("finished_at")
                 if fat is not None:
-                    try:
+                    with contextlib.suppress(ValueError):
                         step_times.append(parse_human(fat))
-                    except ValueError:
-                        pass
             if step_times:
                 ts = max(step_times)
 
         if ts is None:
-            try:
+            with contextlib.suppress(ValueError, KeyError):
                 ts = parse_human(last["started_at"])
-            except (ValueError, KeyError):
-                pass
 
         ts_str = ts.strftime(_HUMAN_FMT) if ts is not None else now_human()
 
@@ -157,7 +154,5 @@ class RunMetrics:
                 step["finished_at"] = ts_str
                 step["exit_code"] = -1
 
-        try:
+        with contextlib.suppress(OSError):
             hb_path.unlink(missing_ok=True)
-        except OSError:
-            pass

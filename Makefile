@@ -1,7 +1,7 @@
 VENV := .venv
 BIN  := $(VENV)/bin
 
-.PHONY: setup clean test e2e
+.PHONY: setup clean test e2e lint lint-fix
 
 setup:
 	python3 -m venv $(VENV)
@@ -20,3 +20,11 @@ test:
 
 e2e:
 	PATH="$(CURDIR)/$(BIN):$$PATH" $(BIN)/pytest tests/e2e/
+
+lint:
+	$(BIN)/ruff check src tests
+	$(BIN)/ruff format --check src tests
+
+lint-fix:
+	$(BIN)/ruff check --fix src tests
+	$(BIN)/ruff format src tests

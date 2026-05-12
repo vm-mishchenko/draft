@@ -1,9 +1,10 @@
+import contextlib
 import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pipeline import PipelineLifecycle, StepError
@@ -66,15 +67,12 @@ class HookRunner:
         self._engine = engine
 
     def get_hooks(self, step_name: str, event: str) -> list[dict]:
-        return list(self._steps_config.get(step_name, {}).get("hooks", {}).get(event, []) or [])
+        return list(
+            self._steps_config.get(step_name, {}).get("hooks", {}).get(event, []) or []
+        )
 
     def run(self, step_name: str, event: str) -> list[HookResult]:
-        entries = (
-            self._steps_config
-            .get(step_name, {})
-            .get("hooks", {})
-            .get(event, [])
-        )
+        entries = self._steps_config.get(step_name, {}).get("hooks", {}).get(event, [])
         if not entries:
             return []
 
@@ -89,22 +87,22 @@ class HookRunner:
         results: list[HookResult] = []
 
         log_fd = None
-        try:
-            log_fd = open(log_path, "w")
-        except OSError as exc:
-            print(
-                f"warning: could not write hook log {log_path}: {exc}",
-                file=sys.stderr,
-            )
+        with contextlib.ExitStack() as stack:
+            try:
+                log_fd = stack.enter_context(open(log_path, "w"))
+            except OSError as exc:
+                print(
+                    f"warning: could not write hook log {log_path}: {exc}",
+                    file=sys.stderr,
+                )
 
-        try:
             for i, entry in enumerate(entries):
                 cmd = entry["cmd"]
                 timeout = entry.get("timeout", 30)
                 label = f"{step_name}.{event}[{i}] {cmd}"
 
                 if log_fd is not None:
-                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                     log_fd.write(f"=== {step_name}.{event}[{i}] @ {ts} ===\n")
                     log_fd.write(f"$ {cmd}\n")
                     log_fd.flush()
@@ -126,9 +124,6 @@ class HookRunner:
 
                 if result.rc != 0:
                     break
-        finally:
-            if log_fd is not None:
-                log_fd.close()
 
         return results
 

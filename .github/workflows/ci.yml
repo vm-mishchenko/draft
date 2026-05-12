@@ -14,5 +14,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: make setup
+      - run: make lint
       - run: make test
       - run: make e2e

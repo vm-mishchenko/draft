@@ -1,13 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 import pipeline.metrics as metrics_module
 from pipeline.metrics import (
-    KnownMetric,
     RunMetrics,
     SessionMetrics,
-    StepMetrics,
     _resolve_name,
     now_human,
     parse_human,
@@ -17,8 +15,8 @@ from pipeline.metrics import (
 def test_now_human_round_trip():
     s = now_human()
     dt = parse_human(s)
-    assert dt.tzinfo == timezone.utc
-    delta = abs((datetime.now(timezone.utc) - dt).total_seconds())
+    assert dt.tzinfo == UTC
+    delta = abs((datetime.now(UTC) - dt).total_seconds())
     assert delta < 1
 
 
@@ -53,7 +51,7 @@ def test_step_handle_validates_name(tmp_path):
 def test_step_handle_rejects_string_shadowing_known(monkeypatch):
     import enum
 
-    class FakeKnownMetric(str, enum.Enum):
+    class FakeKnownMetric(enum.StrEnum):
         FAKE = "fake_metric"
 
     monkeypatch.setattr(metrics_module, "KnownMetric", FakeKnownMetric)

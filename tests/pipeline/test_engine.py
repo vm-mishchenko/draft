@@ -6,9 +6,11 @@ from pipeline.runner import Runner
 
 def test_stage_no_update_final_line_ends_with_ok(capsys):
     runner = Runner()
-    with patch.object(sys.stdout, "isatty", return_value=False):
-        with runner.stage("my-label"):
-            pass
+    with (
+        patch.object(sys.stdout, "isatty", return_value=False),
+        runner.stage("my-label"),
+    ):
+        pass
     captured = capsys.readouterr()
     assert "my-label" in captured.out
     assert captured.out.rstrip().endswith("ok")
@@ -17,9 +19,11 @@ def test_stage_no_update_final_line_ends_with_ok(capsys):
 
 def test_stage_update_final_line_ends_with_last_status(capsys):
     runner = Runner()
-    with patch.object(sys.stdout, "isatty", return_value=False):
-        with runner.stage("my-label") as s:
-            s.update("3/10")
+    with (
+        patch.object(sys.stdout, "isatty", return_value=False),
+        runner.stage("my-label") as s,
+    ):
+        s.update("3/10")
     captured = capsys.readouterr()
     assert captured.out.rstrip().endswith("3/10")
 
@@ -28,9 +32,11 @@ def test_stage_exception_final_line_ends_with_failed(capsys):
     runner = Runner()
     raised = False
     try:
-        with patch.object(sys.stdout, "isatty", return_value=False):
-            with runner.stage("boom"):
-                raise RuntimeError("boom")
+        with (
+            patch.object(sys.stdout, "isatty", return_value=False),
+            runner.stage("boom"),
+        ):
+            raise RuntimeError("boom")
     except RuntimeError:
         raised = True
     assert raised
@@ -85,10 +91,12 @@ def test_sleep_outside_stage_writes_to_stdout(capsys):
 
 def test_sleep_inside_stage_updates_status_no_countdown(capsys):
     runner = Runner()
-    with patch.object(sys.stdout, "isatty", return_value=False):
-        with runner.stage("my-stage") as s:
-            runner.sleep(0.01, "my-sleep-label")
-            assert s._status == "ok"  # prev_status restored after sleep
+    with (
+        patch.object(sys.stdout, "isatty", return_value=False),
+        runner.stage("my-stage") as s,
+    ):
+        runner.sleep(0.01, "my-sleep-label")
+        assert s._status == "ok"  # prev_status restored after sleep
     captured = capsys.readouterr()
     assert captured.out.rstrip().endswith("ok")
     assert "s..." not in captured.out

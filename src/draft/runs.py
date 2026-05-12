@@ -6,11 +6,23 @@ from pathlib import Path
 
 from pipeline.metrics import parse_human
 
-FULL_PIPELINE_STEPS = ("create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr")
+FULL_PIPELINE_STEPS = (
+    "create-worktree",
+    "implement-spec",
+    "push-commits",
+    "open-pr",
+    "babysit-pr",
+)
 SKIP_PR_STEPS = ("create-worktree", "implement-spec")
 
 
-def _expected_steps(*, worktree_mode: str, pr_mode: str | None, skip_pr: bool, delete_worktree: bool = False) -> tuple[str, ...]:
+def _expected_steps(
+    *,
+    worktree_mode: str,
+    pr_mode: str | None,
+    skip_pr: bool,
+    delete_worktree: bool = False,
+) -> tuple[str, ...]:
     steps: list[str] = []
     if worktree_mode not in ("no-worktree", "reuse-existing"):
         steps.append("create-worktree")
@@ -211,9 +223,13 @@ def delete_run(run_dir: Path, *, delete_branch: bool = False) -> dict:
                 result["branch_deleted"] = True
             else:
                 stderr = r.stderr.strip() or r.stdout.strip()
-                result["warnings"].append(f"failed to delete branch '{branch}': {stderr}")
+                result["warnings"].append(
+                    f"failed to delete branch '{branch}': {stderr}"
+                )
         else:
-            result["warnings"].append("--delete-branch requested but branch or repo missing from state")
+            result["warnings"].append(
+                "--delete-branch requested but branch or repo missing from state"
+            )
 
     shutil.rmtree(run_dir)
     result["status"] = "deleted"

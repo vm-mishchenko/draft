@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 TIMEOUT_EXIT = 124
@@ -35,7 +35,7 @@ class Runner:
     @contextmanager
     def tty_ticker(self, label: str):
         is_tty = sys.stdout.isatty()
-        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
+        padded = label[: self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
         start = time.monotonic()
         stop_event = threading.Event()
         final_status = ["?"]
@@ -73,7 +73,7 @@ class Runner:
     @contextmanager
     def stage(self, label: str):
         is_tty = sys.stdout.isatty()
-        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
+        padded = label[: self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
         start = time.monotonic()
         stop_event = threading.Event()
         handle = StageHandle()
@@ -82,7 +82,9 @@ class Runner:
         def _tick():
             while not stop_event.is_set():
                 if handle._countdown_until is not None:
-                    slot = _fmt_elapsed(max(0.0, handle._countdown_until - time.monotonic()))
+                    slot = _fmt_elapsed(
+                        max(0.0, handle._countdown_until - time.monotonic())
+                    )
                 else:
                     slot = _fmt_elapsed(time.monotonic() - start)
                 line = f"{padded} {slot:>7}  {handle._status}"
@@ -125,7 +127,7 @@ class Runner:
         line_formatter=None,
     ) -> int:
         with open(log_path, "a") as log_fd:
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             log_fd.write(f"=== attempt {attempt} @ {ts} ===\n")
             log_fd.flush()
 
@@ -145,7 +147,11 @@ class Runner:
                         for ln in lines:
                             formatted = line_formatter(ln)
                             if formatted is not None:
-                                out.append(formatted if formatted.endswith("\n") else formatted + "\n")
+                                out.append(
+                                    formatted
+                                    if formatted.endswith("\n")
+                                    else formatted + "\n"
+                                )
                         text = "".join(out)
                     if text:
                         log_fd.write(text)
@@ -182,7 +188,7 @@ class Runner:
                 handle._status = prev_status
             return
         is_tty = sys.stdout.isatty()
-        padded = label[:self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
+        padded = label[: self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
         end = time.monotonic() + seconds
         while True:
             remaining = end - time.monotonic()
