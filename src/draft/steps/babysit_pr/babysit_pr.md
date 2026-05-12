@@ -4,8 +4,10 @@ You are an expert software engineer. A PR has failing CI checks.
 
 PR URL: {{PR_URL}}
 
+{{CHECK_FAILURES}}
+
 Your task:
-1. Look at the CI check failures using `gh pr checks` or by reading the repository
+1. The failing checks are listed above. Treat that list as authoritative. You may run `gh pr checks` or `gh run view` for deeper logs
 2. Diagnose the root cause of each failure
 3. Fix the code to make the checks pass
 

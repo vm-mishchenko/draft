@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from importlib.resources import files
@@ -8,6 +9,26 @@ from pipeline.runner import TIMEOUT_EXIT
 
 # seconds to wait before the first poll and after a push; not user-configurable, CI needs time to register a new commit
 INITIAL_PR_CHECK_DELAY = 15
+
+FAILURE_STATES = frozenset(
+    {
+        "failure",
+        "failed",
+        "action_required",
+        "timed_out",
+        "cancelled",
+        "startup_failure",
+    }
+)
+
+
+def _normalise_state(raw: str) -> str:
+    s = raw.strip().lower()
+    if s in ("success", "completed"):
+        return "success"
+    if s in FAILURE_STATES:
+        return "failure"
+    return "pending"
 
 
 def _render_verify_commands(entries: list[dict]) -> str:
@@ -23,7 +44,21 @@ def _render_verify_commands(entries: list[dict]) -> str:
     )
 
 
-def _build_prompt(ctx, verify_commands: str) -> str:
+def _render_check_failures(entries: list[dict]) -> str:
+    failed = [e for e in entries if e["state"] == "failure"]
+    if not failed:
+        return ""
+    lines = []
+    for e in failed:
+        name = " ".join(str(e["name"]).split())
+        if e["link"]:
+            lines.append(f"- {name} ({e['conclusion']}) {e['link']}")
+        else:
+            lines.append(f"- {name} ({e['conclusion']})")
+    return "## Failing checks\n\n" + "\n".join(lines)
+
+
+def _build_prompt(ctx, verify_commands: str, failed_checks: list[dict]) -> str:
     template = files("draft.steps.babysit_pr").joinpath("babysit_pr.md").read_text()
     pr_url = ctx.get("pr_url", "")
     spec_path = ctx.get("spec", "")
@@ -42,37 +77,35 @@ def _build_prompt(ctx, verify_commands: str) -> str:
         verify_section = ""
     return (
         template.replace("{{PR_URL}}", pr_url)
+        .replace("{{CHECK_FAILURES}}", _render_check_failures(failed_checks))
         .replace("{{SPEC}}", spec)
         .replace("{{VERIFY_COMMANDS}}", verify_commands)
         .replace("{{VERIFY_ERRORS}}", verify_section)
     )
 
 
-def _check_ci(pr_url: str) -> dict[str, int]:
-    """Returns counts keyed by state group: success, failure, pending."""
+def _check_ci(pr_url: str) -> tuple[dict[str, int], list[dict]]:
+    """Returns (counts, entries); counts keyed by state group: success, failure, pending."""
     result = subprocess.run(
-        ["gh", "pr", "checks", pr_url, "--json", "state", "-q", ".[].state"],
+        ["gh", "pr", "checks", pr_url, "--json", "name,state,link"],
         capture_output=True,
         text=True,
         timeout=60,
     )
+    raw_entries = json.loads(result.stdout or "[]")
+    entries = [
+        {
+            "name": str(x.get("name", "")),
+            "state": _normalise_state(str(x.get("state", ""))),
+            "conclusion": str(x.get("state", "")).strip().lower(),
+            "link": str(x.get("link", "")),
+        }
+        for x in raw_entries
+    ]
     counts: dict[str, int] = {"success": 0, "failure": 0, "pending": 0}
-    for line in result.stdout.splitlines():
-        state = line.strip().lower()
-        if state in ("success", "completed"):
-            counts["success"] += 1
-        elif state in (
-            "failure",
-            "failed",
-            "action_required",
-            "timed_out",
-            "cancelled",
-            "startup_failure",
-        ):
-            counts["failure"] += 1
-        else:
-            counts["pending"] += 1
-    return counts
+    for e in entries:
+        counts[e["state"]] += 1
+    return counts, entries
 
 
 def _has_changes(cwd: str) -> bool:
@@ -223,9 +256,10 @@ class BabysitPrStep(Step):
                 pushed_this_iter = False
 
                 try:
-                    counts = _check_ci(pr_url)
+                    counts, entries = _check_ci(pr_url)
                 except Exception:
                     counts = {"success": 0, "failure": 0, "pending": 1}
+                    entries = []
 
                 total = sum(counts.values())
                 print(
@@ -246,8 +280,9 @@ class BabysitPrStep(Step):
                     return
 
                 if counts["failure"] > 0:
+                    failed = [e for e in entries if e["state"] == "failure"]
                     engine.run_llm(
-                        prompt=_build_prompt(ctx, verify_commands),
+                        prompt=_build_prompt(ctx, verify_commands, failed),
                         cwd=wt_dir,
                         log_path=ctx.log_path(self.name),
                         step_metrics=step_metrics,
