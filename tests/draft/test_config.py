@@ -398,3 +398,98 @@ def test_resolve_pr_body_template_valid_rewrites_to_absolute(tmp_path):
     config = _make_pr_config("template.md")
     result = resolve_pr_body_template(config, str(repo))
     assert result["steps"]["open-pr"]["pr_body_template"] == str(tpl.resolve())
+
+
+# --- validate_config: implement-spec specific keys ---
+
+
+def _make_impl_config(**step_cfg):
+    return {"steps": {"implement-spec": step_cfg}}
+
+
+def test_validate_config_max_checks_negative():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(max_checks=-1))
+
+
+def test_validate_config_max_checks_too_large():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(max_checks=21))
+
+
+def test_validate_config_max_checks_zero_ok():
+    validate_config(_make_impl_config(max_checks=0))
+
+
+def test_validate_config_max_checks_twenty_ok():
+    validate_config(_make_impl_config(max_checks=20))
+
+
+def test_validate_config_per_check_timeout_too_large():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(per_check_timeout=181))
+
+
+def test_validate_config_per_check_timeout_zero():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(per_check_timeout=0))
+
+
+def test_validate_config_per_check_timeout_ok():
+    validate_config(_make_impl_config(per_check_timeout=180))
+
+
+def test_validate_config_suggester_timeout_string():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggester_timeout="120"))
+
+
+def test_validate_config_suggester_timeout_too_large():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggester_timeout=601))
+
+
+def test_validate_config_suggester_timeout_ok():
+    validate_config(_make_impl_config(suggester_timeout=600))
+
+
+def test_validate_config_suggester_total_budget_ok():
+    validate_config(_make_impl_config(suggester_total_budget=600))
+
+
+def test_validate_config_suggester_total_budget_too_large():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggester_total_budget=3601))
+
+
+def test_validate_config_suggester_total_budget_zero():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggester_total_budget=0))
+
+
+def test_validate_config_impl_spec_keys_ignored_on_other_steps():
+    # Keys max_checks etc. are only validated for implement-spec
+    validate_config({"steps": {"babysit-pr": {"max_checks": -1}}})
+    validate_config({"steps": {"open-pr": {"suggester_timeout": "bad"}}})  # type: ignore[arg-type]
+
+
+def test_validate_config_suggest_extra_checks_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggest_extra_checks="yes"))
+
+
+def test_validate_config_suggest_extra_checks_int_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(_make_impl_config(suggest_extra_checks=1))
+
+
+def test_validate_config_suggest_extra_checks_false_accepted():
+    validate_config(_make_impl_config(suggest_extra_checks=False))
+
+
+def test_validate_config_suggest_extra_checks_true_accepted():
+    validate_config(_make_impl_config(suggest_extra_checks=True))
+
+
+def test_validate_config_suggest_extra_checks_other_step_ignored():
+    validate_config({"steps": {"babysit-pr": {"suggest_extra_checks": "bad"}}})

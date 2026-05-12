@@ -1,8 +1,12 @@
+import contextlib
+import json
 import subprocess
 import sys
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
+from draft.hooks import HookResult, _run_hook_cmd, _status_text
 from pipeline import Step, StepError
 from pipeline.runner import TIMEOUT_EXIT
 
@@ -12,6 +16,10 @@ def _load_template(cfg: dict) -> str:
     if path:
         return Path(path).read_text(encoding="utf-8")
     return files("draft.steps.implement_spec").joinpath("implement_spec.md").read_text()
+
+
+def _load_suggest_template() -> str:
+    return files("draft.steps.implement_spec").joinpath("suggest_checks.md").read_text()
 
 
 def _render_verify_commands(entries: list[dict]) -> str:
@@ -98,6 +106,132 @@ def _run_git_capture_allow_fail(
     return result
 
 
+def _normalize_cmd(cmd: str) -> str:
+    return " ".join(cmd.split())
+
+
+def _parse_suggestions(text: str) -> list[dict]:
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    result = []
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            continue
+        cmd = entry.get("cmd")
+        if not isinstance(cmd, str) or not cmd:
+            continue
+        new_entry: dict = {"cmd": cmd}
+        timeout = entry.get("timeout")
+        if timeout is not None:
+            try:
+                t = int(timeout)
+            except (TypeError, ValueError):
+                continue
+            if t <= 0:
+                continue
+            new_entry["timeout"] = t
+        result.append(new_entry)
+    return result
+
+
+def _filter_dupes(suggested: list[dict], static_cmds: list[str]) -> list[dict]:
+    normalized_static = {_normalize_cmd(c) for c in static_cmds}
+    return [e for e in suggested if _normalize_cmd(e["cmd"]) not in normalized_static]
+
+
+def _format_suggested_failures(failures: list[HookResult]) -> str:
+    parts = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
+    return f"## Suggested check failures\n\n{parts}"
+
+
+def _suggest_checks(
+    ctx, engine, step_metrics, cfg, spec, wt_dir, static_cmds, suggest_template: str
+) -> list[dict]:
+    suggest_log = ctx.run_dir / "implement-spec.suggest.log"
+    changed_files = _run_git_capture(
+        ["git", "diff", "--name-status", "HEAD"], wt_dir, 60, suggest_log
+    )
+    static_bullets = "\n".join(f"- {cmd}" for cmd in static_cmds) or "(none)"
+    prompt = (
+        suggest_template.replace("{{SPEC}}", spec)
+        .replace("{{CHANGED_FILES}}", changed_files.strip())
+        .replace("{{STATIC_CHECKS}}", static_bullets)
+        .replace("{{PER_CHECK_TIMEOUT}}", str(cfg["per_check_timeout"]))
+    )
+    result = engine.run_llm(
+        prompt=prompt,
+        cwd=wt_dir,
+        log_path=suggest_log,
+        step_metrics=step_metrics,
+        allowed_tools=["Read"],
+        timeout=cfg["suggester_timeout"],
+    )
+    return _filter_dupes(_parse_suggestions(result.final_text), static_cmds)[
+        : cfg["max_checks"]
+    ]
+
+
+def _run_suggested_checks(
+    suggested: list[dict], wt_dir: str, run_dir: Path, engine, cfg: dict
+) -> list[HookResult]:
+    log_path = run_dir / "implement-spec.suggested.log"
+    failures: list[HookResult] = []
+    elapsed = 0.0
+
+    with contextlib.ExitStack() as stack:
+        try:
+            log_fd = stack.enter_context(open(log_path, "a"))
+        except OSError as exc:
+            print(
+                f"warning: could not write suggested log {log_path}: {exc}",
+                file=sys.stderr,
+            )
+            log_fd = None
+
+        for i, entry in enumerate(suggested):
+            if elapsed >= cfg["suggester_total_budget"]:
+                if log_fd is not None:
+                    log_fd.write("--- skipped (budget exhausted) ---\n")
+                    log_fd.flush()
+                break
+
+            timeout = min(
+                int(entry.get("timeout") or cfg["per_check_timeout"]),
+                cfg["per_check_timeout"],
+            )
+            label = f"implement-spec.suggested[{i}] {entry['cmd']}"
+
+            if log_fd is not None:
+                ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                log_fd.write(f"=== implement-spec.suggested[{i}] @ {ts} ===\n")
+                log_fd.write(f"$ {entry['cmd']}\n")
+                log_fd.flush()
+
+            with engine.tty_ticker(label) as set_status:
+                result = _run_hook_cmd(entry["cmd"], timeout, wt_dir)
+                set_status(_status_text(result.rc))
+
+            if log_fd is not None:
+                if result.output:
+                    log_fd.write(result.output)
+                    if not result.output.endswith("\n"):
+                        log_fd.write("\n")
+                log_fd.write(f"--- exit {result.rc} in {result.duration:.1f}s ---\n\n")
+                log_fd.flush()
+
+            elapsed += result.duration
+
+            if result.rc != 0:
+                failures.append(result)
+                break
+
+    return failures
+
+
 def _generate_commit_message(
     spec: str,
     wt_dir: str,
@@ -156,7 +290,15 @@ class ImplementSpecStep(Step):
     name = "implement-spec"
 
     def defaults(self) -> dict:
-        return {"max_retries": 10, "timeout": 1200}
+        return {
+            "max_retries": 10,
+            "timeout": 1200,
+            "suggest_extra_checks": True,
+            "max_checks": 5,
+            "per_check_timeout": 120,
+            "suggester_timeout": 120,
+            "suggester_total_budget": 300,
+        }
 
     def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
@@ -171,9 +313,17 @@ class ImplementSpecStep(Step):
                 print(f"error: cannot read prompt_template: {exc}", file=sys.stderr)
                 raise StepError(self.name, 1) from exc
 
-            verify_commands = _render_verify_commands(
-                lifecycle.get_hooks(self.name, "verify")
+            suggest_template = (
+                _load_suggest_template() if cfg["suggest_extra_checks"] else None
             )
+
+            verify_hook_entries = lifecycle.get_hooks(self.name, "verify")
+            verify_commands = _render_verify_commands(verify_hook_entries)
+            static_cmds = [
+                e["cmd"]
+                for e in verify_hook_entries
+                if isinstance(e, dict) and e.get("cmd")
+            ]
 
             for attempt in range(1, cfg["max_retries"] + 1):
                 s.update(f"attempt {attempt}/{cfg['max_retries']} — implementing")
@@ -208,6 +358,38 @@ class ImplementSpecStep(Step):
                     )
                     ctx.save()
                     continue
+
+                if cfg["suggest_extra_checks"]:
+                    s.update(
+                        f"attempt {attempt}/{cfg['max_retries']} — suggesting checks"
+                    )
+                    suggested = _suggest_checks(
+                        ctx,
+                        engine,
+                        step_metrics,
+                        cfg,
+                        spec,
+                        wt_dir,
+                        static_cmds,
+                        suggest_template,
+                    )
+                    ctx.step_set(self.name, "suggested_checks", suggested)
+                    ctx.save()
+
+                    s.update(
+                        f"attempt {attempt}/{cfg['max_retries']} — running suggested checks"
+                    )
+                    suggest_failures = _run_suggested_checks(
+                        suggested, wt_dir, ctx.run_dir, engine, cfg
+                    )
+                    if suggest_failures:
+                        ctx.step_set(
+                            self.name,
+                            "verify_errors",
+                            _format_suggested_failures(suggest_failures),
+                        )
+                        ctx.save()
+                        continue
 
                 s.update(f"attempt {attempt}/{cfg['max_retries']} — writing commit")
                 message, used_fallback = _generate_commit_message(
@@ -252,6 +434,8 @@ class ImplementSpecStep(Step):
                 ctx.step_set(self.name, "commit_sha", sha)
                 ctx.step_set(self.name, "commit_message_fallback", used_fallback)
                 ctx.step_set(self.name, "verify_errors", "")
+                if cfg["suggest_extra_checks"]:
+                    ctx.step_set(self.name, "suggested_checks", [])
                 ctx.save()
                 return
 
