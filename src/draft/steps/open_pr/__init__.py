@@ -1,3 +1,4 @@
+import contextlib
 import re
 import subprocess
 import sys
@@ -97,12 +98,21 @@ class OpenPrStep(Step):
                 ctx.log_path("open-pr-git-log"),
             )
 
+            spec_path = ctx.get("spec", "")
+            spec_text = ""
+            if spec_path:
+                with contextlib.suppress(OSError):
+                    spec_text = Path(spec_path).read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+
             prompt = (
                 (STEP_DIR / "open_pr.md")
                 .read_text()
                 .replace("{{PR_BODY_TEMPLATE}}", template_text)
                 .replace("{{GIT_DIFF}}", git_diff)
                 .replace("{{GIT_LOG}}", git_log)
+                .replace("{{SPEC}}", spec_text)
             )
 
             s.update("drafting")
