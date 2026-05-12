@@ -123,7 +123,6 @@ def _generate_commit_message(
             step_metrics=step_metrics,
             allowed_tools=["Read", "Bash"],
             timeout=timeout,
-            attempt=attempt,
         )
         msg = result.final_text.strip()
         if result.rc == 0 and msg:
@@ -185,7 +184,6 @@ class ImplementSpecStep(Step):
                     step_metrics=step_metrics,
                     allowed_tools=["Bash", "Edit", "Write", "Read"],
                     timeout=cfg["timeout"],
-                    attempt=attempt,
                 )
 
                 if not _has_changes(wt_dir):

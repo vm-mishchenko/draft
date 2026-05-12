@@ -57,7 +57,6 @@ def test_run_command_zero_exit_returns_zero_and_writes_log(tmp_path):
         cmd=["echo", "hello"],
         cwd=None,
         log_path=log,
-        attempt=1,
     )
     assert rc == 0
     assert "hello" in log.read_text()

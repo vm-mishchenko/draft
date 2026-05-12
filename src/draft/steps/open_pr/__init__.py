@@ -124,7 +124,6 @@ class OpenPrStep(Step):
                 allowed_tools=[],
                 extra_args=["--permission-mode", "acceptEdits"],
                 timeout=cfg["timeout"],
-                attempt=1,
             )
             if result.rc != 0:
                 raise StepError(self.name, result.rc)
@@ -155,7 +154,6 @@ class OpenPrStep(Step):
                 ],
                 cwd=wt_dir,
                 log_path=log_path,
-                attempt=1,
                 timeout=cfg["timeout"],
             )
             if rc != 0:

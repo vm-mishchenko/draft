@@ -90,7 +90,6 @@ class CreateWorktreeStep(Step):
                 cmd=self.cmd(ctx),
                 cwd=repo,
                 log_path=ctx.log_path(self.name),
-                attempt=1,
                 timeout=cfg["timeout"],
             )
             if rc != 0:
