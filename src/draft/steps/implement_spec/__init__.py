@@ -176,7 +176,10 @@ class ImplementSpecStep(Step):
             )
 
             for attempt in range(1, cfg["max_retries"] + 1):
-                s.update(f"attempt {attempt}/{cfg['max_retries']} — implementing")
+                prefix = (
+                    f"attempt {attempt}/{cfg['max_retries']} — " if attempt > 1 else ""
+                )
+                s.update(f"{prefix}implementing")
                 engine.run_llm(
                     prompt=_render_prompt(ctx, impl_template, verify_commands),
                     cwd=wt_dir,
@@ -197,7 +200,7 @@ class ImplementSpecStep(Step):
                     ctx.save()
                     continue
 
-                s.update(f"attempt {attempt}/{cfg['max_retries']} — verifying")
+                s.update(f"{prefix}verifying")
                 results = lifecycle.run_hooks(self.name, "verify")
                 failures = [r for r in results if r.rc != 0]
                 if failures:
@@ -209,7 +212,7 @@ class ImplementSpecStep(Step):
                     ctx.save()
                     continue
 
-                s.update(f"attempt {attempt}/{cfg['max_retries']} — writing commit")
+                s.update(f"{prefix}writing commit")
                 message, used_fallback = _generate_commit_message(
                     spec=spec,
                     wt_dir=wt_dir,
