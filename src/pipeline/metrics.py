@@ -18,6 +18,7 @@ def parse_human(s: str) -> datetime:
 
 
 class KnownMetric(str, Enum):
+    """Enumeration of well-known metric keys; extend to add reserved names."""
     pass
 
 
@@ -37,6 +38,7 @@ def _resolve_name(name) -> str:
 
 
 class StepHandle:
+    """Mutable view into a single step entry; closed after `end()` is called."""
     def __init__(self, step_dict: dict):
         self._dict = step_dict
         self._closed = False
@@ -66,6 +68,7 @@ class StepHandle:
 
 
 class SessionHandle:
+    """Mutable view into a single session entry; produces StepHandles for each step."""
     def __init__(self, session_dict: dict):
         self._dict = session_dict
         self._closed = False
@@ -92,6 +95,7 @@ class SessionHandle:
 
 
 class RunMetrics:
+    """Top-level metrics object for a run; owns the sessions list and reconciles crash state."""
     def __init__(self, sessions: list, run_dir: Path):
         self._sessions = sessions
         self._run_dir = run_dir
