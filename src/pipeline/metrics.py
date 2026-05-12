@@ -28,7 +28,10 @@ def parse_human(s: str) -> datetime:
 class KnownMetric(StrEnum):
     """Enumeration of well-known metric keys; extend to add reserved names."""
 
-    pass
+    LLM_COST_USD = "llm_cost_usd"
+    LLM_INPUT_TOKENS = "llm_input_tokens"
+    LLM_OUTPUT_TOKENS = "llm_output_tokens"
+    LLM_DURATION_MS = "llm_duration_ms"
 
 
 def _resolve_name(name) -> str:

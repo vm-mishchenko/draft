@@ -6,7 +6,11 @@ import pytest
 import draft.steps.open_pr as pr_open_mod
 from draft.steps.open_pr import STEP_DIR, OpenPrStep
 from pipeline import StepError
-from pipeline.runner import TIMEOUT_EXIT
+from pipeline.runner import TIMEOUT_EXIT, LLMResult
+
+_PARSEABLE_FINAL_TEXT = (
+    "<<<PR-TITLE>>>\nT\n<<</PR-TITLE>>>\n<<<PR-BODY>>>\nB\n<<</PR-BODY>>>"
+)
 
 
 def _make_ctx(
@@ -21,7 +25,6 @@ def _make_ctx(
         "wt_dir": wt_dir,
     }.get(key, default)
     ctx.log_path.side_effect = lambda name: tmp_path / f"{name}.log"
-    # pre-create log files that the step reads back after run_command
     (tmp_path / "open-pr-claude.log").write_text("")
     (tmp_path / "open-pr.log").write_text("")
     return ctx
@@ -34,6 +37,7 @@ def _make_engine():
     stage_cm.__exit__ = MagicMock(return_value=False)
     engine.stage.return_value = stage_cm
     engine.run_command.return_value = 0
+    engine.run_llm.return_value = LLMResult(rc=0, final_text=_PARSEABLE_FINAL_TEXT)
     return engine
 
 
@@ -67,8 +71,7 @@ def test_custom_body_path_used_in_prompt(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    first_call_cmd = engine.run_command.call_args_list[0].kwargs["cmd"]
-    prompt = first_call_cmd[2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     assert "## Summary" in prompt
 
 
@@ -82,8 +85,7 @@ def test_bundled_default_used_when_no_template(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    first_call_cmd = engine.run_command.call_args_list[0].kwargs["cmd"]
-    prompt = first_call_cmd[2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     bundled_content = (STEP_DIR / "pull-request-template.md").read_text()
     assert bundled_content[:50] in prompt
 
@@ -101,6 +103,7 @@ def test_missing_body_path_raises_step_error_without_claude(tmp_path, capsys):
 
     assert exc_info.value.step_name == "open-pr"
     assert exc_info.value.exit_code == 1
+    engine.run_llm.assert_not_called()
     engine.run_command.assert_not_called()
     mock_sub.run.assert_not_called()
     captured = capsys.readouterr()
@@ -123,7 +126,7 @@ def test_diff_content_in_prompt(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     assert "diff --git a/x b/x" in prompt
     assert "+hi" in prompt
 
@@ -139,7 +142,7 @@ def test_log_content_in_prompt(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     assert "subject line" in prompt
     assert "body line" in prompt
 
@@ -154,7 +157,7 @@ def test_no_stale_placeholders_in_rendered_prompt(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     for placeholder in (
         "{{PR_BODY_TEMPLATE}}",
         "{{GIT_DIFF}}",
@@ -181,8 +184,7 @@ def test_subprocess_called_twice_before_claude(tmp_path):
     assert calls[1].kwargs["cwd"] == "/wt"
     assert "diff" in calls[0].args[0]
     assert "log" in calls[1].args[0]
-    # claude call happened after both subprocess calls
-    assert engine.run_command.call_count >= 1
+    assert engine.run_llm.call_count == 1
 
 
 def test_git_diff_log_files_written(tmp_path):
@@ -232,8 +234,8 @@ def test_git_diff_failure_raises_step_error(tmp_path, capsys):
 
     assert exc_info.value.step_name == "open-pr"
     assert exc_info.value.exit_code == 128
-    # git log was not called
     assert mock_sub.run.call_count == 1
+    engine.run_llm.assert_not_called()
     engine.run_command.assert_not_called()
     captured = capsys.readouterr()
     assert "fatal: ambiguous argument" in captured.err
@@ -260,6 +262,7 @@ def test_git_log_failure_raises_step_error(tmp_path):
             OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
     assert exc_info.value.exit_code == 1
+    engine.run_llm.assert_not_called()
     engine.run_command.assert_not_called()
 
 
@@ -296,7 +299,7 @@ def test_non_utf8_template_does_not_raise(tmp_path):
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
-    prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
+    prompt = engine.run_llm.call_args.kwargs["prompt"]
     assert "�" in prompt
 
 

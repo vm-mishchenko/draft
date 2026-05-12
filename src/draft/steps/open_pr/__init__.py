@@ -106,18 +106,21 @@ class OpenPrStep(Step):
             )
 
             s.update("drafting")
-            rc = engine.run_command(
-                cmd=["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
+            result = engine.run_llm(
+                prompt=prompt,
                 cwd=wt_dir,
                 log_path=claude_log,
-                attempt=1,
+                step_metrics=step_metrics,
+                allowed_tools=[],
+                extra_args=["--permission-mode", "acceptEdits"],
                 timeout=cfg["timeout"],
+                attempt=1,
             )
-            if rc != 0:
-                raise StepError(self.name, rc)
+            if result.rc != 0:
+                raise StepError(self.name, result.rc)
 
             try:
-                title, body = _parse_title_body(claude_log.read_text())
+                title, body = _parse_title_body(result.final_text)
             except _ParseError as e:
                 print(
                     f"open-pr: agent output unparseable ({e}); falling back to branch-name title",

@@ -6,13 +6,13 @@ import pytest
 
 from draft.steps.implement_spec import (
     ImplementSpecStep,
-    _build_claude_cmd,
     _generate_commit_message,
     _load_template,
+    _render_prompt,
     _render_verify_commands,
 )
 from pipeline import StepError
-from pipeline.runner import TIMEOUT_EXIT
+from pipeline.runner import TIMEOUT_EXIT, LLMResult
 
 _BUNDLED_MARKER = "{{SPEC}}"
 
@@ -36,6 +36,7 @@ def _make_engine(s=None):
     stage_ctx.__exit__ = MagicMock(return_value=False)
     engine.stage.return_value = stage_ctx
     engine.run_command.return_value = None
+    engine.run_llm.return_value = LLMResult(rc=0, final_text="commit msg")
     return engine
 
 
@@ -53,7 +54,7 @@ def test_load_template_returns_custom_content(tmp_path):
     assert result == "Custom {{SPEC}} template {{VERIFY_ERRORS}}"
 
 
-def test_build_claude_cmd_substitutes_spec(tmp_path):
+def test_render_prompt_substitutes_spec(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text(
         "Spec: {{SPEC}} Commands: {{VERIFY_COMMANDS}} Errors: {{VERIFY_ERRORS}}"
@@ -64,24 +65,22 @@ def test_build_claude_cmd_substitutes_spec(tmp_path):
     ctx.get.return_value = "my spec content"
     ctx.step_get.return_value = ""
 
-    cmd = _build_claude_cmd(ctx, template, "")
-    prompt = cmd[2]
+    prompt = _render_prompt(ctx, template, "")
     assert "my spec content" in prompt
     assert "{{SPEC}}" not in prompt
 
 
-def test_build_claude_cmd_uses_bundled_template():
+def test_render_prompt_uses_bundled_template():
     bundled = _load_template({})
     ctx = MagicMock()
     ctx.get.return_value = "the spec"
     ctx.step_get.return_value = ""
-    cmd = _build_claude_cmd(ctx, bundled, "")
-    prompt = cmd[2]
+    prompt = _render_prompt(ctx, bundled, "")
     assert "the spec" in prompt
     assert "{{SPEC}}" not in prompt
 
 
-def test_build_claude_cmd_substitutes_verify_commands(tmp_path):
+def test_render_prompt_substitutes_verify_commands(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
     template = tpl.read_text()
@@ -91,13 +90,12 @@ def test_build_claude_cmd_substitutes_verify_commands(tmp_path):
     ctx.step_get.return_value = ""
 
     verify_commands = "## Verify commands\n\n```bash\nmake test\n```"
-    cmd = _build_claude_cmd(ctx, template, verify_commands)
-    prompt = cmd[2]
+    prompt = _render_prompt(ctx, template, verify_commands)
     assert "make test" in prompt
     assert "{{VERIFY_COMMANDS}}" not in prompt
 
 
-def test_build_claude_cmd_empty_verify_commands_collapses_marker(tmp_path):
+def test_render_prompt_empty_verify_commands_collapses_marker(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
     template = tpl.read_text()
@@ -106,13 +104,12 @@ def test_build_claude_cmd_empty_verify_commands_collapses_marker(tmp_path):
     ctx.get.return_value = "spec"
     ctx.step_get.return_value = ""
 
-    cmd = _build_claude_cmd(ctx, template, "")
-    prompt = cmd[2]
+    prompt = _render_prompt(ctx, template, "")
     assert "{{VERIFY_COMMANDS}}" not in prompt
     assert "## Verify commands" not in prompt
 
 
-def test_build_claude_cmd_template_without_verify_commands_marker(tmp_path):
+def test_render_prompt_template_without_verify_commands_marker(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
     template = tpl.read_text()
@@ -121,15 +118,14 @@ def test_build_claude_cmd_template_without_verify_commands_marker(tmp_path):
     ctx.get.return_value = "spec"
     ctx.step_get.return_value = ""
 
-    cmd = _build_claude_cmd(
+    prompt = _render_prompt(
         ctx, template, "## Verify commands\n\n```bash\nmake test\n```"
     )
-    prompt = cmd[2]
     assert "spec" in prompt
     assert "{{SPEC}}" not in prompt
 
 
-def test_build_claude_cmd_all_substitutions_work_together(tmp_path):
+def test_render_prompt_all_substitutions_work_together(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}")
     template = tpl.read_text()
@@ -139,8 +135,7 @@ def test_build_claude_cmd_all_substitutions_work_together(tmp_path):
     ctx.step_get.return_value = "errors here"
 
     verify_commands = "## Verify commands\n\n```bash\nmake test\n```"
-    cmd = _build_claude_cmd(ctx, template, verify_commands)
-    prompt = cmd[2]
+    prompt = _render_prompt(ctx, template, verify_commands)
     assert "my spec" in prompt
     assert "make test" in prompt
     assert "errors here" in prompt
@@ -324,7 +319,7 @@ def test_run_prompt_contains_verify_commands_when_configured(tmp_path):
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
-    prompt = engine.run_command.call_args[1]["cmd"][2]
+    prompt = engine.run_llm.call_args[1]["prompt"]
     assert "## Verify commands" in prompt
     assert "make test" in prompt
 
@@ -355,7 +350,7 @@ def test_run_prompt_no_verify_commands_section_when_empty(tmp_path):
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
-    prompt = engine.run_command.call_args[1]["cmd"][2]
+    prompt = engine.run_llm.call_args[1]["prompt"]
     assert "## Verify commands" not in prompt
 
 
@@ -434,7 +429,7 @@ def test_verify_failure_feeds_back_and_skips_commit(tmp_path):
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
-    assert engine.run_command.call_count == 2
+    assert engine.run_llm.call_count == 2
     mock_gen.assert_called_once()
 
     calls = ctx.step_set.call_args_list
@@ -536,7 +531,7 @@ def test_pre_commit_hook_failure_feeds_back(tmp_path):
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
-    assert engine.run_command.call_count == 2
+    assert engine.run_llm.call_count == 2
 
     calls = ctx.step_set.call_args_list
     verify_calls = [c for c in calls if c.args[1] == "verify_errors"]
@@ -615,108 +610,96 @@ def test_max_retries_exhausted_raises_step_error(tmp_path):
 # Tests for _generate_commit_message
 
 
-_GIT_OK = subprocess.CompletedProcess([], 0, b"", b"")
-
-
 def test_generate_commit_message_returns_trimmed_stdout(tmp_path):
     log = tmp_path / "msg.log"
-    # 2 git calls (diff, status) + 1 claude call
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.CompletedProcess([], 0, b"  Add feature  \n", b""),
-    ]
-    with patch("subprocess.run", side_effect=results) as mock_run:
-        msg, used_fallback = _generate_commit_message("spec", "/wt", log, 120, 3)
-
+    engine = MagicMock()
+    engine.run_llm.return_value = LLMResult(rc=0, final_text="  Add feature  ")
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        msg, used_fallback = _generate_commit_message(
+            "spec", "/wt", log, 120, 3, engine, MagicMock()
+        )
     assert msg == "Add feature"
     assert used_fallback is False
-    assert mock_run.call_count == 3  # 2 git + 1 claude
+    assert engine.run_llm.call_count == 1
 
 
 def test_generate_commit_message_retries_on_empty(tmp_path):
     log = tmp_path / "msg.log"
-    # 2 git calls then 2 claude attempts
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.CompletedProcess([], 0, b"\n", b""),
-        subprocess.CompletedProcess([], 0, b"Add feature", b""),
+    engine = MagicMock()
+    engine.run_llm.side_effect = [
+        LLMResult(rc=0, final_text=""),
+        LLMResult(rc=0, final_text="Add feature"),
     ]
-    with patch("subprocess.run", side_effect=results) as mock_run:
-        msg, used_fallback = _generate_commit_message("spec", "/wt", log, 120, 3)
-
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        msg, used_fallback = _generate_commit_message(
+            "spec", "/wt", log, 120, 3, engine, MagicMock()
+        )
     assert msg == "Add feature"
     assert used_fallback is False
-    assert mock_run.call_count == 4  # 2 git + 2 claude
+    assert engine.run_llm.call_count == 2
 
 
 def test_generate_commit_message_retries_on_non_zero(tmp_path):
     log = tmp_path / "msg.log"
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.CompletedProcess([], 2, b"", b""),
-        subprocess.CompletedProcess([], 0, b"Add feature", b""),
+    engine = MagicMock()
+    engine.run_llm.side_effect = [
+        LLMResult(rc=2, final_text=""),
+        LLMResult(rc=0, final_text="Add feature"),
     ]
-    with patch("subprocess.run", side_effect=results) as mock_run:
-        msg, used_fallback = _generate_commit_message("spec", "/wt", log, 120, 3)
-
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        msg, used_fallback = _generate_commit_message(
+            "spec", "/wt", log, 120, 3, engine, MagicMock()
+        )
     assert msg == "Add feature"
     assert used_fallback is False
-    assert mock_run.call_count == 4  # 2 git + 2 claude
+    assert engine.run_llm.call_count == 2
 
 
 def test_generate_commit_message_retries_on_timeout(tmp_path):
     log = tmp_path / "msg.log"
-    # git calls succeed, first claude times out, second succeeds
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.TimeoutExpired(cmd=["claude"], timeout=120),
-        subprocess.CompletedProcess([], 0, b"Add feature", b""),
+    engine = MagicMock()
+    engine.run_llm.side_effect = [
+        LLMResult(rc=TIMEOUT_EXIT, final_text=""),
+        LLMResult(rc=0, final_text="Add feature"),
     ]
-    with patch("subprocess.run", side_effect=results) as mock_run:
-        msg, used_fallback = _generate_commit_message("spec", "/wt", log, 120, 3)
-
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        msg, used_fallback = _generate_commit_message(
+            "spec", "/wt", log, 120, 3, engine, MagicMock()
+        )
     assert msg == "Add feature"
     assert used_fallback is False
-    assert mock_run.call_count == 4  # 2 git + 2 claude
+    assert engine.run_llm.call_count == 2
 
 
 def test_generate_commit_message_falls_back_after_three_failures(tmp_path, capsys):
     log = tmp_path / "msg.log"
-    # 2 git calls then 3 empty claude attempts
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.CompletedProcess([], 0, b"", b""),
-        subprocess.CompletedProcess([], 0, b"", b""),
-        subprocess.CompletedProcess([], 0, b"", b""),
+    engine = MagicMock()
+    engine.run_llm.side_effect = [
+        LLMResult(rc=0, final_text=""),
+        LLMResult(rc=0, final_text=""),
+        LLMResult(rc=0, final_text=""),
     ]
-    with patch("subprocess.run", side_effect=results) as mock_run:
-        msg, used_fallback = _generate_commit_message("spec", "/wt", log, 120, 3)
-
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        msg, used_fallback = _generate_commit_message(
+            "spec", "/wt", log, 120, 3, engine, MagicMock()
+        )
     assert msg == "Implement spec"
     assert used_fallback is True
-    assert mock_run.call_count == 5  # 2 git + 3 claude
+    assert engine.run_llm.call_count == 3
     captured = capsys.readouterr()
     assert "fallback" in captured.err.lower() or "Implement spec" in captured.err
 
 
 def test_generate_commit_message_logs_to_file(tmp_path):
     log = tmp_path / "msg.log"
-    results = [
-        _GIT_OK,
-        _GIT_OK,
-        subprocess.CompletedProcess([], 0, b"\n", b""),
-        subprocess.CompletedProcess([], 0, b"Add feature\n", b""),
+    engine = MagicMock()
+    engine.run_llm.side_effect = [
+        LLMResult(rc=0, final_text=""),
+        LLMResult(rc=0, final_text="Add feature"),
     ]
-    with patch("subprocess.run", side_effect=results):
-        _generate_commit_message("spec", "/wt", log, 120, 3)
+    with patch("draft.steps.implement_spec._run_git_capture", return_value=""):
+        _generate_commit_message("spec", "/wt", log, 120, 3, engine, MagicMock())
 
     content = log.read_text()
-    assert "=== commit-message attempt 1 @" in content
-    assert "=== commit-message attempt 2 @" in content
     assert "--- selected commit message (attempt 2) ---" in content
     assert "Add feature" in content
