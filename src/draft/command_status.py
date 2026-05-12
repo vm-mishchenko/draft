@@ -57,7 +57,11 @@ def run(args) -> int:
     sessions = state.get("sessions", [])
     started_at = sessions[0].get("started_at") if sessions else None
     finished_at = sessions[-1].get("finished_at") if sessions else None
-    total_seconds = RunMetrics(sessions, run_dir).aggregates()["total_runtime_seconds"]
+    metrics = RunMetrics(sessions, run_dir)
+    agg = metrics.aggregates()
+    total_seconds = agg["total_runtime_seconds"]
+    total_cost = agg["total_llm_cost_usd"]
+    per_step = metrics.per_step_costs()
 
     if runs.is_run_finished(state):
         run_status = "done"
@@ -77,7 +81,9 @@ def run(args) -> int:
             first_unfinished = False
         else:
             step_status = "pending"
-        step_rows.append({"name": step, "status": step_status})
+        step_rows.append(
+            {"name": step, "status": step_status, "llm_cost_usd": per_step.get(step)}
+        )
 
     worktree = data.get("wt_dir") or None
     pr_url = data.get("pr_url") or None
@@ -94,6 +100,7 @@ def run(args) -> int:
             "started_at": started_at,
             "finished_at": finished_at,
             "total_runtime_seconds": total_seconds,
+            "total_llm_cost_usd": total_cost,
             "steps": step_rows,
         }
         print(json.dumps(result, indent=2))
@@ -110,6 +117,10 @@ def run(args) -> int:
     print(f"started:       {started_at or '-'}")
     print(f"finished:      {finished_at or '-'}")
     print(f"total runtime: {fmt_duration(total_seconds)}")
+    if total_cost is None:
+        print("cost:          -")
+    else:
+        print(f"cost:          ${total_cost:.2f}")
 
     print()
     print(f"{'STEP':<24}{'STATUS'}")

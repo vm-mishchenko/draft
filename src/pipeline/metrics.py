@@ -173,6 +173,7 @@ class RunMetrics:
 
     def aggregates(self) -> dict:
         total = 0.0
+        total_cost: float | None = None
         for s in self._sessions:
             try:
                 started = parse_human(s["started_at"])
@@ -191,4 +192,38 @@ class RunMetrics:
             delta = (finished - started).total_seconds()
             if delta >= 0:
                 total += delta
-        return {"total_runtime_seconds": total}
+            for step in s.get("steps", []) or []:
+                data = step.get("data")
+                if not isinstance(data, dict):
+                    continue
+                if "llm_cost_usd" not in data:
+                    continue
+                val = data["llm_cost_usd"]
+                if not isinstance(val, (int, float)):
+                    continue
+                if total_cost is None:
+                    total_cost = 0.0
+                total_cost += val
+        return {"total_runtime_seconds": total, "total_llm_cost_usd": total_cost}
+
+    def per_step_costs(self) -> dict[str, float | None]:
+        costs: dict[str, float | None] = {}
+        for s in self._sessions:
+            for step in s.get("steps", []) or []:
+                name = step.get("name")
+                if name is None:
+                    continue
+                data = step.get("data")
+                if not isinstance(data, dict) or "llm_cost_usd" not in data:
+                    if name not in costs:
+                        costs[name] = None
+                    continue
+                val = data["llm_cost_usd"]
+                if not isinstance(val, (int, float)):
+                    if name not in costs:
+                        costs[name] = None
+                    continue
+                if costs.get(name) is None:
+                    costs[name] = 0.0
+                costs[name] += val
+        return costs
