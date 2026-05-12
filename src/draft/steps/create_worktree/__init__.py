@@ -48,7 +48,7 @@ class CreateWorktreeStep(Step):
             return ["git", "worktree", "add", ctx.get("wt_dir"), ctx.get("branch")]
         return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch"), ctx.get("base_branch")]
 
-    def run(self, ctx, engine, lifecycle):
+    def run(self, ctx, engine, lifecycle, metrics=None):
         cfg = ctx.config(self.name)
         from pipeline import StepError
 

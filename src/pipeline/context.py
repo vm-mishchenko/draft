@@ -1,7 +1,8 @@
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
+
+from pipeline.metrics import RunMetrics
 
 
 class RunContext:
@@ -12,7 +13,8 @@ class RunContext:
         self._step_data: dict = {}
         self._completed: list[str] = []
         self._step_configs: dict = step_configs or {}
-        self.started_at: str = datetime.now(timezone.utc).isoformat()
+        self._sessions: list[dict] = []
+        self.metrics: RunMetrics = RunMetrics(self._sessions, self.run_dir)
 
     # --- run-level KV ---
 
@@ -62,7 +64,7 @@ class RunContext:
             "data": self._data,
             "step_data": self._step_data,
             "step_configs": self._step_configs,
-            "started_at": self.started_at,
+            "sessions": self._sessions,
         }
         state_path = self.run_dir / "state.json"
         tmp_path = self.run_dir / "state.json.tmp"
@@ -87,5 +89,6 @@ class RunContext:
         ctx._data = payload.get("data", {})
         ctx._step_data = payload.get("step_data", {})
         ctx._completed = payload.get("completed", [])
-        ctx.started_at = payload.get("started_at", "")
+        ctx._sessions = payload.get("sessions", [])
+        ctx.metrics = RunMetrics(ctx._sessions, ctx.run_dir)
         return ctx

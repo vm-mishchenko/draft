@@ -8,6 +8,7 @@ from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Runner, Pipeline, RunContext, StepError
+from pipeline.heartbeat import Heartbeat
 
 
 def register(subparsers):
@@ -24,13 +25,21 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
+_STEP_EXIT_CODES = {
+    "implement-spec": 4,
+    "push-commits": 5,
+    "open-pr": 6,
+}
+
+
 def _print_preamble(ctx, steps):
     completed = set(ctx._completed)
+    started_at = ctx._sessions[0]["started_at"] if ctx._sessions else "-"
     print(f"run-id:   {ctx.run_id}")
     print(f"branch:   {ctx.get('branch', '-')}")
     print(f"worktree: {ctx.get('wt_dir', '-')}")
     print(f"logs:     {ctx.run_dir}")
-    print(f"started:  {ctx.started_at}")
+    print(f"started:  {started_at}")
     print("stages:")
     for step in steps:
         marker = "x" if step.name in completed else "*" if _next_step(ctx, steps) == step.name else " "
@@ -161,23 +170,30 @@ def run(args) -> int:
 
     active_steps = [s for s in STEPS if s.name in set(expected)]
 
+    session = ctx.metrics.session_begin("continue")
+    ctx.save()
+
     _print_preamble(ctx, active_steps)
 
     engine = Runner()
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine))
 
+    hb = Heartbeat(run_dir / "heartbeat").start()
+    rc = 0
     try:
-        Pipeline(active_steps).run(ctx, engine, lifecycle)
+        Pipeline(active_steps).run(ctx, engine, lifecycle, session)
     except StepError as exc:
         print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
-        _exit_code = {
-            "implement-spec": 4,
-            "push-commits": 5,
-            "open-pr": 6,
-        }.get(exc.step_name, 1)
+        rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
+    except BaseException:
+        rc = -1
+        raise
+    finally:
+        hb.stop()
+        session.end(rc)
+        ctx.save()
         pid_file.unlink(missing_ok=True)
-        return _exit_code
 
-    print("done.")
-    pid_file.unlink(missing_ok=True)
-    return 0
+    if rc == 0:
+        print("done.")
+    return rc
