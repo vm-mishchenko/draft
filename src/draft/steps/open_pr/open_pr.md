@@ -1,5 +1,9 @@
 You are writing a GitHub Pull Request title and description. Do not run any shell commands. Do not read any files. Use only the context provided below.
 
+**Spec**
+
+{{SPEC}}
+
 **PR body template**
 
 {{PR_BODY_TEMPLATE}}
