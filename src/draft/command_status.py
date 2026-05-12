@@ -3,6 +3,7 @@ import sys
 
 from draft import runs
 from pipeline import RunMetrics, fmt_duration
+from pipeline.heartbeat import Heartbeat
 
 
 def register(subparsers):
@@ -57,7 +58,7 @@ def run(args) -> int:
     sessions = state.get("sessions", [])
     started_at = sessions[0].get("started_at") if sessions else None
     finished_at = sessions[-1].get("finished_at") if sessions else None
-    metrics = RunMetrics(sessions, run_dir)
+    metrics = RunMetrics(sessions, Heartbeat(run_dir))
     agg = metrics.aggregates()
     total_seconds = agg["total_runtime_seconds"]
     total_cost = agg["total_llm_cost_usd"]

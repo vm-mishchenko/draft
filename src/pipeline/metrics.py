@@ -2,7 +2,10 @@ import contextlib
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipeline.heartbeat import Heartbeat
 
 _HUMAN_FMT = "%Y-%m-%d %H:%M:%S UTC"
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -111,9 +114,9 @@ class SessionMetrics:
 class RunMetrics:
     """Top-level metrics object for a run; owns the sessions list and reconciles crash state."""
 
-    def __init__(self, sessions: list, run_dir: Path):
+    def __init__(self, sessions: list, heartbeat: "Heartbeat"):
         self._sessions = sessions
-        self._run_dir = run_dir
+        self._heartbeat = heartbeat
 
     def session_begin(self, command: str) -> SessionMetrics:
         self._reconcile_unclosed()
@@ -128,11 +131,9 @@ class RunMetrics:
         return SessionMetrics(entry)
 
     def _infer_finish_for(self, session: dict) -> "datetime | None":
-        from pipeline.heartbeat import HEARTBEAT_FILENAME
-
-        hb_path = self._run_dir / HEARTBEAT_FILENAME
-        with contextlib.suppress(OSError, ValueError):
-            return parse_human(hb_path.read_text().strip())
+        ts = self._heartbeat.read()
+        if ts is not None:
+            return ts
 
         step_times = []
         for step in session.get("steps", []):
@@ -149,12 +150,8 @@ class RunMetrics:
         return None
 
     def _reconcile_unclosed(self):
-        from pipeline.heartbeat import HEARTBEAT_FILENAME
-
-        hb_path = self._run_dir / HEARTBEAT_FILENAME
         if not self._sessions or self._sessions[-1]["finished_at"] is not None:
-            with contextlib.suppress(OSError):
-                hb_path.unlink(missing_ok=True)
+            self._heartbeat.delete()
             return
 
         last = self._sessions[-1]
@@ -168,8 +165,7 @@ class RunMetrics:
                 step["finished_at"] = ts_str
                 step["exit_code"] = -1
 
-        with contextlib.suppress(OSError):
-            hb_path.unlink(missing_ok=True)
+        self._heartbeat.delete()
 
     def aggregates(self) -> dict:
         total = 0.0

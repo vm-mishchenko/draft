@@ -1,5 +1,5 @@
 from pipeline.context import RunContext
-from pipeline.heartbeat import HEARTBEAT_INTERVAL_SECONDS, Heartbeat
+from pipeline.heartbeat import HEARTBEAT_INTERVAL_SECONDS, Heartbeat, HeartbeatPulse
 from pipeline.metrics import (
     KnownMetric,
     RunMetrics,
@@ -24,5 +24,6 @@ __all__ = [
     "KnownMetric",
     "fmt_duration",
     "Heartbeat",
+    "HeartbeatPulse",
     "HEARTBEAT_INTERVAL_SECONDS",
 ]
