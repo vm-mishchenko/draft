@@ -113,7 +113,8 @@ class RunMetrics:
         return SessionHandle(entry)
 
     def _reconcile_unclosed(self):
-        hb_path = self._run_dir / "heartbeat"
+        from pipeline.heartbeat import HEARTBEAT_FILENAME
+        hb_path = self._run_dir / HEARTBEAT_FILENAME
         if not self._sessions or self._sessions[-1]["finished_at"] is not None:
             try:
                 hb_path.unlink(missing_ok=True)

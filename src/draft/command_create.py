@@ -657,7 +657,7 @@ def run(args) -> int:
     )
 
     # 15. Run pipeline
-    hb = Heartbeat(run_dir / "heartbeat").start()
+    hb = Heartbeat(run_dir).start()
     rc = 0
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session)
