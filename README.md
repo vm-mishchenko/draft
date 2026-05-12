@@ -1,6 +1,19 @@
 # draft
 
-CLI that takes a spec file (or inline prompt), runs it through an AI-powered pipeline, opens a draft pull request, and watches CI until it goes green.
+CLI that takes a spec, runs it through an AI-powered pipeline, opens a draft pull request, and watches CI until it goes green.
+
+```shell
+draft create spec.md
+```
+
+## Table of Content
+
+- [Install](#install)
+- [Requirements](#requirements)
+- [Commands](#commands)
+- [How it works](#how-it-works)
+- [Use Cases](#use-cases)
+- [Config](#config)
 
 ## Install
 
@@ -127,6 +140,23 @@ draft prune --delete-branch
 - `--all-projects` — operate across every project under `~/.draft/runs/`; mutually exclusive with `--project`
 - `--delete-branch` — also delete the local git branch for each pruned run
 
+## How it works
+
+`draft` turns a spec or prompt into a merge-ready pull request without you babysitting it. It's project-agnostic — no assumptions about language, framework, or build system. A run walks through a fixed sequence of steps. If any step fails, the run stops at that point and `draft continue` picks up where it left off.
+
+Steps in order:
+
+- `create-worktree` — sets up an isolated copy of your repo on a new branch. Your current checkout is never touched, so you can keep working on something else while a run is in progress.
+- `implement-spec` — the agent reads your spec and edits code. After each attempt `draft` runs your verification commands (tests, linters, anything you configure under `hooks.verify`); failures are handed back to the agent for another attempt. When verification passes, a second agent run drafts a commit message and `draft` creates the commit.
+- `push-commits` — publishes the new branch to your remote.
+- `open-pr` — composes a PR title and body from the spec and opens a draft pull request on GitHub.
+- `babysit-pr` — watches CI. Every failing check is fed back to the agent for a fix; the loop continues until every check is green or the retry budget is exhausted.
+- `delete-worktree` — removes the isolated working copy when the run is done. Off by default; opt in per run with `--delete-worktree`.
+
+Every step exposes lifecycle hooks where you can attach custom shell commands — bootstrap the environment, run your tests, send notifications — without forking `draft`. See [Config](#config) for the full reference.
+
+`--skip-pr` stops the run after `implement-spec`. The commits stay on a local branch; nothing is pushed and no PR is opened.
+
 ## Use Cases
 
 - [Spec or prompt to PR](#spec-or-prompt-to-pr) — generate code and open a draft PR
@@ -213,25 +243,6 @@ Remove runs for every project and also delete their branches:
 draft prune --all-projects --delete-branch --yes
 ```
 
-## Pipeline
-
-A run is an ordered chain of steps. Each step streams its log to `~/.draft/runs/<project>/<run-id>/<step>.log` and persists progress in `state.json`, so a failing run can be resumed with `draft continue`. Around every step `draft` fires lifecycle events that user-defined hooks can subscribe to.
-
-The `open-pr` step writes additional per-step logs: `open-pr-claude.log` (Claude output), `open-pr-git-diff.log` (captured `git diff` output), and `open-pr-git-log.log` (captured `git log` output). All three are written to the same run log directory. The `implement-spec` step writes `implement-spec-commit-msg.log` (commit-message agent and draft's git add/commit invocations).
-
-Steps run in this order:
-
-- `create-worktree` — prepare an isolated working copy on a fresh branch so the run never touches your current checkout
-- `implement-spec` — generate code from the spec (the agent does not commit), then run verification; on green, a second agent run produces a commit message and draft creates the commit. Failures (no changes, verify, pre-commit hook) feed back into the next attempt.
-- `push-commits` — publish the branch to the remote
-- `open-pr` — draft a title and body from the spec and open a draft pull request
-- `babysit-pr` — watch CI and feed failing checks back to the agent until everything goes green
-- `delete-worktree` — clean up the working copy once the run is done
-
-`--skip-pr` stops after `implement-spec` and skips `push-commits`, `open-pr`, `babysit-pr`.
-
-`delete-worktree` is included only when `--delete-worktree` is set and `worktree_mode` is `worktree` or `reuse-existing`; it is skipped otherwise. If the worktree directory is already absent when the step runs, it succeeds without error (idempotent). This makes resume safe: re-running after a partial cleanup does not fail. Hooks at `steps.delete-worktree.hooks.<event>` are opt-in and fire only when the step is active; a skipped step fires no hooks.
-
 ## Config
 
 Project config: `.draft/config.yaml`
@@ -282,6 +293,39 @@ Defaults per step:
 - `open-pr`: `timeout=300`, `title_prefix=""`
 - `babysit-pr`: `max_retries=100`, `timeout=1200`, `checks_delay=30`
 - `delete-worktree`: `timeout=60`
+
+### Hooks
+
+A hook is a shell command attached to a step lifecycle event. Hooks live under `steps.<step-name>.hooks.<event>` and run sequentially; the first non-zero exit aborts the chain and fails the step.
+
+```yaml
+steps:
+  implement-spec:
+    hooks:
+      pre:
+        - cmd: make setup
+          timeout: 60
+      verify:
+        - cmd: make test
+      on_error:
+        - cmd: notify-slack
+```
+
+Entry fields:
+
+- `cmd` — shell command, required
+- `timeout` — seconds before the hook is killed, default 30
+
+Events available on every step:
+
+- `pre` — before the step runs
+- `post` — after the step finishes, success or failure
+- `on_success` — after the step succeeds
+- `on_error` — after the step raises a `StepError`
+
+Step-specific events:
+
+- `implement-spec.verify` — invoked after the agent edits the working tree, before draft commits; non-zero output is fed back into the next implement-spec attempt as test failures, and the failing changes stay in the working tree.
 
 ### Custom implement-spec prompt
 
@@ -341,36 +385,3 @@ In previous versions, draft automatically looked for a PR body template at `<rep
 **Migration note: retry fields removed**
 
 `retry_delay` has been removed from all steps. `max_retries` has been removed from `create-worktree`, `push-commits`, `open-pr`, and `delete-worktree` — those steps run exactly once. Setting either field on an unsupported step now fails preflight with a clear error message (exit 3 for YAML config, exit 2 for `--set`).
-
-## Hooks
-
-A hook is a shell command attached to a step lifecycle event. Hooks live under `steps.<step-name>.hooks.<event>` and run sequentially; the first non-zero exit aborts the chain and fails the step.
-
-```yaml
-steps:
-  implement-spec:
-    hooks:
-      pre:
-        - cmd: make setup
-          timeout: 60
-      verify:
-        - cmd: make test
-      on_error:
-        - cmd: notify-slack
-```
-
-Entry fields:
-
-- `cmd` — shell command, required
-- `timeout` — seconds before the hook is killed, default 30
-
-Events available on every step:
-
-- `pre` — before the step runs
-- `post` — after the step finishes, success or failure
-- `on_success` — after the step succeeds
-- `on_error` — after the step raises a `StepError`
-
-Step-specific events:
-
-- `implement-spec.verify` — invoked after the agent edits the working tree, before draft commits; non-zero output is fed back into the next implement-spec attempt as test failures, and the failing changes stay in the working tree.
