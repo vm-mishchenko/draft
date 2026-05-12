@@ -8,7 +8,7 @@ from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import Pipeline, RunContext, Runner, StepError
-from pipeline.heartbeat import Heartbeat
+from pipeline.heartbeat import HeartbeatPulse
 
 
 def register(subparsers):
@@ -193,7 +193,7 @@ def run(args) -> int:
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )
 
-    hb = Heartbeat(run_dir).start()
+    hb = HeartbeatPulse(ctx.heartbeat).start()
     rc = 0
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)

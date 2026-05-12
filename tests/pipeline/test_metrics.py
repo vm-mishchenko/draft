@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 
 import pipeline.metrics as metrics_module
+from pipeline.heartbeat import Heartbeat
 from pipeline.metrics import (
     RunMetrics,
     SessionMetrics,
@@ -11,6 +12,10 @@ from pipeline.metrics import (
     now_human,
     parse_human,
 )
+
+
+def _make_metrics(sessions, tmp_path):
+    return RunMetrics(sessions, Heartbeat(tmp_path))
 
 
 def test_now_human_round_trip():
@@ -89,7 +94,7 @@ def test_session_begin_reconciles_open_prior(tmp_path):
             ],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.session_begin("continue")
 
     assert sessions[0]["exit_code"] == -1
@@ -112,7 +117,7 @@ def test_reconciliation_uses_heartbeat_when_present(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.session_begin("continue")
 
     assert sessions[0]["finished_at"] == hb_ts
@@ -138,7 +143,7 @@ def test_reconciliation_falls_back_to_step_finish(tmp_path):
             ],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.session_begin("continue")
 
     assert sessions[0]["finished_at"] == step_ts
@@ -155,7 +160,7 @@ def test_reconciliation_falls_back_to_session_started_at(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.session_begin("continue")
 
     assert sessions[0]["finished_at"] == started
@@ -174,7 +179,7 @@ def test_reconciliation_deletes_stale_heartbeat_when_last_already_closed(tmp_pat
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.session_begin("continue")
 
     assert not hb_path.exists()
@@ -211,7 +216,7 @@ def test_infer_finish_for_uses_heartbeat_first(tmp_path):
             }
         ],
     }
-    rm = RunMetrics([session], tmp_path)
+    rm = _make_metrics([session], tmp_path)
     result = rm._infer_finish_for(session)
     assert result == parse_human(hb_ts)
 
@@ -237,7 +242,7 @@ def test_infer_finish_for_falls_back_to_max_step_finish(tmp_path):
             },
         ],
     }
-    rm = RunMetrics([session], tmp_path)
+    rm = _make_metrics([session], tmp_path)
     result = rm._infer_finish_for(session)
     assert result == parse_human("2025-01-01 10:04:00 UTC")
 
@@ -249,14 +254,14 @@ def test_infer_finish_for_falls_back_to_session_started_at(tmp_path):
         "finished_at": None,
         "steps": [],
     }
-    rm = RunMetrics([session], tmp_path)
+    rm = _make_metrics([session], tmp_path)
     result = rm._infer_finish_for(session)
     assert result == parse_human(started)
 
 
 def test_infer_finish_for_returns_none_when_nothing_parses(tmp_path):
     session = {"steps": []}
-    rm = RunMetrics([session], tmp_path)
+    rm = _make_metrics([session], tmp_path)
     result = rm._infer_finish_for(session)
     assert result is None
 
@@ -265,7 +270,7 @@ def test_infer_finish_for_returns_none_when_nothing_parses(tmp_path):
 
 
 def test_aggregates_empty_sessions_returns_zero(tmp_path):
-    rm = RunMetrics([], tmp_path)
+    rm = _make_metrics([], tmp_path)
     assert rm.aggregates() == {"total_runtime_seconds": 0.0, "total_llm_cost_usd": None}
 
 
@@ -277,7 +282,7 @@ def test_aggregates_one_closed_session(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {
         "total_runtime_seconds": 60.0,
         "total_llm_cost_usd": None,
@@ -297,7 +302,7 @@ def test_aggregates_two_closed_sessions_sum(tmp_path):
             "steps": [],
         },
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {
         "total_runtime_seconds": 75.0,
         "total_llm_cost_usd": None,
@@ -315,7 +320,7 @@ def test_aggregates_unclosed_uses_heartbeat(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {
         "total_runtime_seconds": 90.0,
         "total_llm_cost_usd": None,
@@ -338,7 +343,7 @@ def test_aggregates_unclosed_no_heartbeat_uses_max_step_finish(tmp_path):
             ],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {
         "total_runtime_seconds": 40.0,
         "total_llm_cost_usd": None,
@@ -353,7 +358,7 @@ def test_aggregates_unclosed_no_heartbeat_no_steps(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     # Falls back to started_at == started_at, delta == 0
     result = rm.aggregates()
     assert result["total_runtime_seconds"] == 0.0
@@ -372,7 +377,7 @@ def test_aggregates_does_not_mutate_sessions(tmp_path):
     import copy
 
     snapshot = copy.deepcopy(sessions)
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.aggregates()
     assert sessions == snapshot
 
@@ -387,7 +392,7 @@ def test_aggregates_does_not_delete_heartbeat(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     rm.aggregates()
     assert hb_path.exists()
 
@@ -405,7 +410,7 @@ def test_aggregates_malformed_started_at_contributes_zero(tmp_path):
             "steps": [],
         },
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {
         "total_runtime_seconds": 30.0,
         "total_llm_cost_usd": None,
@@ -420,7 +425,7 @@ def test_aggregates_negative_delta_contributes_zero(tmp_path):
             "steps": [],
         }
     ]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates() == {"total_runtime_seconds": 0.0, "total_llm_cost_usd": None}
 
 
@@ -449,43 +454,43 @@ def _step(name, cost=None):
 
 
 def test_aggregates_cost_empty_sessions(tmp_path):
-    rm = RunMetrics([], tmp_path)
+    rm = _make_metrics([], tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] is None
 
 
 def test_aggregates_cost_one_step(tmp_path):
     sessions = [_session([_step("s", 0.42)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.42)
 
 
 def test_aggregates_cost_same_step_two_sessions(tmp_path):
     sessions = [_session([_step("s", 0.10)]), _session([_step("s", 0.10)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.20)
 
 
 def test_aggregates_cost_two_steps_one_session(tmp_path):
     sessions = [_session([_step("a", 0.10), _step("b", 0.05)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.15)
 
 
 def test_aggregates_cost_partial_steps_have_key(tmp_path):
     sessions = [_session([_step("a", 0.10), _step("b")])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.10)
 
 
 def test_aggregates_cost_all_zero(tmp_path):
     sessions = [_session([_step("a", 0.0), _step("b", 0.0)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == 0.0
 
 
 def test_aggregates_cost_key_absent_everywhere(tmp_path):
     sessions = [_session([_step("a"), _step("b")])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] is None
 
 
@@ -498,7 +503,7 @@ def test_aggregates_cost_data_not_dict_skipped(tmp_path):
         "data": None,
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] is None
 
 
@@ -511,7 +516,7 @@ def test_aggregates_cost_string_value_skipped(tmp_path):
         "data": {"llm_cost_usd": "0.42"},
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] is None
 
 
@@ -524,7 +529,7 @@ def test_aggregates_cost_crashed_step_contributes(tmp_path):
         "data": {"llm_cost_usd": 0.07},
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.07)
 
 
@@ -537,7 +542,7 @@ def test_aggregates_cost_failed_step_contributes(tmp_path):
         "data": {"llm_cost_usd": 0.08},
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.aggregates()["total_llm_cost_usd"] == pytest.approx(0.08)
 
 
@@ -545,39 +550,39 @@ def test_aggregates_cost_failed_step_contributes(tmp_path):
 
 
 def test_per_step_costs_empty_sessions(tmp_path):
-    rm = RunMetrics([], tmp_path)
+    rm = _make_metrics([], tmp_path)
     assert rm.per_step_costs() == {}
 
 
 def test_per_step_costs_one_step(tmp_path):
     sessions = [_session([_step("s", 0.42)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": pytest.approx(0.42)}
 
 
 def test_per_step_costs_same_step_across_sessions(tmp_path):
     sessions = [_session([_step("s", 0.10)]), _session([_step("s", 0.15)])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": pytest.approx(0.25)}
 
 
 def test_per_step_costs_step_no_key_maps_to_none(tmp_path):
     sessions = [_session([_step("s")])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": None}
 
 
 def test_per_step_costs_data_not_dict_maps_to_none(tmp_path):
     step = {"name": "s", "data": None}
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": None}
 
 
 def test_per_step_costs_string_value_maps_to_none(tmp_path):
     step = {"name": "s", "data": {"llm_cost_usd": "bad"}}
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": None}
 
 
@@ -585,19 +590,19 @@ def test_per_step_costs_string_value_maps_to_none(tmp_path):
 
 
 def test_per_step_times_empty_sessions(tmp_path):
-    rm = RunMetrics([], tmp_path)
+    rm = _make_metrics([], tmp_path)
     assert rm.per_step_times() == {}
 
 
 def test_per_step_times_one_step(tmp_path):
     sessions = [_session([_step("s")])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"s": pytest.approx(1.0)}
 
 
 def test_per_step_times_same_step_across_sessions(tmp_path):
     sessions = [_session([_step("s")]), _session([_step("s")])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"s": pytest.approx(2.0)}
 
 
@@ -617,7 +622,7 @@ def test_per_step_times_two_steps_one_session(tmp_path):
         "data": {},
     }
     sessions = [_session([step_a, step_b])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"a": pytest.approx(30.0), "b": pytest.approx(30.0)}
 
 
@@ -629,14 +634,14 @@ def test_per_step_times_missing_finished_at_maps_to_none(tmp_path):
         "data": {},
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"s": None}
 
 
 def test_per_step_times_invalid_timestamps_map_to_none(tmp_path):
     step = {"name": "s", "started_at": "bad", "finished_at": "also-bad", "data": {}}
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"s": None}
 
 
@@ -648,5 +653,5 @@ def test_per_step_times_negative_delta_maps_to_none(tmp_path):
         "data": {},
     }
     sessions = [_session([step])]
-    rm = RunMetrics(sessions, tmp_path)
+    rm = _make_metrics(sessions, tmp_path)
     assert rm.per_step_times() == {"s": None}

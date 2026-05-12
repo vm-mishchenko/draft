@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 
+from pipeline.heartbeat import Heartbeat
 from pipeline.metrics import RunMetrics
 
 
@@ -16,7 +17,8 @@ class RunContext:
         self._completed: list[str] = []
         self._step_configs: dict = step_configs or {}
         self._sessions: list[dict] = []
-        self.metrics: RunMetrics = RunMetrics(self._sessions, self.run_dir)
+        self.heartbeat: Heartbeat = Heartbeat(self.run_dir)
+        self.metrics: RunMetrics = RunMetrics(self._sessions, self.heartbeat)
 
     # --- run-level KV ---
 
@@ -92,5 +94,5 @@ class RunContext:
         ctx._step_data = payload.get("step_data", {})
         ctx._completed = payload.get("completed", [])
         ctx._sessions = payload.get("sessions", [])
-        ctx.metrics = RunMetrics(ctx._sessions, ctx.run_dir)
+        ctx.metrics = RunMetrics(ctx._sessions, ctx.heartbeat)
         return ctx

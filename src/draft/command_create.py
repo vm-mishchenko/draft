@@ -20,7 +20,7 @@ from draft.config import (
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
 from pipeline import RunContext, Runner, StepError
-from pipeline.heartbeat import Heartbeat
+from pipeline.heartbeat import HeartbeatPulse
 
 _BRANCH_HEAD_SENTINEL = ""
 
@@ -784,7 +784,7 @@ def run(args) -> int:
     )
 
     # 15. Run pipeline
-    hb = Heartbeat(run_dir).start()
+    hb = HeartbeatPulse(ctx.heartbeat).start()
     rc = 0
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
