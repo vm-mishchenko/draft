@@ -178,7 +178,7 @@ def run(args) -> int:
     engine = Runner()
     lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine))
 
-    hb = Heartbeat(run_dir / "heartbeat").start()
+    hb = Heartbeat(run_dir).start()
     rc = 0
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)

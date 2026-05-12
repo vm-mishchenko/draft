@@ -3,17 +3,20 @@ import sys
 import threading
 from pathlib import Path
 
-from pipeline.metrics import now_human
-
 HEARTBEAT_INTERVAL_SECONDS = 10
+HEARTBEAT_FILENAME = "heartbeat"
+
+from pipeline.metrics import now_human
 
 
 # Writes a timestamp file at a fixed interval so external monitors can detect
 # stalled runs. A background daemon thread calls _write_once() in a loop; the
 # file is replaced atomically via a .tmp rename to avoid partial reads.
 class Heartbeat:
-    def __init__(self, path: Path, interval: float = HEARTBEAT_INTERVAL_SECONDS):
-        self._path = path
+    FILENAME = HEARTBEAT_FILENAME
+
+    def __init__(self, run_dir: Path, interval: float = HEARTBEAT_INTERVAL_SECONDS):
+        self._path = run_dir / self.FILENAME
         self._interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
