@@ -2667,6 +2667,156 @@ def test_status_json_no_json_unchanged(tmp_path, capsys):
     assert "status" in out
 
 
+def test_status_text_includes_logs_started_finished_runtime(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+        "sessions": [
+            {
+                "started_at": "2025-01-01 10:00:00 UTC",
+                "finished_at": "2025-01-01 10:01:00 UTC",
+                "exit_code": 0,
+                "steps": [],
+            }
+        ],
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert f"logs:          {run_dir}" in out
+    assert "started:       2025-01-01 10:00:00 UTC" in out
+    assert "finished:      2025-01-01 10:01:00 UTC" in out
+    assert "total runtime: 1m00s" in out
+
+
+def test_status_text_empty_sessions_shows_dashes_and_zero(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "started:       -" in out
+    assert "finished:      -" in out
+    assert "total runtime: 0s" in out
+
+
+def test_status_text_unclosed_trailing_session_uses_heartbeat_for_runtime(
+    tmp_path, capsys
+):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+        "sessions": [
+            {
+                "started_at": "2025-01-01 10:00:00 UTC",
+                "finished_at": None,
+                "exit_code": None,
+                "steps": [],
+            }
+        ],
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+    (run_dir / "heartbeat").write_text("2025-01-01 10:01:30 UTC")
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "finished:      -" in out
+    assert "total runtime: 1m30s" in out
+
+
+def test_status_json_includes_logs_started_finished_runtime(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+        "sessions": [
+            {
+                "started_at": "2025-01-01 10:00:00 UTC",
+                "finished_at": "2025-01-01 10:00:45 UTC",
+                "exit_code": 0,
+                "steps": [],
+            }
+        ],
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["logs"] == str(run_dir)
+    assert data["started_at"] == "2025-01-01 10:00:00 UTC"
+    assert data["finished_at"] == "2025-01-01 10:00:45 UTC"
+    assert data["total_runtime_seconds"] == 45.0
+
+
+def test_status_json_empty_sessions_emits_nulls_and_zero(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": [],
+        "data": {"branch": "feat"},
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["started_at"] is None
+    assert data["finished_at"] is None
+    assert data["total_runtime_seconds"] == 0.0
+
+
+def test_status_state_absent_does_not_add_new_keys(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(_make_status_args("260508-100000", use_json=True))
+
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "logs" not in data
+    assert "started_at" not in data
+    assert "finished_at" not in data
+    assert "total_runtime_seconds" not in data
+
+
 # --- _validate_overrides ---
 
 

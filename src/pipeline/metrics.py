@@ -8,6 +8,14 @@ _HUMAN_FMT = "%Y-%m-%d %H:%M:%S UTC"
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 
+def fmt_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    return f"{m}m{s:02d}s"
+
+
 def now_human() -> str:
     return datetime.now(UTC).strftime(_HUMAN_FMT)
 
@@ -116,6 +124,27 @@ class RunMetrics:
         self._sessions.append(entry)
         return SessionMetrics(entry)
 
+    def _infer_finish_for(self, session: dict) -> "datetime | None":
+        from pipeline.heartbeat import HEARTBEAT_FILENAME
+
+        hb_path = self._run_dir / HEARTBEAT_FILENAME
+        with contextlib.suppress(OSError, ValueError):
+            return parse_human(hb_path.read_text().strip())
+
+        step_times = []
+        for step in session.get("steps", []):
+            fat = step.get("finished_at")
+            if fat is not None:
+                with contextlib.suppress(ValueError):
+                    step_times.append(parse_human(fat))
+        if step_times:
+            return max(step_times)
+
+        with contextlib.suppress(ValueError, KeyError):
+            return parse_human(session["started_at"])
+
+        return None
+
     def _reconcile_unclosed(self):
         from pipeline.heartbeat import HEARTBEAT_FILENAME
 
@@ -126,25 +155,7 @@ class RunMetrics:
             return
 
         last = self._sessions[-1]
-        ts = None
-
-        with contextlib.suppress(OSError, ValueError):
-            ts = parse_human(hb_path.read_text().strip())
-
-        if ts is None:
-            step_times = []
-            for step in last.get("steps", []):
-                fat = step.get("finished_at")
-                if fat is not None:
-                    with contextlib.suppress(ValueError):
-                        step_times.append(parse_human(fat))
-            if step_times:
-                ts = max(step_times)
-
-        if ts is None:
-            with contextlib.suppress(ValueError, KeyError):
-                ts = parse_human(last["started_at"])
-
+        ts = self._infer_finish_for(last)
         ts_str = ts.strftime(_HUMAN_FMT) if ts is not None else now_human()
 
         last["finished_at"] = ts_str
@@ -156,3 +167,25 @@ class RunMetrics:
 
         with contextlib.suppress(OSError):
             hb_path.unlink(missing_ok=True)
+
+    def aggregates(self) -> dict:
+        total = 0.0
+        for s in self._sessions:
+            try:
+                started = parse_human(s["started_at"])
+            except (KeyError, ValueError):
+                continue
+            fa = s.get("finished_at")
+            if fa is None:
+                finished = self._infer_finish_for(s)
+            else:
+                try:
+                    finished = parse_human(fa)
+                except ValueError:
+                    continue
+            if finished is None:
+                continue
+            delta = (finished - started).total_seconds()
+            if delta >= 0:
+                total += delta
+        return {"total_runtime_seconds": total}

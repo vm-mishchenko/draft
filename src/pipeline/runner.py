@@ -6,15 +6,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pipeline.metrics import fmt_duration
+
 TIMEOUT_EXIT = 124
-
-
-def _fmt_elapsed(seconds: float) -> str:
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    m, s = divmod(seconds, 60)
-    return f"{m}m{s:02d}s"
 
 
 class StageHandle:
@@ -45,7 +39,7 @@ class Runner:
 
         def _tick():
             while not stop_event.is_set():
-                elapsed = _fmt_elapsed(time.monotonic() - start)
+                elapsed = fmt_duration(time.monotonic() - start)
                 line = f"{padded} {elapsed:>7}  running"
                 if is_tty:
                     sys.stdout.write(f"\r\033[K{line}")
@@ -62,7 +56,7 @@ class Runner:
             stop_event.set()
             if is_tty:
                 thread.join()
-            elapsed = _fmt_elapsed(time.monotonic() - start)
+            elapsed = fmt_duration(time.monotonic() - start)
             line = f"{padded} {elapsed:>7}  {final_status[0]}"
             if is_tty:
                 sys.stdout.write(f"\r\033[K{line}\n")
@@ -82,11 +76,11 @@ class Runner:
         def _tick():
             while not stop_event.is_set():
                 if handle._countdown_until is not None:
-                    slot = _fmt_elapsed(
+                    slot = fmt_duration(
                         max(0.0, handle._countdown_until - time.monotonic())
                     )
                 else:
-                    slot = _fmt_elapsed(time.monotonic() - start)
+                    slot = fmt_duration(time.monotonic() - start)
                 line = f"{padded} {slot:>7}  {handle._status}"
                 if is_tty:
                     sys.stdout.write(f"\r\033[K{line}")
@@ -108,7 +102,7 @@ class Runner:
             stop_event.set()
             if is_tty:
                 thread.join()
-            elapsed = _fmt_elapsed(time.monotonic() - start)
+            elapsed = fmt_duration(time.monotonic() - start)
             status = "failed" if failed else handle._status
             line = f"{padded} {elapsed:>7}  {status}"
             if is_tty:
