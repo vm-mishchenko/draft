@@ -2275,7 +2275,7 @@ def test_status_running_partial_shows_active(tmp_path, capsys):
             ]
         )
     ]
-    statuses = [line.split()[-1] for line in step_lines]
+    statuses = [line.split()[1] for line in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "active"
     assert all(s == "pending" for s in statuses[3:])
@@ -2314,7 +2314,7 @@ def test_status_stopped_partial_shows_stopped(tmp_path, capsys):
             ]
         )
     ]
-    statuses = [line.split()[-1] for line in step_lines]
+    statuses = [line.split()[1] for line in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "stopped"
     assert all(s == "pending" for s in statuses[3:])

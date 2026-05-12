@@ -206,6 +206,34 @@ class RunMetrics:
                 total_cost += val
         return {"total_runtime_seconds": total, "total_llm_cost_usd": total_cost}
 
+    def per_step_times(self) -> dict[str, float | None]:
+        times: dict[str, float | None] = {}
+        for s in self._sessions:
+            for step in s.get("steps", []) or []:
+                name = step.get("name")
+                if name is None:
+                    continue
+                sat = step.get("started_at")
+                fat = step.get("finished_at")
+                if sat is None or fat is None:
+                    if name not in times:
+                        times[name] = None
+                    continue
+                try:
+                    delta = (parse_human(fat) - parse_human(sat)).total_seconds()
+                except ValueError:
+                    if name not in times:
+                        times[name] = None
+                    continue
+                if delta < 0:
+                    if name not in times:
+                        times[name] = None
+                    continue
+                if times.get(name) is None:
+                    times[name] = 0.0
+                times[name] += delta
+        return times
+
     def per_step_costs(self) -> dict[str, float | None]:
         costs: dict[str, float | None] = {}
         for s in self._sessions:

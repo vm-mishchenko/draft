@@ -579,3 +579,74 @@ def test_per_step_costs_string_value_maps_to_none(tmp_path):
     sessions = [_session([step])]
     rm = RunMetrics(sessions, tmp_path)
     assert rm.per_step_costs() == {"s": None}
+
+
+# --- per_step_times ---
+
+
+def test_per_step_times_empty_sessions(tmp_path):
+    rm = RunMetrics([], tmp_path)
+    assert rm.per_step_times() == {}
+
+
+def test_per_step_times_one_step(tmp_path):
+    sessions = [_session([_step("s")])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"s": pytest.approx(1.0)}
+
+
+def test_per_step_times_same_step_across_sessions(tmp_path):
+    sessions = [_session([_step("s")]), _session([_step("s")])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"s": pytest.approx(2.0)}
+
+
+def test_per_step_times_two_steps_one_session(tmp_path):
+    step_a = {
+        "name": "a",
+        "started_at": "2025-01-01 10:00:00 UTC",
+        "finished_at": "2025-01-01 10:00:30 UTC",
+        "exit_code": 0,
+        "data": {},
+    }
+    step_b = {
+        "name": "b",
+        "started_at": "2025-01-01 10:00:30 UTC",
+        "finished_at": "2025-01-01 10:01:00 UTC",
+        "exit_code": 0,
+        "data": {},
+    }
+    sessions = [_session([step_a, step_b])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"a": pytest.approx(30.0), "b": pytest.approx(30.0)}
+
+
+def test_per_step_times_missing_finished_at_maps_to_none(tmp_path):
+    step = {
+        "name": "s",
+        "started_at": "2025-01-01 10:00:00 UTC",
+        "finished_at": None,
+        "data": {},
+    }
+    sessions = [_session([step])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"s": None}
+
+
+def test_per_step_times_invalid_timestamps_map_to_none(tmp_path):
+    step = {"name": "s", "started_at": "bad", "finished_at": "also-bad", "data": {}}
+    sessions = [_session([step])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"s": None}
+
+
+def test_per_step_times_negative_delta_maps_to_none(tmp_path):
+    step = {
+        "name": "s",
+        "started_at": "2025-01-01 10:01:00 UTC",
+        "finished_at": "2025-01-01 10:00:00 UTC",
+        "data": {},
+    }
+    sessions = [_session([step])]
+    rm = RunMetrics(sessions, tmp_path)
+    assert rm.per_step_times() == {"s": None}

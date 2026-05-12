@@ -62,6 +62,7 @@ def run(args) -> int:
     total_seconds = agg["total_runtime_seconds"]
     total_cost = agg["total_llm_cost_usd"]
     per_step = metrics.per_step_costs()
+    per_step_time = metrics.per_step_times()
 
     if runs.is_run_finished(state):
         run_status = "done"
@@ -82,7 +83,12 @@ def run(args) -> int:
         else:
             step_status = "pending"
         step_rows.append(
-            {"name": step, "status": step_status, "llm_cost_usd": per_step.get(step)}
+            {
+                "name": step,
+                "status": step_status,
+                "llm_cost_usd": per_step.get(step),
+                "runtime_seconds": per_step_time.get(step),
+            }
         )
 
     worktree = data.get("wt_dir") or None
@@ -123,9 +129,22 @@ def run(args) -> int:
         print(f"cost:          ${total_cost:.2f}")
 
     print()
-    print(f"{'STEP':<24}{'STATUS'}")
+    print(f"{'STEP':<24}{'STATUS':<12}{'COST':<10}{'TIME':<10}{'%'}")
 
     for row in step_rows:
-        print(f"{row['name']:<24}{row['status']}")
+        cost = row["llm_cost_usd"]
+        secs = row["runtime_seconds"]
+        cost_str = f"${cost:.2f}" if cost is not None else "-"
+        if secs is not None:
+            time_str = fmt_duration(secs)
+            pct_str = (
+                f"{int(secs / total_seconds * 100)}%" if total_seconds > 0 else "-"
+            )
+        else:
+            time_str = "-"
+            pct_str = "-"
+        print(
+            f"{row['name']:<24}{row['status']:<12}{cost_str:<10}{time_str:<10}{pct_str}"
+        )
 
     return 0
