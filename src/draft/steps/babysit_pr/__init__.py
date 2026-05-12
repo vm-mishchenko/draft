@@ -8,7 +8,7 @@ from pipeline import Step
 INITIAL_PR_CHECK_DELAY = 15
 
 
-def _build_claude_cmd(ctx) -> list[str]:
+def _build_prompt(ctx) -> str:
     template = files("draft.steps.babysit_pr").joinpath("babysit_pr.md").read_text()
     pr_url = ctx.get("pr_url", "")
     spec_path = ctx.get("spec", "")
@@ -25,12 +25,11 @@ def _build_claude_cmd(ctx) -> list[str]:
         verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
     else:
         verify_section = ""
-    prompt = (
+    return (
         template.replace("{{PR_URL}}", pr_url)
         .replace("{{SPEC}}", spec)
         .replace("{{VERIFY_ERRORS}}", verify_section)
     )
-    return ["claude", "-p", prompt, "--allowedTools", "Bash,Edit,Write,Read"]
 
 
 def _check_ci(pr_url: str) -> dict[str, int]:
@@ -126,12 +125,14 @@ class BabysitPrStep(Step):
                     return
 
                 if counts["failure"] > 0:
-                    engine.run_command(
-                        cmd=_build_claude_cmd(ctx),
+                    engine.run_llm(
+                        prompt=_build_prompt(ctx),
                         cwd=wt_dir,
                         log_path=ctx.log_path(self.name),
-                        attempt=attempt,
+                        step_metrics=step_metrics,
+                        allowed_tools=["Bash", "Edit", "Write", "Read"],
                         timeout=cfg["timeout"],
+                        attempt=attempt,
                     )
                     if _is_branch_clean(wt_dir) and _has_unpushed_commits(wt_dir):
                         results = lifecycle.run_hooks(self.name, "verify")
