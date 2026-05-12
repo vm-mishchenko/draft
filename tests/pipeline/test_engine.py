@@ -332,7 +332,10 @@ def test_run_llm_missing_binary_raises_runtime_error(tmp_path):
     runner = Runner()
     log = tmp_path / "out.log"
 
-    with patch("subprocess.Popen", side_effect=FileNotFoundError("claude")), pytest.raises(RuntimeError, match="claude"):
+    with (
+        patch("subprocess.Popen", side_effect=FileNotFoundError("claude")),
+        pytest.raises(RuntimeError, match="claude"),
+    ):
         runner.run_llm(
             prompt="p",
             cwd=None,
