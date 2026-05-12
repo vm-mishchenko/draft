@@ -136,38 +136,6 @@ def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
                 f"the step runs once. Remove it."
             )
 
-    if step_name == "implement-spec":
-        if "suggest_extra_checks" in step_cfg:
-            v = step_cfg["suggest_extra_checks"]
-            if not isinstance(v, bool):
-                raise ConfigError(
-                    "steps.implement-spec.suggest_extra_checks must be a bool (true or false)"
-                )
-        if "max_checks" in step_cfg:
-            v = step_cfg["max_checks"]
-            if not isinstance(v, int) or isinstance(v, bool) or not (0 <= v <= 20):
-                raise ConfigError(
-                    "steps.implement-spec.max_checks must be an integer between 0 and 20"
-                )
-        if "per_check_timeout" in step_cfg:
-            v = step_cfg["per_check_timeout"]
-            if not isinstance(v, int) or isinstance(v, bool) or not (1 <= v <= 180):
-                raise ConfigError(
-                    "steps.implement-spec.per_check_timeout must be an integer between 1 and 180"
-                )
-        if "suggester_timeout" in step_cfg:
-            v = step_cfg["suggester_timeout"]
-            if not isinstance(v, int) or isinstance(v, bool) or not (1 <= v <= 600):
-                raise ConfigError(
-                    "steps.implement-spec.suggester_timeout must be an integer between 1 and 600"
-                )
-        if "suggester_total_budget" in step_cfg:
-            v = step_cfg["suggester_total_budget"]
-            if not isinstance(v, int) or isinstance(v, bool) or not (1 <= v <= 3600):
-                raise ConfigError(
-                    "steps.implement-spec.suggester_total_budget must be an integer between 1 and 3600"
-                )
-
 
 def validate_config(config: dict) -> None:
     steps = config.get("steps")

@@ -279,11 +279,6 @@ Common fields (all steps):
 Step-specific fields:
 
 - `implement-spec.max_retries` — maximum implementation attempts before failing the step
-- `implement-spec.suggest_extra_checks` — after static verify passes, draft asks an LLM for additional spec-scoped checks and runs them; commands execute with `shell=True` in the worktree and are gated only by timeout and budget; set to `false` to disable (default `true`)
-- `implement-spec.max_checks` — maximum number of LLM-suggested checks to run per attempt (default 5, range 0–20)
-- `implement-spec.per_check_timeout` — per-command timeout in seconds for suggested checks (default 120, range 1–180)
-- `implement-spec.suggester_timeout` — timeout in seconds for the LLM call that generates suggested checks (default 120, range 1–600)
-- `implement-spec.suggester_total_budget` — total time budget in seconds across all suggested checks per attempt (default 300, range 1–3600)
 - `babysit-pr.max_retries` — maximum babysit iterations before giving up
 - `open-pr.title_prefix` — string prepended to the PR title
 - `open-pr.pr_body_template` — path to a file used as structural guidance for the PR body; supports `~` and is resolved relative to the project root; contents are inlined into the prompt (not passed as a path)
@@ -293,7 +288,7 @@ Step-specific fields:
 Defaults per step:
 
 - `create-worktree`: `timeout=60`
-- `implement-spec`: `max_retries=10`, `timeout=1200`, `suggest_extra_checks=true`, `max_checks=5`, `per_check_timeout=120`, `suggester_timeout=120`, `suggester_total_budget=300`
+- `implement-spec`: `max_retries=10`, `timeout=1200`
 - `push-commits`: `timeout=120`
 - `open-pr`: `timeout=300`, `title_prefix=""`
 - `babysit-pr`: `max_retries=100`, `timeout=1200`, `checks_delay=30`
@@ -334,7 +329,7 @@ Step-specific events:
 
 **LLM-suggested checks**
 
-After the static verify hooks pass, draft makes an additional LLM call that inspects the changed-file list and suggests a short list of supplementary shell commands. These commands are deduplicated against the configured verify list and then executed with `shell=True` in the worktree, gated only by per-command timeout (`per_check_timeout`) and a total time budget (`suggester_total_budget`). Any failure is fed back to the implement agent as another retry. There is no opt-out for this phase.
+After the static verify hooks pass, draft makes an additional LLM call that inspects the changed-file list and suggests a short list of supplementary shell commands. These commands are deduplicated against the configured verify list and then executed with `shell=True` in the worktree. Any failure is fed back to the implement agent as another retry.
 
 ### Custom implement-spec prompt
 

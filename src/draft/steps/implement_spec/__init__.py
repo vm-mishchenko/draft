@@ -10,6 +10,11 @@ from draft.hooks import HookResult, _run_hook_cmd, _status_text
 from pipeline import Step, StepError
 from pipeline.runner import TIMEOUT_EXIT
 
+_MAX_CHECKS = 5
+_PER_CHECK_TIMEOUT = 120
+_SUGGESTER_TIMEOUT = 120
+_SUGGESTER_TOTAL_BUDGET = 300
+
 
 def _load_template(cfg: dict) -> str:
     path = cfg.get("prompt_template")
@@ -149,7 +154,7 @@ def _format_suggested_failures(failures: list[HookResult]) -> str:
 
 
 def _suggest_checks(
-    ctx, engine, step_metrics, cfg, spec, wt_dir, static_cmds, suggest_template: str
+    ctx, engine, step_metrics, spec, wt_dir, static_cmds, suggest_template: str
 ) -> list[dict]:
     suggest_log = ctx.run_dir / "implement-spec.suggest.log"
     changed_files = _run_git_capture(
@@ -167,15 +172,15 @@ def _suggest_checks(
         log_path=suggest_log,
         step_metrics=step_metrics,
         allowed_tools=["Read"],
-        timeout=cfg["suggester_timeout"],
+        timeout=_SUGGESTER_TIMEOUT,
     )
     return _filter_dupes(_parse_suggestions(result.final_text), static_cmds)[
-        : cfg["max_checks"]
+        :_MAX_CHECKS
     ]
 
 
 def _run_suggested_checks(
-    suggested: list[dict], wt_dir: str, run_dir: Path, engine, cfg: dict
+    suggested: list[dict], wt_dir: str, run_dir: Path, engine
 ) -> list[HookResult]:
     log_path = run_dir / "implement-spec.suggested.log"
     failures: list[HookResult] = []
@@ -192,15 +197,15 @@ def _run_suggested_checks(
             log_fd = None
 
         for i, entry in enumerate(suggested):
-            if elapsed >= cfg["suggester_total_budget"]:
+            if elapsed >= _SUGGESTER_TOTAL_BUDGET:
                 if log_fd is not None:
                     log_fd.write("--- skipped (budget exhausted) ---\n")
                     log_fd.flush()
                 break
 
             timeout = min(
-                int(entry.get("timeout") or cfg["per_check_timeout"]),
-                cfg["per_check_timeout"],
+                int(entry.get("timeout") or _PER_CHECK_TIMEOUT),
+                _PER_CHECK_TIMEOUT,
             )
             label = f"implement-spec.suggested[{i}] {entry['cmd']}"
 
@@ -292,11 +297,6 @@ class ImplementSpecStep(Step):
         return {
             "max_retries": 10,
             "timeout": 1200,
-            "suggest_extra_checks": True,
-            "max_checks": 5,
-            "per_check_timeout": 120,
-            "suggester_timeout": 120,
-            "suggester_total_budget": 300,
         }
 
     def run(self, ctx, engine, lifecycle, step_metrics):
@@ -312,9 +312,7 @@ class ImplementSpecStep(Step):
                 print(f"error: cannot read prompt_template: {exc}", file=sys.stderr)
                 raise StepError(self.name, 1) from exc
 
-            suggest_template = (
-                _load_suggest_template() if cfg["suggest_extra_checks"] else None
-            )
+            suggest_template = _load_suggest_template()
 
             verify_hook_entries = lifecycle.get_hooks(self.name, "verify")
             verify_commands = _render_verify_commands(verify_hook_entries)
@@ -358,37 +356,33 @@ class ImplementSpecStep(Step):
                     ctx.save()
                     continue
 
-                if cfg["suggest_extra_checks"]:
-                    s.update(
-                        f"attempt {attempt}/{cfg['max_retries']} — suggesting checks"
-                    )
-                    suggested = _suggest_checks(
-                        ctx,
-                        engine,
-                        step_metrics,
-                        cfg,
-                        spec,
-                        wt_dir,
-                        static_cmds,
-                        suggest_template,
-                    )
-                    ctx.step_set(self.name, "suggested_checks", suggested)
-                    ctx.save()
+                s.update(f"attempt {attempt}/{cfg['max_retries']} — suggesting checks")
+                suggested = _suggest_checks(
+                    ctx,
+                    engine,
+                    step_metrics,
+                    spec,
+                    wt_dir,
+                    static_cmds,
+                    suggest_template,
+                )
+                ctx.step_set(self.name, "suggested_checks", suggested)
+                ctx.save()
 
-                    s.update(
-                        f"attempt {attempt}/{cfg['max_retries']} — running suggested checks"
+                s.update(
+                    f"attempt {attempt}/{cfg['max_retries']} — running suggested checks"
+                )
+                suggest_failures = _run_suggested_checks(
+                    suggested, wt_dir, ctx.run_dir, engine
+                )
+                if suggest_failures:
+                    ctx.step_set(
+                        self.name,
+                        "verify_errors",
+                        _format_suggested_failures(suggest_failures),
                     )
-                    suggest_failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, cfg
-                    )
-                    if suggest_failures:
-                        ctx.step_set(
-                            self.name,
-                            "verify_errors",
-                            _format_suggested_failures(suggest_failures),
-                        )
-                        ctx.save()
-                        continue
+                    ctx.save()
+                    continue
 
                 s.update(f"attempt {attempt}/{cfg['max_retries']} — writing commit")
                 message, used_fallback = _generate_commit_message(
@@ -433,8 +427,7 @@ class ImplementSpecStep(Step):
                 ctx.step_set(self.name, "commit_sha", sha)
                 ctx.step_set(self.name, "commit_message_fallback", used_fallback)
                 ctx.step_set(self.name, "verify_errors", "")
-                if cfg["suggest_extra_checks"]:
-                    ctx.step_set(self.name, "suggested_checks", [])
+                ctx.step_set(self.name, "suggested_checks", [])
                 ctx.save()
                 return
 

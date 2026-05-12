@@ -25,11 +25,6 @@ _BUNDLED_MARKER = "{{SPEC}}"
 _DEFAULT_CFG = {
     "max_retries": 10,
     "timeout": 1200,
-    "suggest_extra_checks": True,
-    "max_checks": 5,
-    "per_check_timeout": 120,
-    "suggester_timeout": 120,
-    "suggester_total_budget": 300,
 }
 
 
@@ -847,14 +842,8 @@ def test_format_suggested_failures_multiple():
 # --- _run_suggested_checks ---
 
 
-def _make_run_suggested_cfg(**overrides):
-    base = {"per_check_timeout": 120, "suggester_total_budget": 300}
-    return {**base, **overrides}
-
-
 def test_run_suggested_checks_all_pass(tmp_path):
     engine = MagicMock()
-    cfg = _make_run_suggested_cfg()
     suggested = [{"cmd": "echo ok"}, {"cmd": "echo also ok"}]
 
     with patch(
@@ -864,7 +853,7 @@ def test_run_suggested_checks_all_pass(tmp_path):
             HookResult(cmd="echo also ok", rc=0, output="also ok\n", duration=0.1),
         ],
     ):
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine)
 
     assert failures == []
     log = (tmp_path / "implement-spec.suggested.log").read_text()
@@ -873,7 +862,6 @@ def test_run_suggested_checks_all_pass(tmp_path):
 
 def test_run_suggested_checks_first_fails_stops_early(tmp_path):
     engine = MagicMock()
-    cfg = _make_run_suggested_cfg()
     suggested = [{"cmd": "false"}, {"cmd": "echo never"}]
 
     with patch(
@@ -882,7 +870,7 @@ def test_run_suggested_checks_first_fails_stops_early(tmp_path):
             HookResult(cmd="false", rc=1, output="", duration=0.1),
         ],
     ) as mock_run:
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine)
 
     assert len(failures) == 1
     assert failures[0].rc == 1
@@ -891,44 +879,41 @@ def test_run_suggested_checks_first_fails_stops_early(tmp_path):
 
 def test_run_suggested_checks_caps_timeout(tmp_path):
     engine = MagicMock()
-    cfg = _make_run_suggested_cfg(per_check_timeout=120)
     suggested = [{"cmd": "slow", "timeout": 300}]
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=HookResult(cmd="slow", rc=0, output="", duration=0.1),
     ) as mock_run:
-        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine)
 
     mock_run.assert_called_once_with("slow", 120, "/wt")
 
 
 def test_run_suggested_checks_uses_default_timeout_when_omitted(tmp_path):
     engine = MagicMock()
-    cfg = _make_run_suggested_cfg(per_check_timeout=90)
     suggested = [{"cmd": "pytest"}]
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=HookResult(cmd="pytest", rc=0, output="", duration=0.1),
     ) as mock_run:
-        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine)
 
-    mock_run.assert_called_once_with("pytest", 90, "/wt")
+    mock_run.assert_called_once_with("pytest", 120, "/wt")
 
 
 def test_run_suggested_checks_budget_exhausted(tmp_path):
     engine = MagicMock()
-    cfg = _make_run_suggested_cfg(per_check_timeout=120, suggester_total_budget=10)
     suggested = [{"cmd": "slow"}, {"cmd": "skipped"}]
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         side_effect=[
-            HookResult(cmd="slow", rc=0, output="", duration=15.0),
+            HookResult(cmd="slow", rc=0, output="", duration=400.0),
         ],
     ) as mock_run:
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine)
 
     assert failures == []
     assert mock_run.call_count == 1
@@ -1268,68 +1253,3 @@ def test_bundled_suggest_checks_no_diff_marker():
         files("draft.steps.implement_spec").joinpath("suggest_checks.md").read_text()
     )
     assert "{{DIFF}}" not in content
-
-
-# --- suggest_extra_checks=False integration ---
-
-
-def test_suggest_extra_checks_false_static_passes_no_suggester(tmp_path):
-    cfg = _make_cfg(max_retries=1, timeout=60, suggest_extra_checks=False)
-    ctx = _make_ctx(cfg, tmp_path=tmp_path)
-    engine = _make_engine()
-    lifecycle = MagicMock()
-    lifecycle.get_hooks.return_value = []
-    lifecycle.run_hooks.return_value = []
-
-    step = ImplementSpecStep()
-    with (
-        patch("draft.steps.implement_spec._has_changes", return_value=True),
-        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
-        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run_suggest,
-        patch(
-            "draft.steps.implement_spec._generate_commit_message",
-            return_value=("msg", False),
-        ),
-        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
-        patch(
-            "draft.steps.implement_spec._run_git_capture_allow_fail",
-            return_value=subprocess.CompletedProcess([], 0, b"", b""),
-        ),
-    ):
-        step.run(ctx, engine, lifecycle, MagicMock())
-
-    mock_suggest.assert_not_called()
-    mock_run_suggest.assert_not_called()
-
-    calls = ctx.step_set.call_args_list
-    suggested_calls = [c for c in calls if c.args[1] == "suggested_checks"]
-    assert len(suggested_calls) == 0
-
-    sha_calls = [c for c in calls if c.args[1] == "commit_sha"]
-    assert len(sha_calls) == 1
-
-
-def test_suggest_extra_checks_false_static_fails_no_suggester(tmp_path):
-    cfg = _make_cfg(max_retries=1, timeout=60, suggest_extra_checks=False)
-    ctx = _make_ctx(cfg, tmp_path=tmp_path)
-    engine = _make_engine()
-    lifecycle = MagicMock()
-    lifecycle.get_hooks.return_value = []
-
-    fail_result = MagicMock()
-    fail_result.rc = 1
-    fail_result.cmd = "make test"
-    fail_result.output = "boom"
-    lifecycle.run_hooks.return_value = [fail_result]
-
-    step = ImplementSpecStep()
-    with (
-        patch("draft.steps.implement_spec._has_changes", return_value=True),
-        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
-        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run_suggest,
-        pytest.raises(StepError),
-    ):
-        step.run(ctx, engine, lifecycle, MagicMock())
-
-    mock_suggest.assert_not_called()
-    mock_run_suggest.assert_not_called()
