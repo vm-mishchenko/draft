@@ -105,7 +105,7 @@ def run(args) -> int:
             if run_dir.is_dir():
                 dirs.append(run_dir)
 
-    dirs = sorted(dirs, key=lambda d: d.name, reverse=True)[:15]
+    dirs = sorted(dirs, key=lambda d: d.name, reverse=False)[-15:]
 
     if not dirs:
         if getattr(args, "json", False):
