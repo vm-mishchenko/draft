@@ -49,7 +49,7 @@ def test_pipeline_skips_completed_steps(tmp_path):
     class TrackStep(Step):
         name = "ok-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): ran.append(self.name)
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): ran.append(self.name)
 
     Pipeline([TrackStep()]).run(ctx, Runner(), PipelineLifecycle(), ctx.metrics.session_begin("test"))
     assert ran == []
@@ -63,7 +63,7 @@ def test_pipeline_step_error_propagates_with_lifecycle(tmp_path):
     class ImmediateFailStep(Step):
         name = "fail-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): raise StepError("fail-step", 1)
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): raise StepError("fail-step", 1)
 
     with pytest.raises(StepError):
         Pipeline([ImmediateFailStep()]).run(ctx, Runner(), lc, ctx.metrics.session_begin("test"))
@@ -87,7 +87,7 @@ def test_pipeline_lifecycle_order(tmp_path):
     class OkStep(Step):
         name = "ok-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): pass
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): pass
 
     Pipeline([OkStep()]).run(ctx, Runner(), RecordingLifecycle(), ctx.metrics.session_begin("test"))
     assert events == ["before", "success", "after"]
@@ -161,16 +161,16 @@ def test_pipeline_records_step_timing_and_exit_codes(tmp_path):
     class SuccessStep(Step):
         name = "ok-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): pass
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): pass
 
     class FailingStep(Step):
         name = "fail-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): raise StepError("fail-step", 42)
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): raise StepError("fail-step", 42)
 
-    session = ctx.metrics.session_begin("test")
+    session_metrics = ctx.metrics.session_begin("test")
     with pytest.raises(StepError):
-        Pipeline([SuccessStep(), FailingStep()]).run(ctx, Runner(), PipelineLifecycle(), session)
+        Pipeline([SuccessStep(), FailingStep()]).run(ctx, Runner(), PipelineLifecycle(), session_metrics)
 
     steps = ctx._sessions[-1]["steps"]
     assert len(steps) == 2
@@ -190,11 +190,11 @@ def test_pipeline_marks_step_minus_one_on_base_exception(tmp_path):
     class BoomStep(Step):
         name = "ok-step"
         def defaults(self): return {"timeout": None}
-        def run(self, ctx, engine, lifecycle=None, metrics=None): raise RuntimeError("boom")
+        def run(self, ctx, engine, lifecycle=None, step_metrics=None): raise RuntimeError("boom")
 
-    session = ctx.metrics.session_begin("test")
+    session_metrics = ctx.metrics.session_begin("test")
     with pytest.raises(RuntimeError):
-        Pipeline([BoomStep()]).run(ctx, Runner(), PipelineLifecycle(), session)
+        Pipeline([BoomStep()]).run(ctx, Runner(), PipelineLifecycle(), session_metrics)
 
     steps = ctx._sessions[-1]["steps"]
     assert len(steps) == 1

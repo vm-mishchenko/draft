@@ -71,10 +71,10 @@ def test_config_returns_step_config(tmp_run_dir):
 
 def test_sessions_round_trip(tmp_run_dir):
     ctx = make_ctx(tmp_run_dir)
-    session = ctx.metrics.session_begin("create")
-    m = session.step_begin("my-step")
-    m.end(0)
-    session.end(0)
+    session_metrics = ctx.metrics.session_begin("create")
+    step_metrics = session_metrics.step_begin("my-step")
+    step_metrics.end(0)
+    session_metrics.end(0)
     ctx.save()
 
     ctx2 = RunContext.load("260505-120000", tmp_run_dir)
@@ -108,5 +108,5 @@ def test_load_legacy_state_without_sessions(tmp_run_dir):
     (tmp_run_dir / "state.json").write_text(json.dumps(legacy))
     ctx = RunContext.load("260505-120000", tmp_run_dir)
     assert ctx._sessions == []
-    session = ctx.metrics.session_begin("continue")
-    assert session is not None
+    session_metrics = ctx.metrics.session_begin("continue")
+    assert session_metrics is not None

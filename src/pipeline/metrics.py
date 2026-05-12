@@ -37,7 +37,7 @@ def _resolve_name(name) -> str:
     raise TypeError(f"name must be str or KnownMetric, not {type(name).__name__}")
 
 
-class StepHandle:
+class StepMetrics:
     """Mutable view into a single step entry; closed after `end()` is called."""
     def __init__(self, step_dict: dict):
         self._dict = step_dict
@@ -67,13 +67,13 @@ class StepHandle:
         self._closed = True
 
 
-class SessionHandle:
-    """Mutable view into a single session entry; produces StepHandles for each step."""
+class SessionMetrics:
+    """Mutable view into a single session entry; produces StepMetrics for each step."""
     def __init__(self, session_dict: dict):
         self._dict = session_dict
         self._closed = False
 
-    def step_begin(self, step_name: str) -> "StepHandle":
+    def step_begin(self, step_name: str) -> "StepMetrics":
         if self._closed:
             raise RuntimeError("handle closed")
         entry = {
@@ -84,7 +84,7 @@ class SessionHandle:
             "data": {},
         }
         self._dict["steps"].append(entry)
-        return StepHandle(entry)
+        return StepMetrics(entry)
 
     def end(self, exit_code: int):
         if self._closed:
@@ -100,7 +100,7 @@ class RunMetrics:
         self._sessions = sessions
         self._run_dir = run_dir
 
-    def session_begin(self, command: str) -> SessionHandle:
+    def session_begin(self, command: str) -> SessionMetrics:
         self._reconcile_unclosed()
         entry = {
             "command": command,
@@ -110,7 +110,7 @@ class RunMetrics:
             "steps": [],
         }
         self._sessions.append(entry)
-        return SessionHandle(entry)
+        return SessionMetrics(entry)
 
     def _reconcile_unclosed(self):
         hb_path = self._run_dir / "heartbeat"

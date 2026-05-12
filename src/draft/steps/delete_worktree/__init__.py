@@ -16,7 +16,7 @@ class DeleteWorktreeStep(Step):
     def defaults(self) -> dict:
         return {"timeout": 60}
 
-    def run(self, ctx, engine, lifecycle, metrics=None):
+    def run(self, ctx, engine, lifecycle, step_metrics):
         with engine.stage(self.name):
             wt_dir = ctx.get("wt_dir", "")
             if not wt_dir:

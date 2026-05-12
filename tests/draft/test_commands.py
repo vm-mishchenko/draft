@@ -1657,7 +1657,7 @@ def test_delete_worktree_step_path_missing_succeeds(tmp_path):
     ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(tmp_path / "nonexistent"))
 
-    DeleteWorktreeStep().run(ctx, Runner(), None)  # must not raise
+    DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))  # must not raise
 
 
 def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
@@ -1668,7 +1668,7 @@ def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
     ctx.set("wt_dir", "")
 
     with pytest.raises(StepError):
-        DeleteWorktreeStep().run(ctx, Runner(), None)
+        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
 
 
 def test_delete_worktree_step_git_success(tmp_path):
@@ -1685,7 +1685,7 @@ def test_delete_worktree_step_git_success(tmp_path):
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, Runner(), None)
+        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
 
     mock_run.assert_called_once_with(
         ["git", "worktree", "remove", str(wt), "--force"],
@@ -1706,7 +1706,7 @@ def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path
         mock_run.return_value.returncode = 128
         mock_run.return_value.stderr = "fatal: 'wt' is not a working tree"
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, Runner(), None)  # must not raise
+        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))  # must not raise
 
 
 def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
@@ -1723,7 +1723,7 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
         mock_run.return_value.stderr = "fatal: internal error"
         mock_run.return_value.stdout = ""
         with pytest.raises(StepError):
-            DeleteWorktreeStep().run(ctx, Runner(), None)
+            DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
 
 
 # --- command_list --json ---

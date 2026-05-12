@@ -63,7 +63,7 @@ class OpenPrStep(Step):
     def defaults(self) -> dict:
         return {"timeout": 300, "title_prefix": ""}
 
-    def run(self, ctx, engine, lifecycle, metrics=None):
+    def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
         repo = ctx.get("repo", "")
         branch = ctx.get("branch", "")

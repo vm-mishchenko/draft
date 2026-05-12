@@ -236,7 +236,7 @@ def test_template_loaded_once_across_retries(tmp_path):
              patch("draft.steps.implement_spec._run_git_capture", return_value="abc123"), \
              patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                    return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-            step.run(ctx, engine, lifecycle)
+            step.run(ctx, engine, lifecycle, MagicMock())
 
     assert read_count == 1
 
@@ -274,7 +274,7 @@ def test_get_hooks_called_once_across_retries(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="abc123"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     lifecycle.get_hooks.assert_called_once_with("implement-spec", "verify")
 
@@ -296,7 +296,7 @@ def test_run_prompt_contains_verify_commands_when_configured(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     prompt = engine.run_command.call_args[1]["cmd"][2]
     assert "## Verify commands" in prompt
@@ -320,7 +320,7 @@ def test_run_prompt_no_verify_commands_section_when_empty(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     prompt = engine.run_command.call_args[1]["cmd"][2]
     assert "## Verify commands" not in prompt
@@ -336,7 +336,7 @@ def test_custom_template_file_removed_before_step_runs(tmp_path):
 
     step = ImplementSpecStep()
     with pytest.raises(StepError) as exc_info:
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
     assert exc_info.value.step_name == "implement-spec"
 
 
@@ -350,7 +350,7 @@ def test_no_changes_after_agent_loops_and_records_verify_error(tmp_path):
     with patch("draft.steps.implement_spec._has_changes", return_value=False), \
          patch("draft.steps.implement_spec._generate_commit_message") as mock_gen:
         with pytest.raises(StepError) as exc_info:
-            step.run(ctx, engine, lifecycle)
+            step.run(ctx, engine, lifecycle, MagicMock())
 
     assert exc_info.value.step_name == "implement-spec"
     mock_gen.assert_not_called()
@@ -388,7 +388,7 @@ def test_verify_failure_feeds_back_and_skips_commit(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="deadbeef\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     assert engine.run_command.call_count == 2
     mock_gen.assert_called_once()
@@ -414,7 +414,7 @@ def test_commit_message_used_in_git_commit(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="abc\n") as mock_git, \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")) as mock_commit:
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     mock_commit.assert_called_once()
     commit_call_args = mock_commit.call_args[0][0]
@@ -435,7 +435,7 @@ def test_commit_message_fallback_recorded(tmp_path):
          patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail",
                return_value=subprocess.CompletedProcess([], 0, b"", b"")):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     calls = ctx.step_set.call_args_list
     fallback_calls = [c for c in calls if c.args[1] == "commit_message_fallback"]
@@ -468,7 +468,7 @@ def test_pre_commit_hook_failure_feeds_back(tmp_path):
          patch("draft.steps.implement_spec._generate_commit_message", return_value=("Fix thing", False)), \
          patch("draft.steps.implement_spec._run_git_capture", return_value="sha123\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     assert engine.run_command.call_count == 2
 
@@ -506,7 +506,7 @@ def test_pre_commit_hook_timeout_feeds_back(tmp_path):
          patch("draft.steps.implement_spec._generate_commit_message", return_value=("Fix thing", False)), \
          patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"), \
          patch("draft.steps.implement_spec._run_git_capture_allow_fail", side_effect=commit_side_effect):
-        step.run(ctx, engine, lifecycle)
+        step.run(ctx, engine, lifecycle, MagicMock())
 
     calls = ctx.step_set.call_args_list
     verify_calls = [c for c in calls if c.args[1] == "verify_errors"]
@@ -530,7 +530,7 @@ def test_max_retries_exhausted_raises_step_error(tmp_path):
     with patch("draft.steps.implement_spec._has_changes", return_value=True), \
          patch("draft.steps.implement_spec._generate_commit_message") as mock_gen:
         with pytest.raises(StepError) as exc_info:
-            step.run(ctx, engine, lifecycle)
+            step.run(ctx, engine, lifecycle, MagicMock())
 
     assert exc_info.value.step_name == "implement-spec"
     mock_gen.assert_not_called()
