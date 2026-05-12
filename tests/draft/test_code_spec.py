@@ -12,7 +12,7 @@ from draft.steps.implement_spec import (
     _render_verify_commands,
 )
 from pipeline import StepError
-from pipeline.runner import LLMResult, TIMEOUT_EXIT
+from pipeline.runner import TIMEOUT_EXIT, LLMResult
 
 _BUNDLED_MARKER = "{{SPEC}}"
 

@@ -6,7 +6,7 @@ import pytest
 import draft.steps.open_pr as pr_open_mod
 from draft.steps.open_pr import STEP_DIR, OpenPrStep
 from pipeline import StepError
-from pipeline.runner import LLMResult, TIMEOUT_EXIT
+from pipeline.runner import TIMEOUT_EXIT, LLMResult
 
 _PARSEABLE_FINAL_TEXT = (
     "<<<PR-TITLE>>>\nT\n<<</PR-TITLE>>>\n<<<PR-BODY>>>\nB\n<<</PR-BODY>>>"

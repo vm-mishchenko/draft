@@ -288,8 +288,8 @@ class Runner:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                 )
-            except FileNotFoundError:
-                raise RuntimeError("claude binary not found on PATH")
+            except FileNotFoundError as err:
+                raise RuntimeError("claude binary not found on PATH") from err
 
             def _stream():
                 for raw_line in proc.stdout:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from pipeline.metrics import KnownMetric
-from pipeline.runner import TIMEOUT_EXIT, LLMResult, Runner
+from pipeline.runner import TIMEOUT_EXIT, Runner
 
 
 def test_stage_no_update_final_line_ends_with_ok(capsys):
@@ -332,14 +332,13 @@ def test_run_llm_missing_binary_raises_runtime_error(tmp_path):
     runner = Runner()
     log = tmp_path / "out.log"
 
-    with patch("subprocess.Popen", side_effect=FileNotFoundError("claude")):
-        with pytest.raises(RuntimeError, match="claude"):
-            runner.run_llm(
-                prompt="p",
-                cwd=None,
-                log_path=log,
-                step_metrics=FakeStepMetrics(),
-            )
+    with patch("subprocess.Popen", side_effect=FileNotFoundError("claude")), pytest.raises(RuntimeError, match="claude"):
+        runner.run_llm(
+            prompt="p",
+            cwd=None,
+            log_path=log,
+            step_metrics=FakeStepMetrics(),
+        )
 
 
 def test_run_llm_allowed_tools_builds_argv(tmp_path):
