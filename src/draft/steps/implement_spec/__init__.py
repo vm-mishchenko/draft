@@ -8,6 +8,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from draft.hooks import HookResult, _run_hook_cmd
+from draft.steps.implement_spec._live_status import LiveStatusSummarizer
 from pipeline import Step, StepError
 from pipeline.runner import TIMEOUT_EXIT
 
@@ -342,18 +343,29 @@ class ImplementSpecStep(Step):
                 suggest_template = _load_suggest_template()
 
             for attempt in range(1, cfg["max_retries"] + 1):
-                prefix = (
-                    f"attempt {attempt}/{cfg['max_retries']} — " if attempt > 1 else ""
-                )
-                s.update(f"{prefix}implementing")
-                engine.run_llm(
-                    prompt=_render_prompt(ctx, impl_template, verify_commands),
-                    cwd=wt_dir,
-                    log_path=ctx.log_path(self.name),
-                    step_metrics=step_metrics,
-                    allowed_tools=["Bash", "Edit", "Write", "Read"],
-                    timeout=cfg["timeout"],
-                )
+                prefix = f"attempt {attempt}/{cfg['max_retries']} — "
+                s.update(prefix + "implementing")
+                summarizer = None
+                if sys.stdout.isatty():
+                    summarizer = LiveStatusSummarizer(
+                        handle=s,
+                        engine=engine,
+                        step_metrics=step_metrics,
+                        log_path=ctx.log_path(self.name),
+                        prefix=prefix,
+                    ).start()
+                try:
+                    engine.run_llm(
+                        prompt=_render_prompt(ctx, impl_template, verify_commands),
+                        cwd=wt_dir,
+                        log_path=ctx.log_path(self.name),
+                        step_metrics=step_metrics,
+                        allowed_tools=["Bash", "Edit", "Write", "Read"],
+                        timeout=cfg["timeout"],
+                    )
+                finally:
+                    if summarizer is not None:
+                        summarizer.stop()
 
                 if not _has_changes(wt_dir):
                     ctx.step_set(
