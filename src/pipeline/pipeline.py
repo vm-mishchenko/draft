@@ -54,7 +54,6 @@ class Step:
                 cmd=self.cmd(ctx),
                 cwd=ctx.get("cwd"),
                 log_path=ctx.log_path(self.name),
-                attempt=1,
                 timeout=cfg.get("timeout"),
             )
             if rc != 0:

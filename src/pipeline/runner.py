@@ -5,11 +5,10 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 
-from pipeline.metrics import KnownMetric, fmt_duration
+from pipeline.metrics import KnownMetric, fmt_duration, now_human
 
 TIMEOUT_EXIT = 124
 
@@ -200,12 +199,10 @@ class Runner:
         cwd: str | Path | None,
         log_path: Path,
         timeout: float | None = None,
-        attempt: int = 1,
         line_formatter=None,
     ) -> int:
         with open(log_path, "a") as log_fd:
-            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            log_fd.write(f"=== attempt {attempt} @ {ts} ===\n")
+            log_fd.write(f"=== new attempt @ {now_human()} ===\n")
             log_fd.flush()
 
             proc = subprocess.Popen(
@@ -260,7 +257,6 @@ class Runner:
         allowed_tools: list[str] = (),
         extra_args: list[str] = (),
         timeout: float | None = None,
-        attempt: int = 1,
     ) -> LLMResult:
         argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
         if allowed_tools:
@@ -277,8 +273,7 @@ class Runner:
         }
 
         with open(log_path, "a") as log_fd:
-            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            log_fd.write(f"=== attempt {attempt} @ {ts} ===\n")
+            log_fd.write(f"=== new attempt @ {now_human()} ===\n")
             log_fd.flush()
 
             try:

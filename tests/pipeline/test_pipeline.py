@@ -182,7 +182,6 @@ def test_engine_timeout_returns_timeout_exit(tmp_path):
         cmd=["sleep", "10"],
         cwd=str(tmp_path),
         log_path=log,
-        attempt=1,
         timeout=0.1,
     )
     assert rc == TIMEOUT_EXIT
