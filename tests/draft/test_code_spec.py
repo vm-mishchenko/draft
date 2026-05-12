@@ -1262,3 +1262,91 @@ def test_bundled_suggest_checks_has_no_diff_marker():
         files("draft.steps.implement_spec").joinpath("suggest_checks.md").read_text()
     )
     assert "{{DIFF}}" not in content
+
+
+# --- LiveStatusSummarizer integration ---
+
+
+def _run_step_with_patches(ctx, engine, lifecycle, isatty=False):
+    step = ImplementSpecStep()
+    with (
+        patch("sys.stdout.isatty", return_value=isatty),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+
+def test_summarizer_not_created_when_not_tty(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    with patch(
+        "draft.steps.implement_spec.LiveStatusSummarizer"
+    ) as mock_summarizer_cls:
+        _run_step_with_patches(ctx, engine, lifecycle, isatty=False)
+
+    mock_summarizer_cls.assert_not_called()
+
+
+def test_summarizer_created_and_stopped_when_tty(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    mock_instance = MagicMock()
+    mock_instance.start.return_value = mock_instance
+
+    with patch(
+        "draft.steps.implement_spec.LiveStatusSummarizer", return_value=mock_instance
+    ):
+        _run_step_with_patches(ctx, engine, lifecycle, isatty=True)
+
+    mock_instance.start.assert_called_once()
+    mock_instance.stop.assert_called_once()
+
+
+def test_summarizer_stopped_in_finally_when_run_llm_raises(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    engine.run_llm.side_effect = RuntimeError("boom")
+    lifecycle = MagicMock()
+
+    mock_instance = MagicMock()
+    mock_instance.start.return_value = mock_instance
+
+    step = ImplementSpecStep()
+    with (
+        patch("sys.stdout.isatty", return_value=True),
+        patch(
+            "draft.steps.implement_spec.LiveStatusSummarizer",
+            return_value=mock_instance,
+        ),
+        pytest.raises((StepError, RuntimeError)),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_instance.stop.assert_called_once()
+
+
+def test_bundled_summarize_status_has_tail_placeholder():
+    from importlib.resources import files
+
+    content = (
+        files("draft.steps.implement_spec").joinpath("summarize_status.md").read_text()
+    )
+    assert "{{TAIL}}" in content

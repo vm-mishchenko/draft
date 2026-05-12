@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -251,7 +252,7 @@ class Runner:
         self,
         prompt: str,
         cwd,
-        log_path: Path,
+        log_path: Path | None,
         step_metrics,
         *,
         allowed_tools: list[str] = (),
@@ -272,7 +273,7 @@ class Runner:
             "duration_ms": 0,
         }
 
-        with open(log_path, "a") as log_fd:
+        with open(log_path if log_path is not None else os.devnull, "a") as log_fd:
             log_fd.write(f"=== new attempt @ {now_human()} ===\n")
             log_fd.flush()
 
