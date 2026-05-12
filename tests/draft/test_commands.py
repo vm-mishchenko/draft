@@ -2815,6 +2815,170 @@ def test_status_state_absent_does_not_add_new_keys(tmp_path, capsys):
     assert "started_at" not in data
     assert "finished_at" not in data
     assert "total_runtime_seconds" not in data
+    assert "total_llm_cost_usd" not in data
+
+
+def _make_status_state_with_cost(cost):
+    return {
+        "completed": ["create-worktree"],
+        "data": {"branch": "feat"},
+        "sessions": [
+            {
+                "command": "create",
+                "started_at": "2025-01-01 10:00:00 UTC",
+                "finished_at": "2025-01-01 10:00:01 UTC",
+                "exit_code": 0,
+                "steps": [
+                    {
+                        "name": "create-worktree",
+                        "started_at": "2025-01-01 10:00:00 UTC",
+                        "finished_at": "2025-01-01 10:00:01 UTC",
+                        "exit_code": 0,
+                        "data": {"llm_cost_usd": cost} if cost is not None else {},
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_status_human_cost_present(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = _make_status_state_with_cost(0.42)
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    out = capsys.readouterr().out
+    assert "cost:          $0.42" in out
+    lines = out.splitlines()
+    runtime_idx = next(i for i, line in enumerate(lines) if "total runtime:" in line)
+    cost_idx = next(i for i, line in enumerate(lines) if "cost:" in line)
+    assert cost_idx == runtime_idx + 1
+
+
+def test_status_human_cost_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = _make_status_state_with_cost(None)
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    assert "cost:          -" in capsys.readouterr().out
+
+
+def test_status_human_cost_subcent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = _make_status_state_with_cost(0.003)
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000"))
+
+    assert "cost:          $0.00" in capsys.readouterr().out
+
+
+def test_status_json_cost_present(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = _make_status_state_with_cost(0.42)
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["total_llm_cost_usd"] == pytest.approx(0.42)
+    step = next(s for s in data["steps"] if s["name"] == "create-worktree")
+    assert step["llm_cost_usd"] == pytest.approx(0.42)
+
+
+def test_status_json_cost_absent(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = _make_status_state_with_cost(None)
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["total_llm_cost_usd"] is None
+    for step in data["steps"]:
+        assert step["llm_cost_usd"] is None
+
+
+def test_status_json_cost_per_step_sum_across_sessions(tmp_path, capsys):
+    import draft.command_status as cs
+
+    state = {
+        "completed": ["create-worktree"],
+        "data": {"branch": "feat"},
+        "sessions": [
+            {
+                "command": "create",
+                "started_at": "2025-01-01 10:00:00 UTC",
+                "finished_at": "2025-01-01 10:00:01 UTC",
+                "exit_code": 0,
+                "steps": [
+                    {
+                        "name": "create-worktree",
+                        "started_at": "2025-01-01 10:00:00 UTC",
+                        "finished_at": "2025-01-01 10:00:01 UTC",
+                        "exit_code": 0,
+                        "data": {"llm_cost_usd": 0.10},
+                    },
+                ],
+            },
+            {
+                "command": "continue",
+                "started_at": "2025-01-01 11:00:00 UTC",
+                "finished_at": "2025-01-01 11:00:01 UTC",
+                "exit_code": 0,
+                "steps": [
+                    {
+                        "name": "create-worktree",
+                        "started_at": "2025-01-01 11:00:00 UTC",
+                        "finished_at": "2025-01-01 11:00:01 UTC",
+                        "exit_code": 0,
+                        "data": {"llm_cost_usd": 0.15},
+                    },
+                ],
+            },
+        ],
+    }
+    run_dir = _make_status_run(tmp_path, state=state)
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
+        cs.run(_make_status_args("260508-100000", use_json=True))
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["total_llm_cost_usd"] == pytest.approx(0.25)
+    step = next(s for s in data["steps"] if s["name"] == "create-worktree")
+    assert step["llm_cost_usd"] == pytest.approx(0.25)
 
 
 # --- _validate_overrides ---
