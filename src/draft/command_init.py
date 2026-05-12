@@ -4,14 +4,16 @@ from pathlib import Path
 
 import yaml
 
+from draft.config import _LOOPING_STEPS, ConfigError, load_config, validate_config
 from draft.steps import STEPS
-from draft.config import ConfigError, _LOOPING_STEPS, load_config, validate_config
 
 
 def _repo_root() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 

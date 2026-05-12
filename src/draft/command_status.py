@@ -26,15 +26,20 @@ def run(args) -> int:
     state_path = run_dir / "state.json"
     if not state_path.exists():
         if use_json:
-            print(json.dumps({
-                "run_id": args.run_id,
-                "project": run_dir.parent.name,
-                "branch": None,
-                "status": "unknown",
-                "worktree": None,
-                "pr_url": None,
-                "steps": None,
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "project": run_dir.parent.name,
+                        "branch": None,
+                        "status": "unknown",
+                        "worktree": None,
+                        "pr_url": None,
+                        "steps": None,
+                    },
+                    indent=2,
+                )
+            )
         else:
             print(f"run-id:  {args.run_id}")
             print(f"project: {run_dir.parent.name}")

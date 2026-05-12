@@ -6,7 +6,9 @@ from pipeline.metrics import RunMetrics
 
 
 class RunContext:
-    def __init__(self, run_id: str, run_dir: str | Path, step_configs: dict | None = None):
+    def __init__(
+        self, run_id: str, run_dir: str | Path, step_configs: dict | None = None
+    ):
         self.run_id = run_id
         self.run_dir = Path(run_dir)
         self._data: dict = {}

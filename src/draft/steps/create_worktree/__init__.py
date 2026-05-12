@@ -6,7 +6,9 @@ from pathlib import Path
 from pipeline import Step
 
 
-def _find_run_id_for_branch(project: str, branch: str, exclude_run_id: str | None = None) -> str | None:
+def _find_run_id_for_branch(
+    project: str, branch: str, exclude_run_id: str | None = None
+) -> str | None:
     runs_dir = Path.home() / ".draft" / "runs" / project
     if not runs_dir.exists():
         return None
@@ -26,13 +28,17 @@ def _find_run_id_for_branch(project: str, branch: str, exclude_run_id: str | Non
 def _branch_exists(repo: str, branch: str) -> bool:
     local = subprocess.run(
         ["git", "branch", "--list", branch],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     if local.stdout.strip():
         return True
     remote = subprocess.run(
         ["git", "branch", "-r", "--list", f"*/{branch}"],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     return bool(remote.stdout.strip())
 
@@ -46,7 +52,15 @@ class CreateWorktreeStep(Step):
     def cmd(self, ctx) -> list[str]:
         if ctx.get("branch_source") == "existing":
             return ["git", "worktree", "add", ctx.get("wt_dir"), ctx.get("branch")]
-        return ["git", "worktree", "add", ctx.get("wt_dir"), "-b", ctx.get("branch"), ctx.get("base_branch")]
+        return [
+            "git",
+            "worktree",
+            "add",
+            ctx.get("wt_dir"),
+            "-b",
+            ctx.get("branch"),
+            ctx.get("base_branch"),
+        ]
 
     def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)

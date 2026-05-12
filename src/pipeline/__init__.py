@@ -1,8 +1,8 @@
 from pipeline.context import RunContext
-from pipeline.runner import Runner, StageHandle
+from pipeline.heartbeat import HEARTBEAT_INTERVAL_SECONDS, Heartbeat
+from pipeline.metrics import KnownMetric, RunMetrics, SessionMetrics, StepMetrics
 from pipeline.pipeline import Pipeline, PipelineLifecycle, Step, StepError
-from pipeline.metrics import RunMetrics, SessionMetrics, StepMetrics, KnownMetric
-from pipeline.heartbeat import Heartbeat, HEARTBEAT_INTERVAL_SECONDS
+from pipeline.runner import Runner, StageHandle
 
 __all__ = [
     "Pipeline",

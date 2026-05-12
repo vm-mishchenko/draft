@@ -11,7 +11,7 @@ authors = [{name = "Vitalii Mishchenko"}]
 dependencies = ["PyYAML"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff>=0.6,<1"]
 
 [project.scripts]
 draft = "draft.cli:main"
@@ -29,3 +29,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+extend-exclude = [".venv", "build", "dist", "*.egg-info", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]  # codebase has pervasive long lines; formatting is handled by ruff format

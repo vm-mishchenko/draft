@@ -1,12 +1,13 @@
+import contextlib
 import os
 import sys
 import threading
 from pathlib import Path
 
+from pipeline.metrics import now_human
+
 HEARTBEAT_INTERVAL_SECONDS = 10
 HEARTBEAT_FILENAME = "heartbeat"
-
-from pipeline.metrics import now_human
 
 
 # Writes a timestamp file at a fixed interval so external monitors can detect
@@ -30,10 +31,8 @@ class Heartbeat:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
-        try:
+        with contextlib.suppress(OSError):
             self._path.unlink(missing_ok=True)
-        except OSError:
-            pass
 
     def _loop(self):
         while not self._stop.is_set():

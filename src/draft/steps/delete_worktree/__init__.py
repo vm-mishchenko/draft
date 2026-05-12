@@ -27,7 +27,8 @@ class DeleteWorktreeStep(Step):
 
             result = subprocess.run(
                 ["git", "worktree", "remove", wt_dir, "--force"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if result.returncode == 0:
                 return

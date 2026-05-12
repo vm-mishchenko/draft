@@ -1,7 +1,15 @@
 import argparse
 import sys
 
-from draft import command_create, command_continue, command_delete, command_init, command_list, command_prune, command_status
+from draft import (
+    command_continue,
+    command_create,
+    command_delete,
+    command_init,
+    command_list,
+    command_prune,
+    command_status,
+)
 
 
 def main():

@@ -57,7 +57,9 @@ def resolve_prompt_template(config: dict, repo: str) -> dict:
     if raw is None:
         return config
     if not isinstance(raw, str) or not raw.strip():
-        raise ConfigError("steps.implement-spec.prompt_template must be a non-empty string")
+        raise ConfigError(
+            "steps.implement-spec.prompt_template must be a non-empty string"
+        )
 
     p = Path(raw).expanduser()
     if not p.is_absolute():
@@ -69,13 +71,15 @@ def resolve_prompt_template(config: dict, repo: str) -> dict:
     try:
         text = abs_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"prompt_template is not UTF-8: {abs_path}: {exc}")
+        raise ConfigError(f"prompt_template is not UTF-8: {abs_path}: {exc}") from exc
     except OSError as exc:
-        raise ConfigError(f"cannot read prompt_template {abs_path}: {exc}")
+        raise ConfigError(f"cannot read prompt_template {abs_path}: {exc}") from exc
     if not text:
         raise ConfigError(f"prompt_template is empty: {abs_path}")
     if "{{SPEC}}" not in text:
-        raise ConfigError(f"prompt_template missing required marker {{{{SPEC}}}}: {abs_path}")
+        raise ConfigError(
+            f"prompt_template missing required marker {{{{SPEC}}}}: {abs_path}"
+        )
     if "{{VERIFY_ERRORS}}" not in text:
         print(
             f"warning: prompt_template lacks {{{{VERIFY_ERRORS}}}}; "
@@ -104,9 +108,9 @@ def resolve_pr_body_template(config: dict, repo: str) -> dict:
     try:
         text = abs_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"pr_body_template is not UTF-8: {abs_path}: {exc}")
+        raise ConfigError(f"pr_body_template is not UTF-8: {abs_path}: {exc}") from exc
     except OSError as exc:
-        raise ConfigError(f"cannot read pr_body_template {abs_path}: {exc}")
+        raise ConfigError(f"cannot read pr_body_template {abs_path}: {exc}") from exc
     if not text:
         raise ConfigError(f"pr_body_template is empty: {abs_path}")
 
@@ -120,7 +124,7 @@ _LOOPING_STEPS = frozenset({"implement-spec", "babysit-pr"})
 
 
 def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
-    for key in step_cfg.keys():
+    for key in step_cfg:
         if key in _FORBIDDEN_STEP_KEYS:
             raise ConfigError(
                 f"'{key}' is no longer supported (the pipeline-level retry "
@@ -143,21 +147,20 @@ def validate_config(config: dict) -> None:
     for step_name, step_cfg in steps.items():
         if not isinstance(step_cfg, dict):
             continue
-        _validate_step_keys(step_name, {k: v for k, v in step_cfg.items() if k != "hooks"})
+        _validate_step_keys(
+            step_name, {k: v for k, v in step_cfg.items() if k != "hooks"}
+        )
         hooks = step_cfg.get("hooks")
         if hooks is None:
             continue
         if not isinstance(hooks, dict):
-            raise ConfigError(
-                f"'hooks' for step '{step_name}' must be a mapping"
-            )
+            raise ConfigError(f"'hooks' for step '{step_name}' must be a mapping")
         for event, entries in hooks.items():
             if entries is None:
                 continue
             if not isinstance(entries, list):
                 raise ConfigError(
-                    f"hooks for step '{step_name}' event '{event}' "
-                    f"must be a list"
+                    f"hooks for step '{step_name}' event '{event}' must be a list"
                 )
             for i, entry in enumerate(entries):
                 if not isinstance(entry, dict):

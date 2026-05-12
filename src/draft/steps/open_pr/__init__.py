@@ -36,12 +36,14 @@ def _parse_title_body(text: str) -> tuple[str, str]:
 
 def _run_git_capture(cmd: list[str], cwd: str, timeout: float, log_path: Path) -> str:
     try:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, check=False)
+        result = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, timeout=timeout, check=False
+        )
     except subprocess.TimeoutExpired:
         with open(log_path, "ab") as f:
             f.write(f"$ {' '.join(cmd)}\ntimed out after {timeout}s\n".encode())
         print(f"open-pr: {' '.join(cmd)} timed out after {timeout}s", file=sys.stderr)
-        raise StepError("open-pr", TIMEOUT_EXIT)
+        raise StepError("open-pr", TIMEOUT_EXIT) from None
 
     stdout = result.stdout.decode("utf-8", errors="replace")
     stderr = result.stderr.decode("utf-8", errors="replace")
@@ -65,7 +67,6 @@ class OpenPrStep(Step):
 
     def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
-        repo = ctx.get("repo", "")
         branch = ctx.get("branch", "")
         base_branch = ctx.get("base_branch", "main")
         title_prefix = cfg.get("title_prefix", "")
@@ -85,11 +86,15 @@ class OpenPrStep(Step):
             s.update("gathering context")
             git_diff = _run_git_capture(
                 ["git", "diff", f"{base_branch}..HEAD"],
-                wt_dir, cfg["timeout"], ctx.log_path("open-pr-git-diff"),
+                wt_dir,
+                cfg["timeout"],
+                ctx.log_path("open-pr-git-diff"),
             )
             git_log = _run_git_capture(
                 ["git", "log", f"{base_branch}..HEAD", "--format=%s%n%n%b"],
-                wt_dir, cfg["timeout"], ctx.log_path("open-pr-git-log"),
+                wt_dir,
+                cfg["timeout"],
+                ctx.log_path("open-pr-git-log"),
             )
 
             prompt = (
@@ -124,10 +129,15 @@ class OpenPrStep(Step):
             s.update("creating PR")
             rc = engine.run_command(
                 cmd=[
-                    "gh", "pr", "create",
-                    "--base", gh_base,
-                    "--title", title_prefix + title,
-                    "--body", body,
+                    "gh",
+                    "pr",
+                    "create",
+                    "--base",
+                    gh_base,
+                    "--title",
+                    title_prefix + title,
+                    "--body",
+                    body,
                     "--draft",
                 ],
                 cwd=wt_dir,

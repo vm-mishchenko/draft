@@ -7,13 +7,15 @@ from draft import runs
 from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
-from pipeline import Runner, Pipeline, RunContext, StepError
+from pipeline import Pipeline, RunContext, Runner, StepError
 from pipeline.heartbeat import Heartbeat
 
 
 def register(subparsers):
     p = subparsers.add_parser("continue", help="Resume a stopped run.")
-    p.add_argument("run_id", nargs="?", help="Run ID to resume (defaults to most recent).")
+    p.add_argument(
+        "run_id", nargs="?", help="Run ID to resume (defaults to most recent)."
+    )
     p.set_defaults(func=run)
 
 
@@ -42,7 +44,13 @@ def _print_preamble(ctx, steps):
     print(f"started:  {started_at}")
     print("stages:")
     for step in steps:
-        marker = "x" if step.name in completed else "*" if _next_step(ctx, steps) == step.name else " "
+        marker = (
+            "x"
+            if step.name in completed
+            else "*"
+            if _next_step(ctx, steps) == step.name
+            else " "
+        )
         print(f"  [{marker}] {step.name}")
     print()
 
@@ -57,7 +65,9 @@ def _next_step(ctx, steps) -> str | None:
 def _branch_at(path: str) -> str | None:
     result = subprocess.run(
         ["git", "symbolic-ref", "--short", "-q", "HEAD"],
-        capture_output=True, text=True, cwd=path,
+        capture_output=True,
+        text=True,
+        cwd=path,
     )
     if result.returncode != 0:
         return None
@@ -91,7 +101,10 @@ def run(args) -> int:
         try:
             pid = int(pid_file.read_text().strip())
             if _is_pid_alive(pid):
-                print(f"error: run '{run_id}' is currently active (pid {pid})", file=sys.stderr)
+                print(
+                    f"error: run '{run_id}' is currently active (pid {pid})",
+                    file=sys.stderr,
+                )
                 return 3
         except ValueError:
             pass
@@ -176,14 +189,19 @@ def run(args) -> int:
     _print_preamble(ctx, active_steps)
 
     engine = Runner()
-    lifecycle = DraftLifecycle(HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine))
+    lifecycle = DraftLifecycle(
+        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
+    )
 
     hb = Heartbeat(run_dir).start()
     rc = 0
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
     except StepError as exc:
-        print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
+        print(
+            f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})",
+            file=sys.stderr,
+        )
         rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
     except BaseException:
         rc = -1

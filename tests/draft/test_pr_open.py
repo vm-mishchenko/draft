@@ -1,16 +1,17 @@
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import draft.steps.open_pr as pr_open_mod
-from draft.steps.open_pr import OpenPrStep, STEP_DIR
+from draft.steps.open_pr import STEP_DIR, OpenPrStep
 from pipeline import StepError
 from pipeline.runner import TIMEOUT_EXIT
 
 
-def _make_ctx(cfg, tmp_path, branch="draft/feat", repo="/repo", base_branch="main", wt_dir="/wt"):
+def _make_ctx(
+    cfg, tmp_path, branch="draft/feat", repo="/repo", base_branch="main", wt_dir="/wt"
+):
     ctx = MagicMock()
     ctx.config.return_value = cfg
     ctx.get.side_effect = lambda key, default=None: {
@@ -39,10 +40,17 @@ def _make_engine():
 def _subprocess_factory(diff_stdout=b"", log_stdout=b""):
     def side_effect(cmd, **kwargs):
         if "diff" in cmd:
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=diff_stdout, stderr=b"")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=diff_stdout, stderr=b""
+            )
         if "log" in cmd:
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=log_stdout, stderr=b"")
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=log_stdout, stderr=b""
+            )
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=b"", stderr=b""
+        )
+
     return side_effect
 
 
@@ -147,7 +155,13 @@ def test_no_stale_placeholders_in_rendered_prompt(tmp_path):
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
     prompt = engine.run_command.call_args_list[0].kwargs["cmd"][2]
-    for placeholder in ("{{PR_BODY_TEMPLATE}}", "{{GIT_DIFF}}", "{{GIT_LOG}}", "{{BASE_BRANCH}}", "{{PR_BODY_TEMPLATE_PATH}}"):
+    for placeholder in (
+        "{{PR_BODY_TEMPLATE}}",
+        "{{GIT_DIFF}}",
+        "{{GIT_LOG}}",
+        "{{BASE_BRANCH}}",
+        "{{PR_BODY_TEMPLATE_PATH}}",
+    ):
         assert placeholder not in prompt
 
 
@@ -179,7 +193,9 @@ def test_git_diff_log_files_written(tmp_path):
     diff_bytes = b"diff content\n"
     log_bytes = b"log content\n"
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
-        mock_sub.run.side_effect = _subprocess_factory(diff_stdout=diff_bytes, log_stdout=log_bytes)
+        mock_sub.run.side_effect = _subprocess_factory(
+            diff_stdout=diff_bytes, log_stdout=log_bytes
+        )
         mock_sub.TimeoutExpired = subprocess.TimeoutExpired
         OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
 
@@ -198,8 +214,15 @@ def test_git_diff_failure_raises_step_error(tmp_path, capsys):
 
     def fail_diff(cmd, **kwargs):
         if "diff" in cmd:
-            return subprocess.CompletedProcess(args=cmd, returncode=128, stdout=b"", stderr=b"fatal: ambiguous argument\n")
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=128,
+                stdout=b"",
+                stderr=b"fatal: ambiguous argument\n",
+            )
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=b"", stderr=b""
+        )
 
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = fail_diff
@@ -223,8 +246,12 @@ def test_git_log_failure_raises_step_error(tmp_path):
 
     def fail_log(cmd, **kwargs):
         if "log" in cmd:
-            return subprocess.CompletedProcess(args=cmd, returncode=1, stdout=b"", stderr=b"")
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"", stderr=b"")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout=b"", stderr=b""
+            )
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=b"", stderr=b""
+        )
 
     with patch.object(pr_open_mod, "subprocess") as mock_sub:
         mock_sub.run.side_effect = fail_log
@@ -275,8 +302,15 @@ def test_non_utf8_template_does_not_raise(tmp_path):
 
 def test_bundled_open_pr_md_contains_required_placeholders():
     content = (STEP_DIR / "open_pr.md").read_text()
-    for placeholder in ("<<<PR-TITLE>>>", "<<</PR-TITLE>>>", "<<<PR-BODY>>>", "<<</PR-BODY>>>",
-                        "{{PR_BODY_TEMPLATE}}", "{{GIT_DIFF}}", "{{GIT_LOG}}"):
+    for placeholder in (
+        "<<<PR-TITLE>>>",
+        "<<</PR-TITLE>>>",
+        "<<<PR-BODY>>>",
+        "<<</PR-BODY>>>",
+        "{{PR_BODY_TEMPLATE}}",
+        "{{GIT_DIFF}}",
+        "{{GIT_LOG}}",
+    ):
         assert placeholder in content, f"missing {placeholder} in open_pr.md"
 
 

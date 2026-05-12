@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import shutil
@@ -8,12 +7,20 @@ import time
 from pathlib import Path
 
 from draft import runs
-from draft.config import ConfigError, _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS, load_config, resolve_pr_body_template, resolve_prompt_template, step_config, validate_config
+from draft.config import (
+    _FORBIDDEN_STEP_KEYS,
+    _LOOPING_STEPS,
+    ConfigError,
+    load_config,
+    resolve_pr_body_template,
+    resolve_prompt_template,
+    step_config,
+    validate_config,
+)
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.steps import STEPS
-from pipeline import Runner, RunContext, StepError
+from pipeline import RunContext, Runner, StepError
 from pipeline.heartbeat import Heartbeat
-
 
 _BRANCH_HEAD_SENTINEL = ""
 
@@ -25,9 +32,13 @@ _STEP_EXIT_CODES = {
 
 
 def register(subparsers):
-    p = subparsers.add_parser("create", help="Start a fresh run from a spec file or prompt.")
+    p = subparsers.add_parser(
+        "create", help="Start a fresh run from a spec file or prompt."
+    )
     p.add_argument("spec_path", nargs="?", help="Path to spec file.")
-    p.add_argument("--prompt", metavar="TEXT", help="Inline prompt text instead of a spec file.")
+    p.add_argument(
+        "--prompt", metavar="TEXT", help="Inline prompt text instead of a spec file."
+    )
     p.add_argument(
         "--set",
         metavar="STEP.KEY=VALUE",
@@ -80,6 +91,7 @@ def register(subparsers):
 
 # --- pre-flight helpers ---
 
+
 def _assert_git_repo():
     result = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
@@ -93,24 +105,29 @@ def _assert_git_repo():
 def _assert_main_clone():
     result = subprocess.run(
         ["git", "rev-parse", "--show-superproject-working-tree"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.stdout.strip():
         print("error: cannot run draft from inside a git worktree", file=sys.stderr)
         sys.exit(3)
     result2 = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     lines = result2.stdout.splitlines()
     cwd = os.getcwd()
     main_wt = ""
     for line in lines:
         if line.startswith("worktree "):
-            main_wt = line[len("worktree "):]
+            main_wt = line[len("worktree ") :]
             break
     if cwd != main_wt and main_wt:
-        print("error: draft must be run from the main worktree, not a linked worktree", file=sys.stderr)
+        print(
+            "error: draft must be run from the main worktree, not a linked worktree",
+            file=sys.stderr,
+        )
         sys.exit(3)
 
 
@@ -123,7 +140,9 @@ def _assert_on_path(tool: str):
 def _repo_root() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -142,16 +161,21 @@ def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
     for candidate in ("origin/main", "origin/master"):
         result = subprocess.run(
             ["git", "rev-parse", "--verify", candidate],
-            capture_output=True, cwd=repo,
+            capture_output=True,
+            cwd=repo,
         )
         if result.returncode == 0:
             return candidate
-    print("error: could not find origin/main or origin/master; use --from to specify a base branch", file=sys.stderr)
+    print(
+        "error: could not find origin/main or origin/master; use --from to specify a base branch",
+        file=sys.stderr,
+    )
     sys.exit(3)
 
 
 def _unique_branch(repo: str, branch: str) -> str:
     from draft.steps.create_worktree import _branch_exists
+
     i = 1
     candidate = branch
     while _branch_exists(repo, candidate):
@@ -162,12 +186,17 @@ def _unique_branch(repo: str, branch: str) -> str:
 
 def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     from importlib.resources import files
+
     try:
-        template = files("draft.steps.implement_spec").joinpath("branch_slug.md").read_text()
+        template = (
+            files("draft.steps.implement_spec").joinpath("branch_slug.md").read_text()
+        )
         full_prompt = template.replace("{{PROMPT}}", prompt_text)
         result = subprocess.run(
             ["claude", "-p", full_prompt],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         slug = result.stdout.strip().lower()
         slug = "".join(c if c.isalnum() or c == "-" else "-" for c in slug)
@@ -203,10 +232,13 @@ def _validate_overrides(overrides: list[str]) -> None:
 
 def _apply_overrides(config: dict, overrides: list[str]) -> dict:
     import copy
+
     cfg = copy.deepcopy(config)
     for override in overrides:
         if "=" not in override or "." not in override.split("=")[0]:
-            print(f"warning: ignoring malformed --set value: {override}", file=sys.stderr)
+            print(
+                f"warning: ignoring malformed --set value: {override}", file=sys.stderr
+            )
             continue
         key_path, value = override.split("=", 1)
         step_name, key = key_path.split(".", 1)
@@ -227,31 +259,47 @@ def _validate_run_id(run_id: str, project_name: str) -> None:
         print(f"error: --run-id '{run_id}' exceeds 64 characters", file=sys.stderr)
         sys.exit(2)
     if not _RUN_ID_CHARS_RE.match(run_id):
-        print(f"error: --run-id '{run_id}' contains invalid characters (allowed: [a-z0-9._-])", file=sys.stderr)
+        print(
+            f"error: --run-id '{run_id}' contains invalid characters (allowed: [a-z0-9._-])",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if run_id[0] in _RUN_ID_BORDER or run_id[-1] in _RUN_ID_BORDER:
-        print(f"error: --run-id '{run_id}' must not start or end with '-', '_', or '.'", file=sys.stderr)
+        print(
+            f"error: --run-id '{run_id}' must not start or end with '-', '_', or '.'",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if ".." in run_id:
         print(f"error: --run-id '{run_id}' must not contain '..'", file=sys.stderr)
         sys.exit(2)
     if _TIMESTAMP_RE.match(run_id):
-        print(f"error: --run-id '{run_id}' matches the reserved timestamp format (YYMMDD-HHMMSS)", file=sys.stderr)
+        print(
+            f"error: --run-id '{run_id}' matches the reserved timestamp format (YYMMDD-HHMMSS)",
+            file=sys.stderr,
+        )
         sys.exit(2)
     run_dir = runs.runs_base() / project_name / run_id
     if run_dir.exists():
-        print(f"error: run '{run_id}' already exists in project '{project_name}'", file=sys.stderr)
+        print(
+            f"error: run '{run_id}' already exists in project '{project_name}'",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
 
 # --- new helpers for create-modes ---
+
 
 def _reject_flag_conflicts(args) -> None:
     if args.branch is not None and args.from_branch is not None:
         print("error: --branch and --from are mutually exclusive", file=sys.stderr)
         sys.exit(2)
     if args.delete_worktree and args.no_worktree:
-        print("error: --delete-worktree cannot be combined with --no-worktree", file=sys.stderr)
+        print(
+            "error: --delete-worktree cannot be combined with --no-worktree",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
 
@@ -276,7 +324,9 @@ def _assert_spec_readable(spec_path: str) -> None:
 def _current_head_branch(repo: str) -> str | None:
     result = subprocess.run(
         ["git", "symbolic-ref", "--short", "-q", "HEAD"],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     if result.returncode != 0:
         return None
@@ -286,7 +336,8 @@ def _current_head_branch(repo: str) -> str | None:
 def _local_branch_exists(repo: str, branch: str) -> bool:
     result = subprocess.run(
         ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        capture_output=True, cwd=repo,
+        capture_output=True,
+        cwd=repo,
     )
     return result.returncode == 0
 
@@ -294,15 +345,17 @@ def _local_branch_exists(repo: str, branch: str) -> bool:
 def _branch_worktrees(repo: str, branch: str) -> list[str]:
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     paths: list[str] = []
     current_path: str | None = None
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            current_path = line[len("worktree "):]
+            current_path = line[len("worktree ") :]
         elif line.startswith("branch refs/heads/") and current_path:
-            wt_branch = line[len("branch refs/heads/"):]
+            wt_branch = line[len("branch refs/heads/") :]
             if wt_branch == branch:
                 paths.append(current_path)
     return paths
@@ -315,7 +368,9 @@ def _canonical_worktree_path(project: str, branch: str) -> Path:
 def _is_working_tree_clean(repo: str) -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     return result.returncode == 0 and result.stdout.strip() == ""
 
@@ -334,24 +389,32 @@ def _resolve_working_branch(repo: str, args, base: str) -> tuple[str, str]:
     if args.branch == _BRANCH_HEAD_SENTINEL:
         head = _current_head_branch(repo)
         if head is None:
-            print("error: HEAD is detached; cannot resolve --branch without a value", file=sys.stderr)
+            print(
+                "error: HEAD is detached; cannot resolve --branch without a value",
+                file=sys.stderr,
+            )
             sys.exit(2)
         branch = head
     else:
         branch = args.branch
         if not _local_branch_exists(repo, branch):
             print(f"error: branch '{branch}' does not exist locally", file=sys.stderr)
-            print(f"       fetch it first or pick an existing branch", file=sys.stderr)
+            print("       fetch it first or pick an existing branch", file=sys.stderr)
             sys.exit(2)
 
     if branch == base_short:
-        print(f"error: working branch '{branch}' is the configured base; refusing", file=sys.stderr)
+        print(
+            f"error: working branch '{branch}' is the configured base; refusing",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     return (branch, "existing")
 
 
-def _detect_pr_mode(branch: str, branch_source: str, skip_pr: bool, repo: str) -> tuple[str, str | None]:
+def _detect_pr_mode(
+    branch: str, branch_source: str, skip_pr: bool, repo: str
+) -> tuple[str, str | None]:
     """Returns (pr_mode, pr_url) where pr_mode is 'open' | 'reuse' | 'skip'."""
     if skip_pr:
         return ("skip", None)
@@ -359,12 +422,28 @@ def _detect_pr_mode(branch: str, branch_source: str, skip_pr: bool, repo: str) -
         return ("open", None)
 
     result = subprocess.run(
-        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "-q", ".[].url"],
-        capture_output=True, text=True, cwd=repo,
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "url",
+            "-q",
+            ".[].url",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
-        print(f"error: failed to query open PRs for '{branch}': {stderr}", file=sys.stderr)
+        print(
+            f"error: failed to query open PRs for '{branch}': {stderr}", file=sys.stderr
+        )
         sys.exit(3)
     urls = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if len(urls) == 0:
@@ -381,7 +460,10 @@ def _assert_no_active_run_on_branch(project: str, branch: str) -> None:
     existing = runs.find_active_run_on_branch(project, branch)
     if existing is not None:
         run_id = existing.name
-        print(f"error: branch '{branch}' is already targeted by an unresolved run '{run_id}'", file=sys.stderr)
+        print(
+            f"error: branch '{branch}' is already targeted by an unresolved run '{run_id}'",
+            file=sys.stderr,
+        )
         print(f"       resume it: draft continue {run_id}", file=sys.stderr)
         print(f"       or remove it: draft delete {run_id}", file=sys.stderr)
         sys.exit(2)
@@ -403,35 +485,58 @@ def _resolve_worktree_for_existing_branch(
         return (canonical_str, "worktree")
 
     if not branch_was_explicit:
-        print(f"error: branch '{branch}' (current HEAD) has a worktree at:", file=sys.stderr)
+        print(
+            f"error: branch '{branch}' (current HEAD) has a worktree at:",
+            file=sys.stderr,
+        )
         for p in paths:
             print(f"       {p}", file=sys.stderr)
-        print(f"       pass '--branch {branch}' explicitly to reuse it, or remove the worktree first", file=sys.stderr)
+        print(
+            f"       pass '--branch {branch}' explicitly to reuse it, or remove the worktree first",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     if len(paths) != 1 or Path(paths[0]).resolve() != canonical.resolve():
-        print(f"error: branch '{branch}' is checked out at non-canonical path(s):", file=sys.stderr)
+        print(
+            f"error: branch '{branch}' is checked out at non-canonical path(s):",
+            file=sys.stderr,
+        )
         for p in paths:
             print(f"       {p}", file=sys.stderr)
-        print(f"       only worktrees at {canonical_str} can be reused; remove the others first", file=sys.stderr)
+        print(
+            f"       only worktrees at {canonical_str} can be reused; remove the others first",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     if not Path(canonical_str).is_dir():
-        print(f"error: branch '{branch}' has a stale worktree registration; directory missing:", file=sys.stderr)
+        print(
+            f"error: branch '{branch}' has a stale worktree registration; directory missing:",
+            file=sys.stderr,
+        )
         print(f"       {canonical_str}", file=sys.stderr)
-        print(f"       run 'git worktree prune' to clean up, then rerun", file=sys.stderr)
+        print(
+            "       run 'git worktree prune' to clean up, then rerun", file=sys.stderr
+        )
         sys.exit(2)
 
     head = _current_head_branch(canonical_str)
     if head is None:
-        print(f"error: worktree {canonical_str} has detached HEAD; refusing to reuse", file=sys.stderr)
+        print(
+            f"error: worktree {canonical_str} has detached HEAD; refusing to reuse",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if head != branch:
-        print(f"error: worktree {canonical_str} is on branch '{head}', not '{branch}'", file=sys.stderr)
+        print(
+            f"error: worktree {canonical_str} is on branch '{head}', not '{branch}'",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     if not _is_working_tree_clean(canonical_str):
-        print(f"error: worktree is dirty; cannot reuse:", file=sys.stderr)
+        print("error: worktree is dirty; cannot reuse:", file=sys.stderr)
         print(f"       {canonical_str}", file=sys.stderr)
         print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
         sys.exit(2)
@@ -443,7 +548,10 @@ def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
     """For --no-worktree: branch must not be checked out in any LINKED worktree."""
     paths = [p for p in _branch_worktrees(repo, branch) if p != repo]
     if paths:
-        print(f"error: branch '{branch}' is currently checked out in another worktree:", file=sys.stderr)
+        print(
+            f"error: branch '{branch}' is currently checked out in another worktree:",
+            file=sys.stderr,
+        )
         for p in paths:
             print(f"       {p}", file=sys.stderr)
         sys.exit(2)
@@ -455,7 +563,9 @@ def _checkout_in_place(repo: str, branch: str) -> None:
         return
     result = subprocess.run(
         ["git", "checkout", branch],
-        capture_output=True, text=True, cwd=repo,
+        capture_output=True,
+        text=True,
+        cwd=repo,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
@@ -463,7 +573,9 @@ def _checkout_in_place(repo: str, branch: str) -> None:
         sys.exit(3)
 
 
-def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False):
+def _compose_active_steps(
+    worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False
+):
     skipped = set()
     if worktree_mode in ("no-worktree", "reuse-existing"):
         skipped.add("create-worktree")
@@ -477,7 +589,9 @@ def _compose_active_steps(worktree_mode: str, pr_mode: str, skip_pr: bool, delet
     return active, skipped
 
 
-def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode):
+def _print_preamble(
+    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
+):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
@@ -499,7 +613,8 @@ def _print_preamble(run_id, branch, wt_dir, run_dir, started_at, all_steps, skip
 def _remove_worktree(wt_dir: str) -> None:
     result = subprocess.run(
         ["git", "worktree", "remove", wt_dir, "--force"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
@@ -545,18 +660,26 @@ def run(args) -> int:
         if args.no_worktree:
             _assert_branch_free_for_in_place(repo, branch)
             if not _is_working_tree_clean(repo):
-                print(f"error: working tree is dirty; commit or stash before --no-worktree", file=sys.stderr)
+                print(
+                    "error: working tree is dirty; commit or stash before --no-worktree",
+                    file=sys.stderr,
+                )
                 return 2
         else:
             branch_was_explicit = (
                 args.branch is not None and args.branch != _BRANCH_HEAD_SENTINEL
             )
-            existing_wt_dir, existing_worktree_mode = _resolve_worktree_for_existing_branch(
-                repo, project_name, branch, branch_was_explicit
+            existing_wt_dir, existing_worktree_mode = (
+                _resolve_worktree_for_existing_branch(
+                    repo, project_name, branch, branch_was_explicit
+                )
             )
     else:  # new branch
         if args.no_worktree:
-            print("error: --no-worktree requires --branch (existing branch)", file=sys.stderr)
+            print(
+                "error: --no-worktree requires --branch (existing branch)",
+                file=sys.stderr,
+            )
             return 2
 
     # 5. Detect PR mode (may exit if multiple PRs)
@@ -613,12 +736,13 @@ def run(args) -> int:
 
     # 9. Step configs
     step_configs = {
-        step.name: step_config(config, step.name, step.defaults())
-        for step in STEPS
+        step.name: step_config(config, step.name, step.defaults()) for step in STEPS
     }
 
     # 10. Active steps
-    active_steps, skipped_names = _compose_active_steps(worktree_mode, pr_mode, args.skip_pr, args.delete_worktree)
+    active_steps, skipped_names = _compose_active_steps(
+        worktree_mode, pr_mode, args.skip_pr, args.delete_worktree
+    )
 
     # 11. Context
     ctx = RunContext(run_id, run_dir, step_configs)
@@ -644,11 +768,14 @@ def run(args) -> int:
 
     # 13. Session + preamble
     from pipeline import Pipeline
+
     pid_file = run_dir / "draft.pid"
     session_metrics = ctx.metrics.session_begin("create")
     ctx.save()
     started_at = ctx._sessions[-1]["started_at"]
-    _print_preamble(run_id, branch, wt_dir, run_dir, started_at, STEPS, skipped_names, worktree_mode)
+    _print_preamble(
+        run_id, branch, wt_dir, run_dir, started_at, STEPS, skipped_names, worktree_mode
+    )
 
     # 14. Lifecycle + engine
     engine = Runner()
@@ -662,7 +789,10 @@ def run(args) -> int:
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
     except StepError as exc:
-        print(f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})", file=sys.stderr)
+        print(
+            f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})",
+            file=sys.stderr,
+        )
         rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
     except BaseException:
         rc = -1
@@ -675,7 +805,9 @@ def run(args) -> int:
 
     # 16. Done
     if rc == 0:
-        if args.skip_pr and not (args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+        if args.skip_pr and not (
+            args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")
+        ):
             print(f"done. (push and PR skipped; worktree left at {wt_dir})")
         else:
             print("done.")

@@ -2,12 +2,12 @@ import io
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-
 # --- command_list ---
+
 
 def test_command_list_no_runs(tmp_path, capsys):
     import draft.command_list as clm
@@ -125,7 +125,7 @@ def test_command_list_missing_state_shows_dash(tmp_path, capsys):
         result = clm.run(object())
     out = capsys.readouterr().out
     assert result == 0
-    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    lines = [line for line in out.splitlines() if "260508-100000" in line]
     assert lines and "-" in lines[0]
 
 
@@ -145,6 +145,7 @@ def test_command_list_corrupt_state_shows_corrupt(tmp_path, capsys):
 
 
 # --- _workspace_status ---
+
 
 def test_workspace_status_existing_dir(tmp_path):
     from draft.command_list import _workspace_status
@@ -171,8 +172,9 @@ def test_workspace_status_none():
 
 
 def test_workspace_status_oserror(monkeypatch):
+    from unittest.mock import patch
+
     from draft.command_list import _workspace_status
-    from unittest.mock import MagicMock, patch
 
     with patch("draft.command_list.Path") as MockPath:
         MockPath.return_value.is_dir.side_effect = OSError("permission denied")
@@ -196,7 +198,7 @@ def test_command_list_workspace_column_yes(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    lines = [line for line in out.splitlines() if "260508-100000" in line]
     assert lines and "yes" in lines[0]
 
 
@@ -213,7 +215,7 @@ def test_command_list_workspace_column_no(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    lines = [line for line in out.splitlines() if "260508-100000" in line]
     assert lines and "no" in lines[0]
 
 
@@ -227,7 +229,7 @@ def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [l for l in out.splitlines() if "260508-100000" in l]
+    lines = [line for line in out.splitlines() if "260508-100000" in line]
     assert lines
     # The WORKSPACE column should show '-'
     # Split by multiple spaces to check the workspace field
@@ -245,7 +247,7 @@ def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
         result = clm.run(object())
     out = capsys.readouterr().out
     assert result == 0
-    lines = [l for l in out.splitlines() if "260508-100001" in l]
+    lines = [line for line in out.splitlines() if "260508-100001" in line]
     assert lines and "WORKSPACE" not in lines[0]
     assert "WORKSPACE" in out.splitlines()[0]
 
@@ -263,11 +265,12 @@ def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
     out = capsys.readouterr().out
     assert result == 0
     assert "WORKSPACE" in out.splitlines()[0]
-    lines = [l for l in out.splitlines() if "260508-100002" in l]
+    lines = [line for line in out.splitlines() if "260508-100002" in line]
     assert lines
 
 
 # --- command_delete ---
+
 
 def test_command_delete_active_pid_refuses(tmp_path, capsys):
     import draft.command_delete as cmd_delete
@@ -313,8 +316,10 @@ def test_command_delete_with_delete_branch_flag(tmp_path, capsys):
         run_id = "260505-120000"
         delete_branch = True
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.subprocess.run") as mock_run:
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.subprocess.run") as mock_run,
+    ):
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
         mock_run.return_value.stdout = ""
@@ -323,7 +328,8 @@ def test_command_delete_with_delete_branch_flag(tmp_path, capsys):
     assert result == 0
     assert not run_dir.exists()
     branch_calls = [
-        call for call in mock_run.call_args_list
+        call
+        for call in mock_run.call_args_list
         if call.args and call.args[0][:3] == ["git", "branch", "-D"]
     ]
     assert len(branch_calls) == 1
@@ -356,19 +362,23 @@ def test_command_delete_without_flag_skips_branch_deletion(tmp_path, capsys):
         run_id = "260505-120000"
         delete_branch = False
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.subprocess.run") as mock_run:
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.subprocess.run") as mock_run,
+    ):
         result = cmd_delete.run(FakeArgs())
 
     assert result == 0
     branch_calls = [
-        call for call in mock_run.call_args_list
+        call
+        for call in mock_run.call_args_list
         if call.args and call.args[0][:3] == ["git", "branch", "-D"]
     ]
     assert branch_calls == []
 
 
 # --- command_continue ---
+
 
 def test_command_continue_active_pid_refuses(tmp_path, capsys):
     import draft.command_continue as cmd_continue
@@ -423,10 +433,11 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
     class FakeArgs:
         run_id = "260505-120000"
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.command_continue.load_config", return_value={}), \
-         patch("draft.command_continue.Pipeline") as MockPipeline:
-
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.command_continue.load_config", return_value={}),
+        patch("draft.command_continue.Pipeline") as MockPipeline,
+    ):
         MockPipeline.return_value.run.return_value = None
         cmd_continue.run(FakeArgs())
 
@@ -435,6 +446,7 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
 
 
 # --- runs.delete_run ---
+
 
 def _make_run_dir(tmp_path, run_id="260505-120000", project="myproject", state=None):
     run_dir = tmp_path / project / run_id
@@ -470,14 +482,17 @@ def test_delete_run_no_state_no_pid(tmp_path):
 def test_delete_run_wt_dir_not_on_disk_no_git_call(tmp_path):
     import draft.runs as r
 
-    state = {"data": {"wt_dir": str(tmp_path / "gone"), "branch": "b", "repo": str(tmp_path)}}
+    state = {
+        "data": {"wt_dir": str(tmp_path / "gone"), "branch": "b", "repo": str(tmp_path)}
+    }
     run_dir = _make_run_dir(tmp_path, state=state)
 
     with patch("draft.runs.subprocess.run") as mock_run:
         result = r.delete_run(run_dir)
 
     worktree_calls = [
-        c for c in mock_run.call_args_list
+        c
+        for c in mock_run.call_args_list
         if c.args and c.args[0][:3] == ["git", "worktree", "remove"]
     ]
     assert worktree_calls == []
@@ -501,7 +516,8 @@ def test_delete_run_delete_branch_true(tmp_path):
 
     assert result["branch_deleted"] is True
     branch_calls = [
-        c for c in mock_run.call_args_list
+        c
+        for c in mock_run.call_args_list
         if c.args and c.args[0][:3] == ["git", "branch", "-D"]
     ]
     assert len(branch_calls) == 1
@@ -515,7 +531,10 @@ def test_delete_run_delete_branch_missing_branch(tmp_path):
 
     result = r.delete_run(run_dir, delete_branch=True)
 
-    assert "--delete-branch requested but branch or repo missing from state" in result["warnings"]
+    assert (
+        "--delete-branch requested but branch or repo missing from state"
+        in result["warnings"]
+    )
     assert result["status"] == "deleted"
 
 
@@ -540,11 +559,18 @@ def test_delete_run_delete_branch_git_failure(tmp_path):
 
 # --- runs.is_run_finished ---
 
+
 def test_is_run_finished_full_pipeline(tmp_path):
     import draft.runs as r
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {},
     }
     assert r.is_run_finished(state) is True
@@ -582,6 +608,7 @@ def test_is_run_finished_skip_pr_false(tmp_path):
 
 # --- command_prune ---
 
+
 def _make_prune_args(**kwargs):
     class FakeArgs:
         yes = False
@@ -598,7 +625,13 @@ def _make_prune_args(**kwargs):
 
 def _full_state(branch="draft/feat"):
     return {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": branch},
     }
 
@@ -613,25 +646,33 @@ def _partial_state(branch="draft/feat"):
 def test_prune_no_runs(tmp_path, capsys):
     import draft.command_prune as cp
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[]),
+    ):
         result = cp.run(_make_prune_args())
 
     assert result == 0
     assert "no runs to prune" in capsys.readouterr().out
 
 
-def test_prune_one_finished_one_in_progress_default_selection(tmp_path, capsys, monkeypatch):
+def test_prune_one_finished_one_in_progress_default_selection(
+    tmp_path, capsys, monkeypatch
+):
     import draft.command_prune as cp
 
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=_full_state())
-    run_partial = _make_run_dir(tmp_path, run_id="260505-120000", state=_partial_state())
+    run_partial = _make_run_dir(
+        tmp_path, run_id="260505-120000", state=_partial_state()
+    )
 
     monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done, run_partial]):
-        result = cp.run(_make_prune_args())
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done, run_partial]),
+    ):
+        cp.run(_make_prune_args())
 
     captured = capsys.readouterr()
     assert "260505-130000" in captured.out
@@ -645,10 +686,12 @@ def test_prune_confirmation_declined(tmp_path, capsys, monkeypatch):
 
     monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]), \
-         patch("sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="n"):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="n"),
+    ):
         result = cp.run(_make_prune_args())
 
     assert result == 0
@@ -661,8 +704,10 @@ def test_prune_yes_deletes_run(tmp_path, capsys):
 
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=_full_state())
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+    ):
         result = cp.run(_make_prune_args(yes=True))
 
     assert result == 0
@@ -676,8 +721,10 @@ def test_prune_dry_run_no_deletion(tmp_path, capsys):
 
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=_full_state())
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+    ):
         result = cp.run(_make_prune_args(dry_run=True, yes=True))
 
     assert result == 0
@@ -689,10 +736,14 @@ def test_prune_dry_run_no_deletion(tmp_path, capsys):
 def test_prune_all_includes_incomplete(tmp_path, capsys):
     import draft.command_prune as cp
 
-    run_partial = _make_run_dir(tmp_path, run_id="260505-120000", state=_partial_state())
+    run_partial = _make_run_dir(
+        tmp_path, run_id="260505-120000", state=_partial_state()
+    )
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_partial]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_partial]),
+    ):
         result = cp.run(_make_prune_args(include_all=True, dry_run=True))
 
     assert result == 0
@@ -706,8 +757,10 @@ def test_prune_all_skips_active(tmp_path, capsys):
     run_active = _make_run_dir(tmp_path, run_id="260505-120000", state=_partial_state())
     (run_active / "draft.pid").write_text(str(os.getpid()))
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_active]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_active]),
+    ):
         result = cp.run(_make_prune_args(include_all=True, yes=True))
 
     assert result == 0
@@ -747,11 +800,20 @@ def test_prune_not_in_git_repo(tmp_path, capsys):
 def test_prune_all_projects_aggregates(tmp_path, capsys):
     import draft.command_prune as cp
 
-    run_a = _make_run_dir(tmp_path, run_id="260505-130000", project="proj_a", state=_full_state())
-    run_b = _make_run_dir(tmp_path, run_id="260505-120000", project="proj_b", state=_full_state())
+    run_a = _make_run_dir(
+        tmp_path, run_id="260505-130000", project="proj_a", state=_full_state()
+    )
+    run_b = _make_run_dir(
+        tmp_path, run_id="260505-120000", project="proj_b", state=_full_state()
+    )
 
-    with patch("draft.runs.all_project_names", return_value=["proj_a", "proj_b"]), \
-         patch("draft.runs.project_runs", side_effect=lambda name: [run_a] if name == "proj_a" else [run_b]):
+    with (
+        patch("draft.runs.all_project_names", return_value=["proj_a", "proj_b"]),
+        patch(
+            "draft.runs.project_runs",
+            side_effect=lambda name: [run_a] if name == "proj_a" else [run_b],
+        ),
+    ):
         result = cp.run(_make_prune_args(all_projects=True, dry_run=True))
 
     assert result == 0
@@ -766,14 +828,22 @@ def test_prune_yes_delete_branch(tmp_path, capsys):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "draft/feat", "repo": str(repo_dir)},
     }
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=state)
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]), \
-         patch("draft.runs.subprocess.run") as mock_run:
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+        patch("draft.runs.subprocess.run") as mock_run,
+    ):
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
         mock_run.return_value.stdout = ""
@@ -781,7 +851,8 @@ def test_prune_yes_delete_branch(tmp_path, capsys):
 
     assert result == 0
     branch_calls = [
-        c for c in mock_run.call_args_list
+        c
+        for c in mock_run.call_args_list
         if c.args and c.args[0][:3] == ["git", "branch", "-D"]
     ]
     assert len(branch_calls) == 1
@@ -792,9 +863,11 @@ def test_prune_non_tty_stdin_without_yes(tmp_path, capsys, monkeypatch):
 
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=_full_state())
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]), \
-         patch("sys.stdin.isatty", return_value=False):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+        patch("sys.stdin.isatty", return_value=False),
+    ):
         result = cp.run(_make_prune_args())
 
     assert result != 0
@@ -810,8 +883,10 @@ def test_prune_skip_pr_finished_included(tmp_path, capsys):
     }
     run_done = _make_run_dir(tmp_path, run_id="260505-130000", state=state)
 
-    with patch("draft.runs.current_project_name", return_value="myproject"), \
-         patch("draft.runs.project_runs", return_value=[run_done]):
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_done]),
+    ):
         result = cp.run(_make_prune_args(dry_run=True))
 
     assert result == 0
@@ -851,7 +926,9 @@ def test_reject_delete_worktree_with_no_worktree(capsys):
     import draft.command_create as cmd
 
     with pytest.raises(SystemExit) as exc:
-        cmd._reject_flag_conflicts(_make_create_args(delete_worktree=True, no_worktree=True))
+        cmd._reject_flag_conflicts(
+            _make_create_args(delete_worktree=True, no_worktree=True)
+        )
     assert exc.value.code == 2
     assert "--delete-worktree" in capsys.readouterr().err
 
@@ -906,6 +983,7 @@ def test_assert_spec_readable_broken_symlink(tmp_path, capsys):
 
 def test_assert_spec_readable_unreadable_file(tmp_path, capsys):
     import os
+
     import draft.command_create as cmd
 
     if os.geteuid() == 0:
@@ -958,7 +1036,13 @@ def test_compose_active_steps_default():
     import draft.command_create as cmd
 
     active, skipped = cmd._compose_active_steps("worktree", "open", False)
-    assert [s.name for s in active] == ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"]
+    assert [s.name for s in active] == [
+        "create-worktree",
+        "implement-spec",
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+    ]
     assert skipped == {"delete-worktree"}
 
 
@@ -1009,15 +1093,28 @@ def test_expected_steps_legacy_skip_pr():
 def test_expected_steps_no_worktree_open():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"worktree_mode": "no-worktree", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "babysit-pr")
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "no-worktree", "pr_mode": "open"},
+    }
+    assert r.expected_steps(state) == (
+        "implement-spec",
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+    )
 
 
 def test_expected_steps_pr_reuse():
     import draft.runs as r
 
     state = {"completed": [], "data": {"worktree_mode": "worktree", "pr_mode": "reuse"}}
-    assert r.expected_steps(state) == ("create-worktree", "implement-spec", "push-commits", "babysit-pr")
+    assert r.expected_steps(state) == (
+        "create-worktree",
+        "implement-spec",
+        "push-commits",
+        "babysit-pr",
+    )
 
 
 def test_expected_steps_no_worktree_skip_pr():
@@ -1091,8 +1188,17 @@ def test_find_active_run_on_branch_skips_other_branch(tmp_path):
 # --- create-modes: command_continue drift and finished-run exit ---
 
 
-def _continue_state(*, completed=None, branch="foo", wt_dir="/tmp/wt", repo="/tmp/repo",
-                    worktree_mode="worktree", delete_worktree=False, skip_pr=False, pr_mode="open"):
+def _continue_state(
+    *,
+    completed=None,
+    branch="foo",
+    wt_dir="/tmp/wt",
+    repo="/tmp/repo",
+    worktree_mode="worktree",
+    delete_worktree=False,
+    skip_pr=False,
+    pr_mode="open",
+):
     return {
         "run_id": "260506-100000",
         "run_dir": "",
@@ -1162,8 +1268,10 @@ def test_continue_drift_no_worktree_refuses(tmp_path, capsys):
     class FakeArgs:
         run_id = "260506-100000"
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.command_continue._branch_at", return_value="other-branch"):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.command_continue._branch_at", return_value="other-branch"),
+    ):
         result = cmd_continue.run(FakeArgs())
 
     assert result == 2
@@ -1190,8 +1298,10 @@ def test_continue_drift_worktree_refuses(tmp_path, capsys):
     class FakeArgs:
         run_id = "260506-100000"
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.command_continue._branch_at", return_value="other-branch"):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.command_continue._branch_at", return_value="other-branch"),
+    ):
         result = cmd_continue.run(FakeArgs())
 
     assert result == 2
@@ -1234,7 +1344,9 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
 
 
 def _canonical(project: str, branch: str) -> str:
-    return str(Path.home() / ".draft" / "worktrees" / project / branch.replace("/", "-"))
+    return str(
+        Path.home() / ".draft" / "worktrees" / project / branch.replace("/", "-")
+    )
 
 
 def test_resolve_worktree_no_existing_returns_create():
@@ -1255,10 +1367,12 @@ def test_resolve_worktree_canonical_clean_reuses(tmp_path):
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
-         patch("draft.command_create._current_head_branch", return_value="feature-x"), \
-         patch("draft.command_create._is_working_tree_clean", return_value=True):
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.command_create._current_head_branch", return_value="feature-x"),
+        patch("draft.command_create._is_working_tree_clean", return_value=True),
+    ):
         wt_dir, mode = cmd._resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
@@ -1270,11 +1384,13 @@ def test_resolve_worktree_canonical_clean_reuses(tmp_path):
 def test_resolve_worktree_no_value_form_refuses(capsys):
     import draft.command_create as cmd
 
-    with patch("draft.command_create._branch_worktrees", return_value=["/some/path"]):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=False
-            )
+    with (
+        patch("draft.command_create._branch_worktrees", return_value=["/some/path"]),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=False
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1289,12 +1405,14 @@ def test_resolve_worktree_non_canonical_path_refuses(tmp_path, capsys):
     other = tmp_path / "other"
     other.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(other)]):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(other)]),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1310,12 +1428,17 @@ def test_resolve_worktree_multiple_paths_refuses(tmp_path, capsys):
     extra = tmp_path / "extra"
     extra.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical), str(extra)]):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch(
+            "draft.command_create._branch_worktrees",
+            return_value=[str(canonical), str(extra)],
+        ),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1328,12 +1451,14 @@ def test_resolve_worktree_stale_registration_refuses(tmp_path, capsys):
 
     canonical = tmp_path / "missing"  # does not exist on disk
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1347,13 +1472,15 @@ def test_resolve_worktree_detached_head_refuses(tmp_path, capsys):
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
-         patch("draft.command_create._current_head_branch", return_value=None):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.command_create._current_head_branch", return_value=None),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1366,13 +1493,15 @@ def test_resolve_worktree_wrong_branch_refuses(tmp_path, capsys):
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
-         patch("draft.command_create._current_head_branch", return_value="other-branch"):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.command_create._current_head_branch", return_value="other-branch"),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1386,14 +1515,16 @@ def test_resolve_worktree_dirty_refuses(tmp_path, capsys):
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
-    with patch("draft.command_create._canonical_worktree_path", return_value=canonical), \
-         patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]), \
-         patch("draft.command_create._current_head_branch", return_value="feature-x"), \
-         patch("draft.command_create._is_working_tree_clean", return_value=False):
-        with pytest.raises(SystemExit) as exc:
-            cmd._resolve_worktree_for_existing_branch(
-                "/repo", "proj", "feature-x", branch_was_explicit=True
-            )
+    with (
+        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.command_create._current_head_branch", return_value="feature-x"),
+        patch("draft.command_create._is_working_tree_clean", return_value=False),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cmd._resolve_worktree_for_existing_branch(
+            "/repo", "proj", "feature-x", branch_was_explicit=True
+        )
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
@@ -1430,20 +1561,37 @@ def test_compose_active_steps_reuse_existing_with_skip_pr():
     active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
     names = [s.name for s in active]
     assert names == ["implement-spec"]
-    assert skipped == {"create-worktree", "push-commits", "open-pr", "babysit-pr", "delete-worktree"}
+    assert skipped == {
+        "create-worktree",
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+        "delete-worktree",
+    }
 
 
 def test_expected_steps_reuse_existing_open():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"}}
-    assert r.expected_steps(state) == ("implement-spec", "push-commits", "open-pr", "babysit-pr")
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+    }
+    assert r.expected_steps(state) == (
+        "implement-spec",
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+    )
 
 
 def test_expected_steps_reuse_existing_pr_reuse():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"}}
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"},
+    }
     assert r.expected_steps(state) == ("implement-spec", "push-commits", "babysit-pr")
 
 
@@ -1469,7 +1617,13 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
     wt = tmp_path / "gone"  # does not exist
 
     state = _continue_state(
-        completed=["implement-spec", "push-commits", "open-pr", "babysit-pr", "delete-worktree"],
+        completed=[
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+            "delete-worktree",
+        ],
         wt_dir=str(wt),
         delete_worktree=True,
         worktree_mode="reuse-existing",
@@ -1497,7 +1651,14 @@ def test_preamble_reused_annotation_for_reuse_existing(capsys):
 
     skipped = {"create-worktree"}
     cmd._print_preamble(
-        "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, skipped, "reuse-existing"
+        "rid",
+        "feature-x",
+        "/wt",
+        "/runs/rid",
+        "started",
+        STEPS,
+        skipped,
+        "reuse-existing",
     )
     out = capsys.readouterr().out
     assert "create-worktree [skipped, reused]" in out
@@ -1509,7 +1670,14 @@ def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
 
     skipped = {"create-worktree"}
     cmd._print_preamble(
-        "rid", "feature-x", "/repo", "/runs/rid", "started", STEPS, skipped, "no-worktree"
+        "rid",
+        "feature-x",
+        "/repo",
+        "/runs/rid",
+        "started",
+        STEPS,
+        skipped,
+        "no-worktree",
     )
     out = capsys.readouterr().out
     assert "create-worktree [skipped]" in out
@@ -1534,7 +1702,9 @@ def test_preamble_no_skipped_annotation_for_active_step(capsys):
 def test_compose_active_steps_delete_worktree_included_for_worktree_mode():
     import draft.command_create as cmd
 
-    active, skipped = cmd._compose_active_steps("worktree", "open", False, delete_worktree=True)
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "open", False, delete_worktree=True
+    )
     names = [s.name for s in active]
     assert names[-1] == "delete-worktree"
     assert "delete-worktree" not in skipped
@@ -1543,7 +1713,9 @@ def test_compose_active_steps_delete_worktree_included_for_worktree_mode():
 def test_compose_active_steps_delete_worktree_included_for_reuse_existing():
     import draft.command_create as cmd
 
-    active, skipped = cmd._compose_active_steps("reuse-existing", "open", False, delete_worktree=True)
+    active, skipped = cmd._compose_active_steps(
+        "reuse-existing", "open", False, delete_worktree=True
+    )
     names = [s.name for s in active]
     assert names[-1] == "delete-worktree"
     assert "delete-worktree" not in skipped
@@ -1552,7 +1724,9 @@ def test_compose_active_steps_delete_worktree_included_for_reuse_existing():
 def test_compose_active_steps_delete_worktree_skipped_when_false():
     import draft.command_create as cmd
 
-    active, skipped = cmd._compose_active_steps("worktree", "open", False, delete_worktree=False)
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "open", False, delete_worktree=False
+    )
     names = [s.name for s in active]
     assert "delete-worktree" not in names
     assert "delete-worktree" in skipped
@@ -1561,7 +1735,9 @@ def test_compose_active_steps_delete_worktree_skipped_when_false():
 def test_compose_active_steps_delete_worktree_skipped_for_no_worktree():
     import draft.command_create as cmd
 
-    active, skipped = cmd._compose_active_steps("no-worktree", "open", False, delete_worktree=True)
+    active, skipped = cmd._compose_active_steps(
+        "no-worktree", "open", False, delete_worktree=True
+    )
     names = [s.name for s in active]
     assert "delete-worktree" not in names
     assert "delete-worktree" in skipped
@@ -1570,7 +1746,9 @@ def test_compose_active_steps_delete_worktree_skipped_for_no_worktree():
 def test_compose_active_steps_skip_pr_with_delete_worktree():
     import draft.command_create as cmd
 
-    active, skipped = cmd._compose_active_steps("worktree", "skip", True, delete_worktree=True)
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "skip", True, delete_worktree=True
+    )
     names = [s.name for s in active]
     assert names == ["create-worktree", "implement-spec", "delete-worktree"]
     assert "delete-worktree" not in skipped
@@ -1597,14 +1775,28 @@ def test_expected_steps_delete_worktree_skipped_when_false():
 def test_expected_steps_delete_worktree_skipped_for_no_worktree():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"delete_worktree": True, "worktree_mode": "no-worktree", "skip_pr": True}}
+    state = {
+        "completed": [],
+        "data": {
+            "delete_worktree": True,
+            "worktree_mode": "no-worktree",
+            "skip_pr": True,
+        },
+    }
     assert "delete-worktree" not in r.expected_steps(state)
 
 
 def test_expected_steps_delete_worktree_included_for_reuse_existing():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"delete_worktree": True, "worktree_mode": "reuse-existing", "pr_mode": "open"}}
+    state = {
+        "completed": [],
+        "data": {
+            "delete_worktree": True,
+            "worktree_mode": "reuse-existing",
+            "pr_mode": "open",
+        },
+    }
     result = r.expected_steps(state)
     assert result[-1] == "delete-worktree"
 
@@ -1619,7 +1811,9 @@ def test_expected_steps_legacy_delete_worktree_missing_defaults_false():
 # --- delete-worktree: command_continue ---
 
 
-def test_continue_only_delete_worktree_pending_worktree_absent_exits_clean(tmp_path, capsys):
+def test_continue_only_delete_worktree_pending_worktree_absent_exits_clean(
+    tmp_path, capsys
+):
     import draft.command_continue as cmd_continue
     import draft.runs as r
 
@@ -1657,7 +1851,12 @@ def test_delete_worktree_step_path_missing_succeeds(tmp_path):
     ctx = RunContext("rid", tmp_path, {"delete-worktree": {"timeout": 60}})
     ctx.set("wt_dir", str(tmp_path / "nonexistent"))
 
-    DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))  # must not raise
+    DeleteWorktreeStep().run(
+        ctx,
+        Runner(),
+        None,
+        ctx.metrics.session_begin("test").step_begin("delete-worktree"),
+    )  # must not raise
 
 
 def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
@@ -1668,11 +1867,15 @@ def test_delete_worktree_step_empty_wt_dir_raises(tmp_path):
     ctx.set("wt_dir", "")
 
     with pytest.raises(StepError):
-        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
+        DeleteWorktreeStep().run(
+            ctx,
+            Runner(),
+            None,
+            ctx.metrics.session_begin("test").step_begin("delete-worktree"),
+        )
 
 
 def test_delete_worktree_step_git_success(tmp_path):
-    from unittest.mock import MagicMock
     from draft.steps.delete_worktree import DeleteWorktreeStep
     from pipeline import RunContext, Runner
 
@@ -1685,11 +1888,17 @@ def test_delete_worktree_step_git_success(tmp_path):
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
+        DeleteWorktreeStep().run(
+            ctx,
+            Runner(),
+            None,
+            ctx.metrics.session_begin("test").step_begin("delete-worktree"),
+        )
 
     mock_run.assert_called_once_with(
         ["git", "worktree", "remove", str(wt), "--force"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -1706,7 +1915,12 @@ def test_delete_worktree_step_git_nonzero_idempotent_signature_succeeds(tmp_path
         mock_run.return_value.returncode = 128
         mock_run.return_value.stderr = "fatal: 'wt' is not a working tree"
         mock_run.return_value.stdout = ""
-        DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))  # must not raise
+        DeleteWorktreeStep().run(
+            ctx,
+            Runner(),
+            None,
+            ctx.metrics.session_begin("test").step_begin("delete-worktree"),
+        )  # must not raise
 
 
 def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
@@ -1723,14 +1937,21 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
         mock_run.return_value.stderr = "fatal: internal error"
         mock_run.return_value.stdout = ""
         with pytest.raises(StepError):
-            DeleteWorktreeStep().run(ctx, Runner(), None, ctx.metrics.session_begin("test").step_begin("delete-worktree"))
+            DeleteWorktreeStep().run(
+                ctx,
+                Runner(),
+                None,
+                ctx.metrics.session_begin("test").step_begin("delete-worktree"),
+            )
 
 
 # --- command_list --json ---
 
+
 def _make_list_args(**kwargs):
     class FakeArgs:
         json = False
+
     for k, v in kwargs.items():
         setattr(FakeArgs, k, v)
     return FakeArgs()
@@ -1764,8 +1985,14 @@ def test_command_list_json_valid_row(tmp_path, capsys):
     wt.mkdir()
     state = {
         "completed": ["worktree-create", "code-spec"],
-        "data": {"worktree_mode": "worktree", "pr_mode": "open", "skip_pr": False,
-                 "branch": "feat/foo", "wt_dir": str(wt), "pr_url": "https://github.com/org/repo/pull/1"},
+        "data": {
+            "worktree_mode": "worktree",
+            "pr_mode": "open",
+            "skip_pr": False,
+            "branch": "feat/foo",
+            "wt_dir": str(wt),
+            "pr_url": "https://github.com/org/repo/pull/1",
+        },
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -1928,9 +2155,11 @@ def test_command_list_no_json_unchanged(tmp_path, capsys):
 
 # --- command_status ---
 
+
 def _make_status_args(run_id, *, use_json=False):
     class FakeArgs:
         pass
+
     FakeArgs.run_id = run_id
     FakeArgs.json = use_json
     return FakeArgs()
@@ -1990,13 +2219,21 @@ def test_status_done_all_steps_show_done(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "main", "wt_dir": None},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         result = cs.run(_make_status_args("260508-100000"))
 
     assert result == 0
@@ -2014,16 +2251,31 @@ def test_status_running_partial_shows_active(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=True):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=True),
+    ):
         result = cs.run(_make_status_args("260508-100000"))
 
     assert result == 0
     out = capsys.readouterr().out
     assert "status:   running" in out
-    lines = [l for l in out.splitlines() if l.strip()]
-    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"])]
-    statuses = [l.split()[-1] for l in step_lines]
+    lines = [line for line in out.splitlines() if line.strip()]
+    step_lines = [
+        line
+        for line in lines
+        if any(
+            s in line
+            for s in [
+                "create-worktree",
+                "implement-spec",
+                "push-commits",
+                "open-pr",
+                "babysit-pr",
+            ]
+        )
+    ]
+    statuses = [line.split()[-1] for line in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "active"
     assert all(s == "pending" for s in statuses[3:])
@@ -2038,16 +2290,31 @@ def test_status_stopped_partial_shows_stopped(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         result = cs.run(_make_status_args("260508-100000"))
 
     assert result == 0
     out = capsys.readouterr().out
     assert "status:   stopped" in out
-    lines = [l for l in out.splitlines() if l.strip()]
-    step_lines = [l for l in lines if any(s in l for s in ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"])]
-    statuses = [l.split()[-1] for l in step_lines]
+    lines = [line for line in out.splitlines() if line.strip()]
+    step_lines = [
+        line
+        for line in lines
+        if any(
+            s in line
+            for s in [
+                "create-worktree",
+                "implement-spec",
+                "push-commits",
+                "open-pr",
+                "babysit-pr",
+            ]
+        )
+    ]
+    statuses = [line.split()[-1] for line in step_lines]
     assert statuses[:2] == ["done", "done"]
     assert statuses[2] == "stopped"
     assert all(s == "pending" for s in statuses[3:])
@@ -2057,13 +2324,21 @@ def test_status_pr_url_printed_when_present(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000"))
 
     out = capsys.readouterr().out
@@ -2075,13 +2350,21 @@ def test_status_pr_url_absent_not_printed(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "feat"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000"))
 
     out = capsys.readouterr().out
@@ -2097,8 +2380,10 @@ def test_status_wt_dir_absent_shows_dash(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000"))
 
     out = capsys.readouterr().out
@@ -2114,8 +2399,10 @@ def test_status_skipped_steps_excluded_from_table(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000"))
 
     out = capsys.readouterr().out
@@ -2159,6 +2446,7 @@ def test_status_no_pid_steps_incomplete_is_stopped(tmp_path, capsys):
 
 # --- command_status --json ---
 
+
 def test_status_json_run_not_found(capsys):
     import draft.command_status as cs
 
@@ -2166,7 +2454,7 @@ def test_status_json_run_not_found(capsys):
         result = cs.run(_make_status_args("260508-notfound", use_json=True))
 
     assert result == 1
-    out, err = capsys.readouterr().out, capsys.readouterr().err
+    out = capsys.readouterr().out
     assert out == ""
 
 
@@ -2208,13 +2496,21 @@ def test_status_json_done_all_steps(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "main", "wt_dir": None},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         result = cs.run(_make_status_args("260508-100000", use_json=True))
 
     assert result == 0
@@ -2232,8 +2528,10 @@ def test_status_json_running_partial(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=True):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=True),
+    ):
         result = cs.run(_make_status_args("260508-100000", use_json=True))
 
     assert result == 0
@@ -2254,8 +2552,10 @@ def test_status_json_stopped_partial(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         result = cs.run(_make_status_args("260508-100000", use_json=True))
 
     assert result == 0
@@ -2274,8 +2574,10 @@ def test_status_json_pr_url_null_when_absent(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000", use_json=True))
 
     data = json.loads(capsys.readouterr().out)
@@ -2286,13 +2588,21 @@ def test_status_json_pr_url_present(tmp_path, capsys):
     import draft.command_status as cs
 
     state = {
-        "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr", "babysit-pr"],
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
         "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000", use_json=True))
 
     data = json.loads(capsys.readouterr().out)
@@ -2305,8 +2615,10 @@ def test_status_json_worktree_null_when_absent(tmp_path, capsys):
     state = {"completed": [], "data": {"branch": "feat"}}
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000", use_json=True))
 
     data = json.loads(capsys.readouterr().out)
@@ -2322,8 +2634,10 @@ def test_status_json_skipped_steps_absent_from_steps_array(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         cs.run(_make_status_args("260508-100000", use_json=True))
 
     data = json.loads(capsys.readouterr().out)
@@ -2341,8 +2655,10 @@ def test_status_json_no_json_unchanged(tmp_path, capsys):
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
-    with patch("draft.runs.find_run_dir", return_value=run_dir), \
-         patch("draft.runs.is_run_active", return_value=False):
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.runs.is_run_active", return_value=False),
+    ):
         result = cs.run(_make_status_args("260508-100000"))
 
     assert result == 0
@@ -2399,14 +2715,15 @@ def test_validate_overrides_malformed_is_ignored():
 
 # --- command_init ---
 
+
 def _run_init(tmp_path):
     import draft.command_init as ci
+
     with patch("draft.command_init._repo_root", return_value=str(tmp_path)):
         return ci.run(object())
 
 
 def test_init_happy_path(tmp_path, capsys):
-    import yaml
     result = _run_init(tmp_path)
     assert result == 0
     target = tmp_path / ".draft" / "config.yaml"
@@ -2417,6 +2734,7 @@ def test_init_happy_path(tmp_path, capsys):
 
 def test_init_pipeline_order(tmp_path):
     import yaml
+
     _run_init(tmp_path)
     data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
     assert list(data["steps"].keys()) == [
@@ -2431,8 +2749,10 @@ def test_init_pipeline_order(tmp_path):
 
 def test_init_values_match_defaults(tmp_path):
     import yaml
-    from draft.steps import STEPS
+
     from draft.config import _LOOPING_STEPS
+    from draft.steps import STEPS
+
     _run_init(tmp_path)
     data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
     for step in STEPS:
@@ -2473,8 +2793,13 @@ def test_init_draft_is_file(tmp_path, capsys):
 
 def test_init_not_in_git_repo(tmp_path, capsys):
     import subprocess
+
     import draft.command_init as ci
-    with patch("draft.command_init._repo_root", side_effect=subprocess.CalledProcessError(128, "git")):
+
+    with patch(
+        "draft.command_init._repo_root",
+        side_effect=subprocess.CalledProcessError(128, "git"),
+    ):
         result = ci.run(object())
     assert result == 1
     assert "git repository" in capsys.readouterr().err
@@ -2483,7 +2808,9 @@ def test_init_not_in_git_repo(tmp_path, capsys):
 
 def test_init_round_trip_load_config(tmp_path):
     import yaml
+
     from draft.config import load_config
+
     _run_init(tmp_path)
     cfg = load_config(str(tmp_path))
     data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
@@ -2492,7 +2819,9 @@ def test_init_round_trip_load_config(tmp_path):
 
 def test_init_argparse_wiring():
     import argparse
+
     import draft.command_init as ci
+
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers()
     ci.register(subs)
@@ -2502,8 +2831,9 @@ def test_init_argparse_wiring():
 
 def test_init_cli_has_init_subcommand():
     import argparse
-    import draft.cli as cli_mod
+
     import draft.command_init as ci
+
     parser = argparse.ArgumentParser()
     subs = parser.add_subparsers()
     ci.register(subs)

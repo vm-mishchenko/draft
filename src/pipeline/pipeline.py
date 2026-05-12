@@ -16,16 +16,16 @@ class StepError(Exception):
 
 
 class PipelineLifecycle:
-    def before_step(self, step: "Step", ctx: "RunContext"):
+    def before_step(self, step: Step, ctx: RunContext):
         pass
 
-    def after_step(self, step: "Step", ctx: "RunContext"):
+    def after_step(self, step: Step, ctx: RunContext):
         pass
 
-    def on_step_success(self, step: "Step", ctx: "RunContext"):
+    def on_step_success(self, step: Step, ctx: RunContext):
         pass
 
-    def on_step_error(self, step: "Step", ctx: "RunContext", exc: StepError):
+    def on_step_error(self, step: Step, ctx: RunContext, exc: StepError):
         pass
 
     def run_hooks(self, step_name: str, event: str) -> list:
@@ -38,10 +38,16 @@ class Step:
     def defaults(self) -> dict:
         return {"timeout": None}
 
-    def cmd(self, ctx: "RunContext") -> list[str]:
+    def cmd(self, ctx: RunContext) -> list[str]:
         raise NotImplementedError
 
-    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle | None" = None, step_metrics=None):
+    def run(
+        self,
+        ctx: RunContext,
+        runner: Runner,
+        lifecycle: PipelineLifecycle | None = None,
+        step_metrics=None,
+    ):
         cfg = ctx.config(self.name)
         with runner.stage(self.name):
             rc = runner.run_command(
@@ -59,7 +65,13 @@ class Pipeline:
     def __init__(self, steps: list[Step]):
         self.steps = steps
 
-    def run(self, ctx: "RunContext", runner: "Runner", lifecycle: "PipelineLifecycle", session_metrics: "SessionMetrics"):
+    def run(
+        self,
+        ctx: RunContext,
+        runner: Runner,
+        lifecycle: PipelineLifecycle,
+        session_metrics: SessionMetrics,
+    ):
         for step in self.steps:
             if ctx.is_completed(step.name):
                 continue
