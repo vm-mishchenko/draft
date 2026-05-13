@@ -72,7 +72,11 @@ There are exactly two valid outputs. Choose one. Never both. Never something els
 
 NO_ISSUES
 
-(b) Otherwise, print up to ${MAX_REVIEW_ITEMS} items in the format below. No preamble, no postamble, no NO_ISSUES sentinel mixed in. Items separated by a blank line.
+(b) Otherwise, the FIRST line of your output MUST be exactly:
+
+FOUND_ISSUES
+
+followed by a blank line, then up to ${MAX_REVIEW_ITEMS} items in the format below. No preamble before FOUND_ISSUES, no NO_ISSUES sentinel mixed in. Items separated by a blank line.
 
 ## <name (1-4 words)>
 
@@ -119,12 +123,9 @@ if ! auggie_stdout="$(auggie --print --quiet --ask \
   exit "$rc"
 fi
 
-trimmed="${auggie_stdout#"${auggie_stdout%%[![:space:]]*}"}"
-trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-
-if [[ -z "$trimmed" || "$trimmed" == "NO_ISSUES" ]]; then
-  exit 0
+# Rejection = FOUND_ISSUES sentinel present anywhere in stdout.
+# Anything else (NO_ISSUES, empty output, stray metadata, etc.) is approval.
+if [[ "$auggie_stdout" == *"FOUND_ISSUES"* ]]; then
+  printf '%s' "$auggie_stdout"
 fi
-
-printf '%s' "$auggie_stdout"
 exit 0

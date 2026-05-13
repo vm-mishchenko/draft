@@ -539,9 +539,7 @@ class ReviewImplementationStep(Step):
                 if not _has_changes(wt_dir):
                     if attempt == 1:
                         print(
-                            "review-implementation: review feedback was processed but produced"
-                            " no changes (all items judged out of scope or non-applicable)."
-                            " Reviewer feedback follows:",
+                            "review-implementation: feedback has no changes:",
                             file=sys.stderr,
                         )
                         print(review_issues, file=sys.stderr)
