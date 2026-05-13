@@ -3235,3 +3235,596 @@ def test_init_cli_has_init_subcommand():
     ci.register(subs)
     choices = subs.choices
     assert "init" in choices
+
+
+# --- command_babysit ---
+
+
+def _make_babysit_args(**kwargs):
+    class FakeArgs:
+        pr_input = "https://github.com/org/repo/pull/42"
+        spec_path = None
+        no_worktree = False
+        delete_worktree = False
+        run_id = None
+        overrides = []
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+def _babysit_pr_data(**kwargs):
+    base = {
+        "url": "https://github.com/org/repo/pull/42",
+        "number": 42,
+        "state": "OPEN",
+        "isDraft": False,
+        "headRefName": "feature-x",
+        "headRefOid": "abc123sha",
+        "baseRefName": "main",
+        "isCrossRepository": False,
+        "body": "PR body text",
+    }
+    base.update(kwargs)
+    return base
+
+
+# --- _assert_pr_acceptable ---
+
+
+def test_assert_pr_acceptable_open_passes():
+    from draft.command_babysit import _assert_pr_acceptable
+
+    _assert_pr_acceptable({"state": "OPEN", "isCrossRepository": False})
+
+
+def test_assert_pr_acceptable_closed_exits_2(capsys):
+    from draft.command_babysit import _assert_pr_acceptable
+
+    with pytest.raises(SystemExit) as exc:
+        _assert_pr_acceptable({"state": "CLOSED", "isCrossRepository": False})
+    assert exc.value.code == 2
+    assert "state" in capsys.readouterr().err.lower()
+
+
+def test_assert_pr_acceptable_merged_exits_2(capsys):
+    from draft.command_babysit import _assert_pr_acceptable
+
+    with pytest.raises(SystemExit) as exc:
+        _assert_pr_acceptable({"state": "MERGED", "isCrossRepository": False})
+    assert exc.value.code == 2
+
+
+def test_assert_pr_acceptable_fork_exits_2(capsys):
+    from draft.command_babysit import _assert_pr_acceptable
+
+    with pytest.raises(SystemExit) as exc:
+        _assert_pr_acceptable({"state": "OPEN", "isCrossRepository": True})
+    assert exc.value.code == 2
+    assert "fork" in capsys.readouterr().err
+
+
+# --- _assert_branch_exists_and_matches ---
+
+
+def test_assert_branch_missing_hints_checkout(tmp_path, capsys):
+    from draft.command_babysit import _assert_branch_exists_and_matches
+
+    with (
+        patch("draft.command_babysit.subprocess.run") as mock_run,
+        pytest.raises(SystemExit) as exc,
+    ):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stdout = ""
+        _assert_branch_exists_and_matches(str(tmp_path), "feature-x", "abc123", 42)
+    assert exc.value.code == 2
+    assert "gh pr checkout 42" in capsys.readouterr().err
+
+
+def test_assert_branch_sha_mismatch_shows_both(tmp_path, capsys):
+    from draft.command_babysit import _assert_branch_exists_and_matches
+
+    with (
+        patch("draft.command_babysit.subprocess.run") as mock_run,
+        pytest.raises(SystemExit) as exc,
+    ):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "localsha\n"
+        _assert_branch_exists_and_matches(str(tmp_path), "feature-x", "remotesha", 42)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "localsha" in err
+    assert "remotesha" in err
+
+
+def test_assert_branch_exists_and_matches_passes(tmp_path):
+    from draft.command_babysit import _assert_branch_exists_and_matches
+
+    with patch("draft.command_babysit.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "abc123\n"
+        _assert_branch_exists_and_matches(str(tmp_path), "feature-x", "abc123", 42)
+
+
+# --- _assert_working_tree_clean ---
+
+
+def test_assert_working_tree_clean_exits_if_dirty(tmp_path, capsys):
+    from draft.command_babysit import _assert_working_tree_clean
+
+    with (
+        patch("draft.command_babysit.subprocess.run") as mock_run,
+        pytest.raises(SystemExit) as exc,
+    ):
+        mock_run.return_value.stdout = " M file.py\n"
+        _assert_working_tree_clean(str(tmp_path))
+    assert exc.value.code == 2
+    assert "dirty" in capsys.readouterr().err
+
+
+def test_assert_working_tree_clean_passes_if_clean(tmp_path):
+    from draft.command_babysit import _assert_working_tree_clean
+
+    with patch("draft.command_babysit.subprocess.run") as mock_run:
+        mock_run.return_value.stdout = ""
+        _assert_working_tree_clean(str(tmp_path))
+
+
+# --- _pr_already_green ---
+
+
+def test_pr_already_green_true_when_checks_pass():
+    from draft.command_babysit import _pr_already_green
+
+    with patch(
+        "draft.steps.babysit_pr.check_ci_counts",
+        return_value={"success": 3, "failure": 0, "pending": 0},
+    ):
+        assert _pr_already_green("https://github.com/org/repo/pull/42") is True
+
+
+def test_pr_already_green_false_when_pending():
+    from draft.command_babysit import _pr_already_green
+
+    with patch(
+        "draft.steps.babysit_pr.check_ci_counts",
+        return_value={"success": 1, "failure": 0, "pending": 1},
+    ):
+        assert _pr_already_green("https://github.com/org/repo/pull/42") is False
+
+
+def test_pr_already_green_false_when_zero_checks():
+    from draft.command_babysit import _pr_already_green
+
+    with patch(
+        "draft.steps.babysit_pr.check_ci_counts",
+        return_value={"success": 0, "failure": 0, "pending": 0},
+    ):
+        assert _pr_already_green("https://github.com/org/repo/pull/42") is False
+
+
+def test_pr_already_green_false_on_exception():
+    from draft.command_babysit import _pr_already_green
+
+    with patch(
+        "draft.steps.babysit_pr.check_ci_counts", side_effect=Exception("gh failed")
+    ):
+        assert _pr_already_green("https://github.com/org/repo/pull/42") is False
+
+
+# --- _snapshot_spec ---
+
+
+def test_snapshot_spec_copies_file(tmp_path):
+    from draft.command_babysit import _snapshot_spec
+
+    spec = tmp_path / "my_spec.md"
+    spec.write_text("the spec content")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dest = _snapshot_spec(run_dir, str(spec), "PR body text")
+    assert dest == run_dir / "spec.md"
+    assert dest.read_text() == "the spec content"
+
+
+def test_snapshot_spec_uses_pr_body_when_no_path(tmp_path):
+    from draft.command_babysit import _snapshot_spec
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dest = _snapshot_spec(run_dir, None, "PR body text")
+    assert dest.read_text() == "PR body text"
+
+
+def test_snapshot_spec_empty_when_no_path_and_empty_body(tmp_path):
+    from draft.command_babysit import _snapshot_spec
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dest = _snapshot_spec(run_dir, None, "")
+    assert dest.exists()
+    assert dest.read_text() == ""
+
+
+def test_snapshot_spec_empty_when_no_path_and_none_body(tmp_path):
+    from draft.command_babysit import _snapshot_spec
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    dest = _snapshot_spec(run_dir, None, None)
+    assert dest.exists()
+    assert dest.read_text() == ""
+
+
+# --- _compose_active_steps_babysit ---
+
+
+def test_compose_active_steps_babysit_worktree_default():
+    from draft.command_babysit import _compose_active_steps_babysit
+
+    active, skipped = _compose_active_steps_babysit("worktree", False)
+    assert [s.name for s in active] == ["create-worktree", "babysit-pr"]
+    assert "delete-worktree" in skipped
+
+
+def test_compose_active_steps_babysit_no_worktree():
+    from draft.command_babysit import _compose_active_steps_babysit
+
+    active, skipped = _compose_active_steps_babysit("no-worktree", False)
+    assert [s.name for s in active] == ["babysit-pr"]
+    assert "create-worktree" in skipped
+
+
+def test_compose_active_steps_babysit_with_delete_worktree():
+    from draft.command_babysit import _compose_active_steps_babysit
+
+    active, skipped = _compose_active_steps_babysit("worktree", True)
+    assert [s.name for s in active] == [
+        "create-worktree",
+        "babysit-pr",
+        "delete-worktree",
+    ]
+    assert "delete-worktree" not in skipped
+
+
+def test_compose_active_steps_babysit_reuse_existing():
+    from draft.command_babysit import _compose_active_steps_babysit
+
+    active, skipped = _compose_active_steps_babysit("reuse-existing", False)
+    assert [s.name for s in active] == ["babysit-pr"]
+    assert "create-worktree" in skipped
+
+
+# --- command_babysit.run ---
+
+
+def test_babysit_run_already_green_exits_0(tmp_path, monkeypatch, capsys):
+    import draft.command_babysit as cb
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pr_data = _babysit_pr_data()
+    with (
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_babysit._project_name", return_value="myproject"),
+        patch("draft.command_babysit._fetch_pr", return_value=pr_data),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch(
+            "draft.command_babysit._resolve_worktree_for_babysit",
+            return_value=(str(tmp_path / "wt"), "worktree"),
+        ),
+        patch("draft.command_babysit._pr_already_green", return_value=True),
+    ):
+        result = cb.run(_make_babysit_args())
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "already green" in out
+    assert pr_data["url"] in out
+
+
+def test_babysit_run_concurrent_active_run_exits_2(tmp_path, monkeypatch, capsys):
+    import draft.command_babysit as cb
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pr_data = _babysit_pr_data()
+    fake_run_dir = tmp_path / "myproject" / "260510-120000"
+    fake_run_dir.mkdir(parents=True)
+    with (
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_babysit._project_name", return_value="myproject"),
+        patch("draft.command_babysit._fetch_pr", return_value=pr_data),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=fake_run_dir),
+        pytest.raises(SystemExit) as exc,
+    ):
+        cb.run(_make_babysit_args())
+    assert exc.value.code == 2
+    assert "260510-120000" in capsys.readouterr().err
+
+
+def test_babysit_run_no_worktree_dirty_exits_2(tmp_path, monkeypatch, capsys):
+    import draft.command_babysit as cb
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pr_data = _babysit_pr_data()
+    with (
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_babysit._project_name", return_value="myproject"),
+        patch("draft.command_babysit._fetch_pr", return_value=pr_data),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch("draft.command_babysit.subprocess.run") as mock_subproc,
+        pytest.raises(SystemExit) as exc,
+    ):
+        mock_subproc.return_value.stdout = " M dirty.py\n"
+        mock_subproc.return_value.returncode = 0
+        cb.run(_make_babysit_args(no_worktree=True))
+    assert exc.value.code == 2
+    assert "dirty" in capsys.readouterr().err
+
+
+def test_babysit_run_pipeline_sets_pipeline_field(tmp_path, monkeypatch, capsys):
+    import draft.command_babysit as cb
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pr_data = _babysit_pr_data()
+    wt_dir = tmp_path / "wt"
+    wt_dir.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_babysit._project_name", return_value="myproject"),
+        patch("draft.command_babysit._fetch_pr", return_value=pr_data),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch(
+            "draft.command_babysit._resolve_worktree_for_babysit",
+            return_value=(str(wt_dir), "worktree"),
+        ),
+        patch("draft.command_babysit._pr_already_green", return_value=False),
+        patch("draft.command_babysit.load_config", return_value={}),
+        patch("draft.command_babysit.validate_config"),
+        patch("pipeline.Pipeline") as MockPipeline,
+    ):
+        MockPipeline.return_value.run.return_value = None
+        result = cb.run(_make_babysit_args(run_id="test-babysit-1"))
+
+    assert result == 0
+    run_dir = tmp_path / ".draft" / "runs" / "myproject" / "test-babysit-1"
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["data"]["pipeline"] == "babysit"
+
+
+def test_babysit_run_step_error_returns_1(tmp_path, monkeypatch, capsys):
+    import draft.command_babysit as cb
+    from pipeline import StepError
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pr_data = _babysit_pr_data()
+    wt_dir = tmp_path / "wt"
+    with (
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_babysit._project_name", return_value="myproject"),
+        patch("draft.command_babysit._fetch_pr", return_value=pr_data),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch(
+            "draft.command_babysit._resolve_worktree_for_babysit",
+            return_value=(str(wt_dir), "worktree"),
+        ),
+        patch("draft.command_babysit._pr_already_green", return_value=False),
+        patch("draft.command_babysit.load_config", return_value={}),
+        patch("draft.command_babysit.validate_config"),
+        patch("pipeline.Pipeline") as MockPipeline,
+    ):
+        MockPipeline.return_value.run.side_effect = StepError("babysit-pr", 1)
+        result = cb.run(_make_babysit_args(run_id="test-babysit-2"))
+
+    assert result == 1
+    assert "babysit-pr" in capsys.readouterr().err
+
+
+# --- draft list with babysit pipeline ---
+
+
+def test_command_list_babysit_pipeline_shows_correct_count(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["babysit-pr"],
+        "data": {"pipeline": "babysit", "worktree_mode": "worktree"},
+    }
+    _make_list_run(base, "260510-120000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "1/2" in capsys.readouterr().out
+
+
+def test_command_list_babysit_no_worktree_shows_1_step(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": [],
+        "data": {"pipeline": "babysit", "worktree_mode": "no-worktree"},
+    }
+    _make_list_run(base, "260510-120000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+    assert "0/1" in capsys.readouterr().out
+
+
+# --- draft status with babysit pipeline ---
+
+
+def test_status_babysit_pipeline_shows_three_steps(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260510-120000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": [],
+        "data": {
+            "pipeline": "babysit",
+            "worktree_mode": "worktree",
+            "branch": "feature-x",
+        },
+        "sessions": [],
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260510-120000"
+        json = False
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(FakeArgs())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "create-worktree" in out
+    assert "babysit-pr" in out
+    assert "delete-worktree" not in out
+
+
+def test_status_babysit_pipeline_corrupt_missing_pipeline(tmp_path, capsys):
+    import draft.command_status as cs
+
+    run_dir = tmp_path / "myproject" / "260510-120000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": [],
+        "data": {"branch": "feature-x"},
+        "sessions": [],
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    class FakeArgs:
+        run_id = "260510-120000"
+        json = False
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        result = cs.run(FakeArgs())
+
+    assert result == 1
+    assert "pipeline" in capsys.readouterr().err
+
+
+# --- find_active_run_on_branch skips corrupt state ---
+
+
+def test_find_active_run_on_branch_skips_missing_pipeline(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260510-120000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": ["create-worktree"],
+        "data": {"branch": "foo"},  # no pipeline field
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "foo")
+    assert result is None
+
+
+# --- concurrent blocking ---
+
+
+def test_babysit_blocks_on_active_create_run(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260510-120000"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": ["create-worktree"],
+        "data": {"branch": "feature-x", "pipeline": "create"},
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "feature-x")
+    assert result == run_dir
+
+
+def test_create_blocks_on_active_babysit_run(tmp_path):
+    import draft.runs as r
+
+    project_dir = tmp_path / "proj"
+    run_dir = project_dir / "260510-120001"
+    run_dir.mkdir(parents=True)
+    state = {
+        "completed": ["create-worktree"],
+        "data": {
+            "branch": "feature-x",
+            "pipeline": "babysit",
+            "worktree_mode": "worktree",
+        },
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.runs.runs_base", return_value=tmp_path):
+        result = r.find_active_run_on_branch("proj", "feature-x")
+    assert result == run_dir
+
+
+# --- expected_steps for babysit pipeline ---
+
+
+def test_expected_steps_babysit_default():
+    import draft.runs as r
+
+    state = {
+        "completed": [],
+        "data": {"pipeline": "babysit", "worktree_mode": "worktree"},
+    }
+    assert r.expected_steps(state) == ("create-worktree", "babysit-pr")
+
+
+def test_expected_steps_babysit_no_worktree():
+    import draft.runs as r
+
+    state = {
+        "completed": [],
+        "data": {"pipeline": "babysit", "worktree_mode": "no-worktree"},
+    }
+    assert r.expected_steps(state) == ("babysit-pr",)
+
+
+def test_expected_steps_babysit_with_delete_worktree():
+    import draft.runs as r
+
+    state = {
+        "completed": [],
+        "data": {
+            "pipeline": "babysit",
+            "worktree_mode": "worktree",
+            "delete_worktree": True,
+        },
+    }
+    assert r.expected_steps(state) == (
+        "create-worktree",
+        "babysit-pr",
+        "delete-worktree",
+    )
