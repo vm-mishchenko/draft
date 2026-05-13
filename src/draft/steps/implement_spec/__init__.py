@@ -343,7 +343,9 @@ class ImplementSpecStep(Step):
                 suggest_template = _load_suggest_template()
 
             for attempt in range(1, cfg["max_retries"] + 1):
-                prefix = f"attempt {attempt}/{cfg['max_retries']} — "
+                prefix = (
+                    "" if attempt == 1 else f"attempt {attempt}/{cfg['max_retries']} — "
+                )
                 s.update(prefix + "implementing")
                 summarizer = None
                 if sys.stdout.isatty():

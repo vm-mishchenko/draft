@@ -1343,6 +1343,133 @@ def test_summarizer_stopped_in_finally_when_run_llm_raises(tmp_path):
     mock_instance.stop.assert_called_once()
 
 
+# --- attempt prefix tests ---
+
+
+def _run_step_capturing_s(cfg, tmp_path, lifecycle, *, isatty=False, s=None):
+    if s is None:
+        s = MagicMock()
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine(s=s)
+    step = ImplementSpecStep()
+    with (
+        patch("sys.stdout.isatty", return_value=isatty),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+    return s
+
+
+def test_first_attempt_status_has_no_prefix(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "suggest_extra_checks": False}
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    s = _run_step_capturing_s(cfg, tmp_path, lifecycle)
+
+    calls = [c.args[0] for c in s.update.call_args_list]
+    assert all(c in ("implementing", "verifying", "writing commit") for c in calls)
+    assert not any("attempt" in c or "—" in c for c in calls)
+
+
+def test_second_attempt_status_has_prefix(tmp_path):
+    cfg = {"max_retries": 3, "timeout": 60, "suggest_extra_checks": False}
+    lifecycle = MagicMock()
+    failing = HookResult(cmd="cmd", rc=1, output="fail", duration=0.1)
+    lifecycle.run_hooks.side_effect = [[failing], []]
+
+    s = _run_step_capturing_s(cfg, tmp_path, lifecycle)
+
+    calls = [c.args[0] for c in s.update.call_args_list]
+    implementing_indices = [
+        i for i, c in enumerate(calls) if c.endswith("implementing")
+    ]
+    assert len(implementing_indices) == 2
+    boundary = implementing_indices[1]
+    attempt1_calls = calls[:boundary]
+    attempt2_calls = calls[boundary:]
+    assert not any("attempt" in c for c in attempt1_calls)
+    assert all(c.startswith("attempt 2/3 — ") for c in attempt2_calls)
+
+
+def test_max_retries_exhausted_last_status_has_prefix(tmp_path):
+    cfg = {"max_retries": 3, "timeout": 60, "suggest_extra_checks": False}
+    lifecycle = MagicMock()
+    failing = HookResult(cmd="cmd", rc=1, output="fail", duration=0.1)
+    lifecycle.run_hooks.return_value = [failing]
+
+    s = MagicMock()
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine(s=s)
+    step = ImplementSpecStep()
+    with (
+        patch("sys.stdout.isatty", return_value=False),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+        pytest.raises(StepError),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    calls = [c.args[0] for c in s.update.call_args_list]
+    assert calls[0] == "implementing"
+    assert calls[-1].startswith("attempt 3/3 — ")
+
+
+def test_summarizer_constructed_with_empty_prefix_on_first_attempt(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "suggest_extra_checks": False}
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    mock_instance = MagicMock()
+    mock_instance.start.return_value = mock_instance
+
+    with patch(
+        "draft.steps.implement_spec.LiveStatusSummarizer", return_value=mock_instance
+    ) as mock_cls:
+        _run_step_capturing_s(cfg, tmp_path, lifecycle, isatty=True)
+
+    mock_cls.assert_called_once()
+    _, kwargs = mock_cls.call_args
+    assert kwargs["prefix"] == ""
+
+
+def test_summarizer_constructed_with_attempt_prefix_on_second_attempt(tmp_path):
+    cfg = {"max_retries": 2, "timeout": 60, "suggest_extra_checks": False}
+    lifecycle = MagicMock()
+    failing = HookResult(cmd="cmd", rc=1, output="fail", duration=0.1)
+    lifecycle.run_hooks.side_effect = [[failing], []]
+
+    mock_instance = MagicMock()
+    mock_instance.start.return_value = mock_instance
+
+    with patch(
+        "draft.steps.implement_spec.LiveStatusSummarizer", return_value=mock_instance
+    ) as mock_cls:
+        _run_step_capturing_s(cfg, tmp_path, lifecycle, isatty=True)
+
+    assert mock_cls.call_count == 2
+    prefixes = [call.kwargs["prefix"] for call in mock_cls.call_args_list]
+    assert prefixes[0] == ""
+    assert prefixes[1] == "attempt 2/2 — "
+
+
 def test_bundled_summarize_status_has_tail_placeholder():
     from importlib.resources import files
 
