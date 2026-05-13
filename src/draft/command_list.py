@@ -52,9 +52,24 @@ def _row_data(run_dir: Path) -> dict:
             "branch": None,
             "pr_url": None,
         }
+    from draft.pipelines import CorruptStateError
+
     project = payload.get("data", {}).get("project", project) or project
+    try:
+        stages_total = len(runs.expected_steps(payload))
+    except CorruptStateError:
+        return {
+            "run_id": run_id,
+            "project": project,
+            "state": "corrupt",
+            "stages_completed": None,
+            "stages_total": None,
+            "running": running,
+            "workspace": None,
+            "branch": None,
+            "pr_url": None,
+        }
     stages_completed = len(payload.get("completed", []))
-    stages_total = len(runs.expected_steps(payload))
     branch = payload.get("data", {}).get("branch") or None
     pr_url = payload.get("data", {}).get("pr_url") or None
     wt_dir = payload.get("data", {}).get("wt_dir") or ""

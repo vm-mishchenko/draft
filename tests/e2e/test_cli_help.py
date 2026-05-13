@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 DRAFT = shutil.which("draft")
-SUBCOMMANDS = ["list", "status", "create", "continue", "delete", "prune"]
+SUBCOMMANDS = ["list", "status", "create", "babysit", "continue", "delete", "prune"]
 
 pytestmark = pytest.mark.skipif(
     DRAFT is None, reason="draft binary not on PATH; run `make setup`"

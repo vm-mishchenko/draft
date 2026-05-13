@@ -65,6 +65,17 @@ def run(args) -> int:
     per_step = metrics.per_step_costs()
     per_step_time = metrics.per_step_times()
 
+    from draft.pipelines import CorruptStateError
+
+    try:
+        expected = runs.expected_steps(state)
+    except CorruptStateError:
+        print(
+            f"error: state.json for run '{args.run_id}' is missing or has invalid 'data.pipeline'",
+            file=sys.stderr,
+        )
+        return 1
+
     if runs.is_run_finished(state):
         run_status = "done"
     elif runs.is_run_active(run_dir):
@@ -75,7 +86,7 @@ def run(args) -> int:
     completed = state.get("completed", [])
     first_unfinished = True
     step_rows = []
-    for step in runs.expected_steps(state):
+    for step in expected:
         if step in completed:
             step_status = "done"
         elif first_unfinished:

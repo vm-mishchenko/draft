@@ -2,6 +2,7 @@ import argparse
 import sys
 
 from draft import (
+    command_babysit,
     command_continue,
     command_create,
     command_delete,
@@ -19,6 +20,7 @@ def main():
     )
     subs = parser.add_subparsers(dest="command")
     command_create.register(subs)
+    command_babysit.register(subs)
     command_init.register(subs)
     command_list.register(subs)
     command_continue.register(subs)

@@ -77,6 +77,8 @@ def _resolve_project_scope(args) -> list[Path] | int:
 
 
 def _build_selection(candidates, *, include_all):
+    from draft.pipelines import CorruptStateError
+
     selection = []
     active = []
     for run_dir in candidates:
@@ -84,7 +86,11 @@ def _build_selection(candidates, *, include_all):
             active.append(run_dir)
             continue
         state = runs.load_state(run_dir)
-        if include_all or (state is not None and runs.is_run_finished(state)):
+        try:
+            finished = state is not None and runs.is_run_finished(state)
+        except CorruptStateError:
+            finished = True
+        if include_all or finished:
             selection.append((run_dir, state))
 
     selection.sort(key=lambda x: x[0].name, reverse=True)

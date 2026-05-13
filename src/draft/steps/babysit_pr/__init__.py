@@ -84,6 +84,12 @@ def _build_prompt(ctx, verify_commands: str, failed_checks: list[dict]) -> str:
     )
 
 
+def check_ci_counts(pr_url: str) -> dict[str, int]:
+    """Return CI state counts: success, failure, pending."""
+    counts, _ = _check_ci(pr_url)
+    return counts
+
+
 def _check_ci(pr_url: str) -> tuple[dict[str, int], list[dict]]:
     """Returns (counts, entries); counts keyed by state group: success, failure, pending."""
     result = subprocess.run(
@@ -378,3 +384,4 @@ class BabysitPrStep(Step):
                 engine.sleep(next_delay, "waiting before pr-checks")
 
         print(f"babysit-pr: exhausted attempts. PR: {pr_url}")
+        raise StepError(self.name, 1)
