@@ -120,7 +120,7 @@ def resolve_pr_body_template(config: dict, repo: str) -> dict:
 
 _HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
 _FORBIDDEN_STEP_KEYS = frozenset({"retry_delay"})
-_LOOPING_STEPS = frozenset({"implement-spec", "babysit-pr"})
+_LOOPING_STEPS = frozenset({"implement-spec", "babysit-pr", "fix-pr"})
 
 
 def _validate_step_keys(step_name: str, step_cfg: dict) -> None:

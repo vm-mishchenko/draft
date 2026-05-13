@@ -6,6 +6,7 @@ from draft import (
     command_continue,
     command_create,
     command_delete,
+    command_fix_pr,
     command_init,
     command_list,
     command_prune,
@@ -21,6 +22,7 @@ def main():
     subs = parser.add_subparsers(dest="command")
     command_create.register(subs)
     command_babysit.register(subs)
+    command_fix_pr.register(subs)
     command_init.register(subs)
     command_list.register(subs)
     command_continue.register(subs)

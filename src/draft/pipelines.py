@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from draft.steps.babysit_pr import BabysitPrStep
 from draft.steps.create_worktree import CreateWorktreeStep
 from draft.steps.delete_worktree import DeleteWorktreeStep
+from draft.steps.fix_pr import FixPrStep
 from draft.steps.implement_spec import ImplementSpecStep
 from draft.steps.open_pr import OpenPrStep
 from draft.steps.push_commits import PushCommitsStep
@@ -25,6 +26,7 @@ _implement_spec = ImplementSpecStep()
 _push_commits = PushCommitsStep()
 _open_pr = OpenPrStep()
 _babysit_pr = BabysitPrStep()
+_fix_pr = FixPrStep()
 _delete_worktree = DeleteWorktreeStep()
 
 
@@ -59,6 +61,18 @@ def _expected_steps_babysit(data: dict) -> tuple[str, ...]:
     return tuple(steps)
 
 
+def _expected_steps_fix_pr(data: dict) -> tuple[str, ...]:
+    steps: list[str] = []
+    worktree_mode = data.get("worktree_mode", "worktree")
+    delete_worktree = bool(data.get("delete_worktree", False))
+    if worktree_mode not in ("no-worktree", "reuse-existing"):
+        steps.append("create-worktree")
+    steps.append("fix-pr")
+    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
+        steps.append("delete-worktree")
+    return tuple(steps)
+
+
 PIPELINES: dict[str, "Pipeline"] = {
     "create": Pipeline(
         name="create",
@@ -80,6 +94,15 @@ PIPELINES: dict[str, "Pipeline"] = {
             _delete_worktree,
         ),
         expected_steps=_expected_steps_babysit,
+    ),
+    "fix-pr": Pipeline(
+        name="fix-pr",
+        steps=(
+            _create_worktree,
+            _fix_pr,
+            _delete_worktree,
+        ),
+        expected_steps=_expected_steps_fix_pr,
     ),
 }
 
