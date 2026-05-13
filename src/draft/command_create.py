@@ -28,6 +28,7 @@ from draft.config import (
     resolve_prompt_template,
     step_config,
     validate_config,
+    validate_review_cmd_argv0,
 )
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
@@ -85,6 +86,12 @@ def register(subparsers):
         action="store_true",
         default=False,
         help="Remove the worktree on success (after pr-babysit green, or after commit if --skip-pr).",
+    )
+    p.add_argument(
+        "--no-review",
+        action="store_true",
+        default=False,
+        help="Skip the review-implementation step for this run, even if configured.",
     )
     p.add_argument(
         "--run-id",
@@ -361,7 +368,12 @@ def _assert_no_active_run_on_branch(project: str, branch: str) -> None:
 
 
 def _compose_active_steps(
-    worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False
+    worktree_mode: str,
+    pr_mode: str,
+    skip_pr: bool,
+    delete_worktree: bool = False,
+    skip_review: bool = False,
+    has_review_cmd: bool = False,
 ):
     skipped = set()
     if worktree_mode in ("no-worktree", "reuse-existing"):
@@ -372,6 +384,8 @@ def _compose_active_steps(
         skipped.add("open-pr")
     if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
         skipped.add("delete-worktree")
+    if (not has_review_cmd) or skip_review:
+        skipped.add("review-implementation")
     active = [s for s in PIPELINES["create"].steps if s.name not in skipped]
     return active, skipped
 
@@ -516,10 +530,15 @@ def run(args) -> int:
         validate_config(config)
         config = resolve_prompt_template(config, repo)
         config = resolve_pr_body_template(config, repo)
+        validate_review_cmd_argv0(config, repo)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         (run_dir / "draft.pid").unlink(missing_ok=True)
         return 3
+
+    has_review_cmd = bool(
+        config.get("steps", {}).get("review-implementation", {}).get("cmd", "").strip()
+    )
 
     # 9. Step configs
     step_configs = {
@@ -529,7 +548,12 @@ def run(args) -> int:
 
     # 10. Active steps
     active_steps, skipped_names = _compose_active_steps(
-        worktree_mode, pr_mode, args.skip_pr, args.delete_worktree
+        worktree_mode,
+        pr_mode,
+        args.skip_pr,
+        args.delete_worktree,
+        args.no_review,
+        has_review_cmd,
     )
 
     # 11. Context
@@ -545,6 +569,8 @@ def run(args) -> int:
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("pr_mode", pr_mode)
     ctx.set("delete_worktree", args.delete_worktree)
+    ctx.set("skip_review", args.no_review)
+    ctx.set("has_review_cmd", has_review_cmd)
     ctx.set("pipeline", "create")
     if pr_url is not None:
         ctx.set("pr_url", pr_url)
