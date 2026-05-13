@@ -19,13 +19,13 @@ done
 
 command -v auggie >/dev/null || die "auggie not on PATH"
 
-if ! auth_out="$(auggie account status 2>&1)"; then
+if ! auth_out="$(auggie token print 2>&1)"; then
   echo "review.sh: auggie pre-flight auth check failed; run 'auggie login' or export AUGMENT_SESSION_AUTH" >&2
-  echo "--- auggie account status output ---" >&2
+  echo "--- auggie token print output ---" >&2
   echo "$auth_out" >&2
   exit 1
 fi
-[[ -n "${auth_out//[[:space:]]/}" ]] || die "auggie account status returned empty; run 'auggie login'"
+[[ "$auth_out" == *"SESSION="* ]] || die "auggie token print did not return a SESSION; run 'auggie login'"
 
 if ! diff_text="$(git diff "$DRAFT_BASE_BRANCH"...HEAD 2>&1)"; then
   echo "review.sh: git diff $DRAFT_BASE_BRANCH...HEAD failed:" >&2
