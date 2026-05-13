@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Maximum number of review items to report
-MAX_REVIEW_ITEMS=3
+MAX_REVIEW_ITEMS=4
 
 die() { echo "review.sh: $*" >&2; exit 1; }
 
