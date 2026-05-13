@@ -12,8 +12,8 @@ class RunContext:
     ):
         self.run_id = run_id
         self.run_dir = Path(run_dir)
-        self._data: dict = {}
-        self._step_data: dict = {}
+        self._data: dict = {}  # run-level KV store; steps write outputs here via set()/get() and the values persist across retries in state.json
+        self._step_data: dict = {}  # per-step KV store; keyed by step name, used by steps to stash intermediate state via step_set()/step_get()
         self._completed: list[str] = []
         self._step_configs: dict = step_configs or {}
         self._sessions: list[dict] = []
