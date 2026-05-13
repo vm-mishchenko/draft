@@ -1057,7 +1057,7 @@ def test_compose_active_steps_default():
         "open-pr",
         "babysit-pr",
     ]
-    assert skipped == {"delete-worktree"}
+    assert skipped == {"delete-worktree", "review-implementation"}
 
 
 def test_compose_active_steps_no_worktree():
@@ -1073,7 +1073,13 @@ def test_compose_active_steps_skip_pr():
 
     active, skipped = cmd._compose_active_steps("worktree", "skip", True)
     assert [s.name for s in active] == ["create-worktree", "implement-spec"]
-    assert skipped == {"push-commits", "open-pr", "babysit-pr", "delete-worktree"}
+    assert skipped == {
+        "push-commits",
+        "open-pr",
+        "babysit-pr",
+        "delete-worktree",
+        "review-implementation",
+    }
 
 
 def test_compose_active_steps_pr_reuse_skips_pr_open():
@@ -1596,7 +1602,12 @@ def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
     active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
     names = [s.name for s in active]
     assert names == ["implement-spec", "push-commits", "babysit-pr"]
-    assert skipped == {"create-worktree", "open-pr", "delete-worktree"}
+    assert skipped == {
+        "create-worktree",
+        "open-pr",
+        "delete-worktree",
+        "review-implementation",
+    }
 
 
 def test_compose_active_steps_reuse_existing_with_skip_pr():
@@ -1611,6 +1622,7 @@ def test_compose_active_steps_reuse_existing_with_skip_pr():
         "open-pr",
         "babysit-pr",
         "delete-worktree",
+        "review-implementation",
     }
 
 
@@ -3136,6 +3148,7 @@ def test_init_pipeline_order(tmp_path):
     assert list(data["steps"].keys()) == [
         "create-worktree",
         "implement-spec",
+        "review-implementation",
         "push-commits",
         "open-pr",
         "babysit-pr",

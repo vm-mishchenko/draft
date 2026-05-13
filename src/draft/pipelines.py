@@ -8,6 +8,7 @@ from draft.steps.fix_pr import FixPrStep
 from draft.steps.implement_spec import ImplementSpecStep
 from draft.steps.open_pr import OpenPrStep
 from draft.steps.push_commits import PushCommitsStep
+from draft.steps.review_implementation import ReviewImplementationStep
 
 
 class CorruptStateError(Exception):
@@ -23,6 +24,7 @@ class Pipeline:
 
 _create_worktree = CreateWorktreeStep()
 _implement_spec = ImplementSpecStep()
+_review_implementation = ReviewImplementationStep()
 _push_commits = PushCommitsStep()
 _open_pr = OpenPrStep()
 _babysit_pr = BabysitPrStep()
@@ -39,6 +41,10 @@ def _expected_steps_create(data: dict) -> tuple[str, ...]:
     if worktree_mode not in ("no-worktree", "reuse-existing"):
         steps.append("create-worktree")
     steps.append("implement-spec")
+    has_review_cmd = bool(data.get("has_review_cmd", False))
+    skip_review = bool(data.get("skip_review", False))
+    if has_review_cmd and not skip_review:
+        steps.append("review-implementation")
     if not skip_pr:
         steps.append("push-commits")
         if pr_mode != "reuse":
@@ -79,6 +85,7 @@ PIPELINES: dict[str, "Pipeline"] = {
         steps=(
             _create_worktree,
             _implement_spec,
+            _review_implementation,
             _push_commits,
             _open_pr,
             _babysit_pr,

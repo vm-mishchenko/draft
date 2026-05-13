@@ -1,3 +1,6 @@
+import os
+import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -120,7 +123,9 @@ def resolve_pr_body_template(config: dict, repo: str) -> dict:
 
 _HOOK_ALLOWED_KEYS = frozenset({"cmd", "timeout"})
 _FORBIDDEN_STEP_KEYS = frozenset({"retry_delay"})
-_LOOPING_STEPS = frozenset({"implement-spec", "babysit-pr", "fix-pr"})
+_LOOPING_STEPS = frozenset(
+    {"implement-spec", "babysit-pr", "fix-pr", "review-implementation"}
+)
 
 
 def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
@@ -183,6 +188,62 @@ def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
                 raise ConfigError(
                     "steps.implement-spec.suggester_total_budget must be an int between 1 and 3600"
                 )
+
+    if step_name == "review-implementation":
+        if "cmd" in step_cfg:
+            val = step_cfg["cmd"]
+            if not isinstance(val, str):
+                raise ConfigError("steps.review-implementation.cmd must be a string")
+            if val.strip():
+                try:
+                    shlex.split(val)
+                except ValueError as e:
+                    raise ConfigError(
+                        f"steps.review-implementation.cmd is not parseable: {e}"
+                    ) from e
+        if "timeout" in step_cfg:
+            val = step_cfg["timeout"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 3600)
+            ):
+                raise ConfigError(
+                    "steps.review-implementation.timeout must be an int between 1 and 3600"
+                )
+        if "suggest_extra_checks" in step_cfg:
+            val = step_cfg["suggest_extra_checks"]
+            if not isinstance(val, bool):
+                raise ConfigError(
+                    "steps.review-implementation.suggest_extra_checks must be a bool (true or false)"
+                )
+
+
+def validate_review_cmd_argv0(config: dict, repo: str) -> None:
+    cmd = config.get("steps", {}).get("review-implementation", {}).get("cmd", "")
+    if not isinstance(cmd, str) or not cmd.strip():
+        return
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return
+    argv0 = argv[0]
+    if os.path.isabs(argv0):
+        if not (Path(argv0).is_file() and os.access(argv0, os.X_OK)):
+            raise ConfigError(
+                f"steps.review-implementation.cmd: argv[0] not an executable file: {argv0}"
+            )
+    elif os.sep in argv0 or argv0.startswith("."):
+        resolved = (Path(repo) / argv0).resolve()
+        if not (resolved.is_file() and os.access(resolved, os.X_OK)):
+            raise ConfigError(
+                f"steps.review-implementation.cmd: argv[0] not an executable file: {resolved}"
+            )
+    else:
+        if shutil.which(argv0) is None:
+            raise ConfigError(
+                f"steps.review-implementation.cmd: argv[0] not found on PATH: {argv0}"
+            )
 
 
 def validate_config(config: dict) -> None:
