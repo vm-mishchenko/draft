@@ -6,7 +6,7 @@ from pathlib import Path
 from draft import runs
 from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
-from draft.steps import STEPS
+from draft.pipelines import CorruptStateError, get_pipeline
 from pipeline import Pipeline, RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
@@ -25,13 +25,6 @@ def _is_pid_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
-
-
-_STEP_EXIT_CODES = {
-    "implement-spec": 4,
-    "push-commits": 5,
-    "open-pr": 6,
-}
 
 
 def _print_preamble(ctx, steps):
@@ -109,6 +102,17 @@ def run(args) -> int:
         except ValueError:
             pass
 
+    # Validate pipeline before any checks that depend on expected steps
+    pipeline_name = ctx.get("pipeline")
+    try:
+        pipeline = get_pipeline(pipeline_name)
+    except CorruptStateError:
+        print(
+            f"error: state for run '{run_id}' has missing or invalid 'data.pipeline'",
+            file=sys.stderr,
+        )
+        return 1
+
     # State for finished-run / drift checks
     state_for_check = {
         "completed": ctx._completed,
@@ -181,7 +185,7 @@ def run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
 
-    active_steps = [s for s in STEPS if s.name in set(expected)]
+    active_steps = [s for s in pipeline.steps if s.name in set(expected)]
 
     session_metrics = ctx.metrics.session_begin("continue")
     ctx.save()
@@ -202,7 +206,7 @@ def run(args) -> int:
             f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})",
             file=sys.stderr,
         )
-        rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
+        rc = 1
     except BaseException:
         rc = -1
         raise

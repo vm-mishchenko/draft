@@ -16,27 +16,6 @@ FULL_PIPELINE_STEPS = (
 SKIP_PR_STEPS = ("create-worktree", "implement-spec")
 
 
-def _expected_steps(
-    *,
-    worktree_mode: str,
-    pr_mode: str | None,
-    skip_pr: bool,
-    delete_worktree: bool = False,
-) -> tuple[str, ...]:
-    steps: list[str] = []
-    if worktree_mode not in ("no-worktree", "reuse-existing"):
-        steps.append("create-worktree")
-    steps.append("implement-spec")
-    if not skip_pr:
-        steps.append("push-commits")
-        if pr_mode != "reuse":
-            steps.append("open-pr")
-        steps.append("babysit-pr")
-    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
-        steps.append("delete-worktree")
-    return tuple(steps)
-
-
 def runs_base() -> Path:
     return Path.home() / ".draft" / "runs"
 
@@ -118,20 +97,31 @@ def load_state(run_dir: Path) -> dict | None:
 
 
 def expected_steps(state: dict) -> tuple[str, ...]:
+    """Return the expected step names for the given state.
+
+    Raises CorruptStateError if state["data"]["pipeline"] is missing or unknown.
+    """
+    from draft.pipelines import CorruptStateError, get_pipeline
+
     data = state.get("data", {})
-    return _expected_steps(
-        worktree_mode=data.get("worktree_mode", "worktree"),
-        pr_mode=data.get("pr_mode"),
-        skip_pr=bool(data.get("skip_pr", False)),
-        delete_worktree=bool(data.get("delete_worktree", False)),
-    )
+    pipeline_name = data.get("pipeline", "")
+    if not pipeline_name:
+        raise CorruptStateError("state is missing required 'data.pipeline' field")
+    pipeline = get_pipeline(pipeline_name)
+    return pipeline.expected_steps(data)
 
 
 def is_run_finished(state: dict) -> bool:
+    """Return True if all expected steps are completed.
+
+    Raises CorruptStateError if the pipeline field is missing or unknown.
+    """
     return all(s in state.get("completed", []) for s in expected_steps(state))
 
 
 def find_active_run_on_branch(project: str, branch: str) -> Path | None:
+    from draft.pipelines import CorruptStateError
+
     project_dir = runs_base() / project
     if not project_dir.exists():
         return None
@@ -143,7 +133,11 @@ def find_active_run_on_branch(project: str, branch: str) -> Path | None:
             continue
         if state.get("data", {}).get("branch") != branch:
             continue
-        if is_run_active(run_dir) or not is_run_finished(state):
+        try:
+            finished = is_run_finished(state)
+        except CorruptStateError:
+            continue
+        if is_run_active(run_dir) or not finished:
             return run_dir
     return None
 

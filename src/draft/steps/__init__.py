@@ -5,6 +5,7 @@ from draft.steps.implement_spec import ImplementSpecStep
 from draft.steps.open_pr import OpenPrStep
 from draft.steps.push_commits import PushCommitsStep
 
+# Deprecated: use draft.pipelines.PIPELINES["create"].steps instead.
 STEPS = [
     CreateWorktreeStep(),
     ImplementSpecStep(),

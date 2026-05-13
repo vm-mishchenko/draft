@@ -1,15 +1,27 @@
 import os
-import re
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from draft import runs
+from draft.command_common import (
+    _apply_overrides,
+    _assert_git_repo,
+    _assert_main_clone,
+    _assert_on_path,
+    _branch_worktrees,
+    _canonical_worktree_path,
+    _checkout_in_place,
+    _current_head_branch,
+    _is_working_tree_clean,
+    _local_branch_exists,
+    _project_name,
+    _repo_root,
+    _validate_overrides,
+    _validate_run_id,
+)
 from draft.config import (
-    _FORBIDDEN_STEP_KEYS,
-    _LOOPING_STEPS,
     ConfigError,
     load_config,
     resolve_pr_body_template,
@@ -18,17 +30,11 @@ from draft.config import (
     validate_config,
 )
 from draft.hooks import DraftLifecycle, HookRunner
-from draft.steps import STEPS
+from draft.pipelines import PIPELINES
 from pipeline import RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
 _BRANCH_HEAD_SENTINEL = ""
-
-_STEP_EXIT_CODES = {
-    "implement-spec": 4,
-    "push-commits": 5,
-    "open-pr": 6,
-}
 
 
 def register(subparsers):
@@ -92,69 +98,6 @@ def register(subparsers):
 # --- pre-flight helpers ---
 
 
-def _assert_git_repo():
-    result = subprocess.run(
-        ["git", "rev-parse", "--is-inside-work-tree"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        print("error: not inside a git repository", file=sys.stderr)
-        sys.exit(3)
-
-
-def _assert_main_clone():
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-superproject-working-tree"],
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        print("error: cannot run draft from inside a git worktree", file=sys.stderr)
-        sys.exit(3)
-    result2 = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
-    )
-    lines = result2.stdout.splitlines()
-    cwd = os.getcwd()
-    main_wt = ""
-    for line in lines:
-        if line.startswith("worktree "):
-            main_wt = line[len("worktree ") :]
-            break
-    if cwd != main_wt and main_wt:
-        print(
-            "error: draft must be run from the main worktree, not a linked worktree",
-            file=sys.stderr,
-        )
-        sys.exit(3)
-
-
-def _assert_on_path(tool: str):
-    if not shutil.which(tool):
-        print(f"error: '{tool}' not found on PATH", file=sys.stderr)
-        sys.exit(3)
-
-
-def _repo_root() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
-
-
-def _project_name(repo: str) -> str:
-    return Path(repo).name
-
-
-def _sanitize_branch(branch: str) -> str:
-    return branch.replace("/", "-")
-
-
 def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
     if from_branch:
         return from_branch
@@ -208,86 +151,6 @@ def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
     return f"draft-{run_id}"
 
 
-def _validate_overrides(overrides: list[str]) -> None:
-    for override in overrides:
-        if "=" not in override or "." not in override.split("=")[0]:
-            continue
-        key_path = override.split("=", 1)[0]
-        step_name, key = key_path.split(".", 1)
-        if key in _FORBIDDEN_STEP_KEYS:
-            print(
-                f"error: '{key}' is no longer supported (the pipeline-level retry "
-                f"concept was removed). Remove it from steps.{step_name}.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        if key == "max_retries" and step_name not in _LOOPING_STEPS:
-            print(
-                f"error: 'max_retries' has no effect on steps.{step_name} because "
-                f"the step runs once. Remove it.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-
-
-def _apply_overrides(config: dict, overrides: list[str]) -> dict:
-    import copy
-
-    cfg = copy.deepcopy(config)
-    for override in overrides:
-        if "=" not in override or "." not in override.split("=")[0]:
-            print(
-                f"warning: ignoring malformed --set value: {override}", file=sys.stderr
-            )
-            continue
-        key_path, value = override.split("=", 1)
-        step_name, key = key_path.split(".", 1)
-        cfg.setdefault("steps", {}).setdefault(step_name, {})[key] = value
-    return cfg
-
-
-_TIMESTAMP_RE = re.compile(r"^\d{6}-\d{6}$")
-_RUN_ID_CHARS_RE = re.compile(r"^[a-z0-9._-]+$")
-_RUN_ID_BORDER = frozenset("-_.")
-
-
-def _validate_run_id(run_id: str, project_name: str) -> None:
-    if not run_id:
-        print("error: --run-id must not be empty", file=sys.stderr)
-        sys.exit(2)
-    if len(run_id) > 64:
-        print(f"error: --run-id '{run_id}' exceeds 64 characters", file=sys.stderr)
-        sys.exit(2)
-    if not _RUN_ID_CHARS_RE.match(run_id):
-        print(
-            f"error: --run-id '{run_id}' contains invalid characters (allowed: [a-z0-9._-])",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if run_id[0] in _RUN_ID_BORDER or run_id[-1] in _RUN_ID_BORDER:
-        print(
-            f"error: --run-id '{run_id}' must not start or end with '-', '_', or '.'",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if ".." in run_id:
-        print(f"error: --run-id '{run_id}' must not contain '..'", file=sys.stderr)
-        sys.exit(2)
-    if _TIMESTAMP_RE.match(run_id):
-        print(
-            f"error: --run-id '{run_id}' matches the reserved timestamp format (YYMMDD-HHMMSS)",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    run_dir = runs.runs_base() / project_name / run_id
-    if run_dir.exists():
-        print(
-            f"error: run '{run_id}' already exists in project '{project_name}'",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-
 # --- new helpers for create-modes ---
 
 
@@ -321,58 +184,86 @@ def _assert_spec_readable(spec_path: str) -> None:
         sys.exit(2)
 
 
-def _current_head_branch(repo: str) -> str | None:
-    result = subprocess.run(
-        ["git", "symbolic-ref", "--short", "-q", "HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=repo,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip() or None
+def _resolve_worktree_for_existing_branch(
+    repo: str, project: str, branch: str, branch_was_explicit: bool
+) -> tuple[str, str]:
+    paths = _branch_worktrees(repo, branch)
+    canonical = _canonical_worktree_path(project, branch)
+    canonical_str = str(canonical)
+
+    if not paths:
+        return (canonical_str, "worktree")
+
+    if not branch_was_explicit:
+        print(
+            f"error: branch '{branch}' (current HEAD) has a worktree at:",
+            file=sys.stderr,
+        )
+        for p in paths:
+            print(f"       {p}", file=sys.stderr)
+        print(
+            f"       pass '--branch {branch}' explicitly to reuse it, or remove the worktree first",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if len(paths) != 1 or Path(paths[0]).resolve() != canonical.resolve():
+        print(
+            f"error: branch '{branch}' is checked out at non-canonical path(s):",
+            file=sys.stderr,
+        )
+        for p in paths:
+            print(f"       {p}", file=sys.stderr)
+        print(
+            f"       only worktrees at {canonical_str} can be reused; remove the others first",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if not Path(canonical_str).is_dir():
+        print(
+            f"error: branch '{branch}' has a stale worktree registration; directory missing:",
+            file=sys.stderr,
+        )
+        print(f"       {canonical_str}", file=sys.stderr)
+        print(
+            "       run 'git worktree prune' to clean up, then rerun", file=sys.stderr
+        )
+        sys.exit(2)
+
+    head = _current_head_branch(canonical_str)
+    if head is None:
+        print(
+            f"error: worktree {canonical_str} has detached HEAD; refusing to reuse",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if head != branch:
+        print(
+            f"error: worktree {canonical_str} is on branch '{head}', not '{branch}'",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if not _is_working_tree_clean(canonical_str):
+        print("error: worktree is dirty; cannot reuse:", file=sys.stderr)
+        print(f"       {canonical_str}", file=sys.stderr)
+        print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
+        sys.exit(2)
+
+    return (canonical_str, "reuse-existing")
 
 
-def _local_branch_exists(repo: str, branch: str) -> bool:
-    result = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        capture_output=True,
-        cwd=repo,
-    )
-    return result.returncode == 0
-
-
-def _branch_worktrees(repo: str, branch: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
-        cwd=repo,
-    )
-    paths: list[str] = []
-    current_path: str | None = None
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            current_path = line[len("worktree ") :]
-        elif line.startswith("branch refs/heads/") and current_path:
-            wt_branch = line[len("branch refs/heads/") :]
-            if wt_branch == branch:
-                paths.append(current_path)
-    return paths
-
-
-def _canonical_worktree_path(project: str, branch: str) -> Path:
-    return Path.home() / ".draft" / "worktrees" / project / _sanitize_branch(branch)
-
-
-def _is_working_tree_clean(repo: str) -> bool:
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        cwd=repo,
-    )
-    return result.returncode == 0 and result.stdout.strip() == ""
+def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
+    paths = [p for p in _branch_worktrees(repo, branch) if p != repo]
+    if paths:
+        print(
+            f"error: branch '{branch}' is currently checked out in another worktree:",
+            file=sys.stderr,
+        )
+        for p in paths:
+            print(f"       {p}", file=sys.stderr)
+        sys.exit(2)
 
 
 def _base_short_name(base: str) -> str:
@@ -469,110 +360,6 @@ def _assert_no_active_run_on_branch(project: str, branch: str) -> None:
         sys.exit(2)
 
 
-def _resolve_worktree_for_existing_branch(
-    repo: str, project: str, branch: str, branch_was_explicit: bool
-) -> tuple[str, str]:
-    """Decide between fresh-create and reuse for the worktree-mode existing-branch path.
-
-    Returns (wt_dir, worktree_mode) where worktree_mode is "worktree" (will be created)
-    or "reuse-existing" (already at canonical path, validated, will be reused as-is).
-    Calls sys.exit(2) on any refusal."""
-    paths = _branch_worktrees(repo, branch)
-    canonical = _canonical_worktree_path(project, branch)
-    canonical_str = str(canonical)
-
-    if not paths:
-        return (canonical_str, "worktree")
-
-    if not branch_was_explicit:
-        print(
-            f"error: branch '{branch}' (current HEAD) has a worktree at:",
-            file=sys.stderr,
-        )
-        for p in paths:
-            print(f"       {p}", file=sys.stderr)
-        print(
-            f"       pass '--branch {branch}' explicitly to reuse it, or remove the worktree first",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    if len(paths) != 1 or Path(paths[0]).resolve() != canonical.resolve():
-        print(
-            f"error: branch '{branch}' is checked out at non-canonical path(s):",
-            file=sys.stderr,
-        )
-        for p in paths:
-            print(f"       {p}", file=sys.stderr)
-        print(
-            f"       only worktrees at {canonical_str} can be reused; remove the others first",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    if not Path(canonical_str).is_dir():
-        print(
-            f"error: branch '{branch}' has a stale worktree registration; directory missing:",
-            file=sys.stderr,
-        )
-        print(f"       {canonical_str}", file=sys.stderr)
-        print(
-            "       run 'git worktree prune' to clean up, then rerun", file=sys.stderr
-        )
-        sys.exit(2)
-
-    head = _current_head_branch(canonical_str)
-    if head is None:
-        print(
-            f"error: worktree {canonical_str} has detached HEAD; refusing to reuse",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if head != branch:
-        print(
-            f"error: worktree {canonical_str} is on branch '{head}', not '{branch}'",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    if not _is_working_tree_clean(canonical_str):
-        print("error: worktree is dirty; cannot reuse:", file=sys.stderr)
-        print(f"       {canonical_str}", file=sys.stderr)
-        print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
-        sys.exit(2)
-
-    return (canonical_str, "reuse-existing")
-
-
-def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
-    """For --no-worktree: branch must not be checked out in any LINKED worktree."""
-    paths = [p for p in _branch_worktrees(repo, branch) if p != repo]
-    if paths:
-        print(
-            f"error: branch '{branch}' is currently checked out in another worktree:",
-            file=sys.stderr,
-        )
-        for p in paths:
-            print(f"       {p}", file=sys.stderr)
-        sys.exit(2)
-
-
-def _checkout_in_place(repo: str, branch: str) -> None:
-    head = _current_head_branch(repo)
-    if head == branch:
-        return
-    result = subprocess.run(
-        ["git", "checkout", branch],
-        capture_output=True,
-        text=True,
-        cwd=repo,
-    )
-    if result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip()
-        print(f"error: failed to checkout '{branch}': {stderr}", file=sys.stderr)
-        sys.exit(3)
-
-
 def _compose_active_steps(
     worktree_mode: str, pr_mode: str, skip_pr: bool, delete_worktree: bool = False
 ):
@@ -585,7 +372,7 @@ def _compose_active_steps(
         skipped.add("open-pr")
     if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
         skipped.add("delete-worktree")
-    active = [s for s in STEPS if s.name not in skipped]
+    active = [s for s in PIPELINES["create"].steps if s.name not in skipped]
     return active, skipped
 
 
@@ -736,7 +523,8 @@ def run(args) -> int:
 
     # 9. Step configs
     step_configs = {
-        step.name: step_config(config, step.name, step.defaults()) for step in STEPS
+        step.name: step_config(config, step.name, step.defaults())
+        for step in PIPELINES["create"].steps
     }
 
     # 10. Active steps
@@ -757,6 +545,7 @@ def run(args) -> int:
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("pr_mode", pr_mode)
     ctx.set("delete_worktree", args.delete_worktree)
+    ctx.set("pipeline", "create")
     if pr_url is not None:
         ctx.set("pr_url", pr_url)
 
@@ -774,7 +563,14 @@ def run(args) -> int:
     ctx.save()
     started_at = ctx._sessions[-1]["started_at"]
     _print_preamble(
-        run_id, branch, wt_dir, run_dir, started_at, STEPS, skipped_names, worktree_mode
+        run_id,
+        branch,
+        wt_dir,
+        run_dir,
+        started_at,
+        PIPELINES["create"].steps,
+        skipped_names,
+        worktree_mode,
     )
 
     # 14. Lifecycle + engine
@@ -793,7 +589,7 @@ def run(args) -> int:
             f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})",
             file=sys.stderr,
         )
-        rc = _STEP_EXIT_CODES.get(exc.step_name, 1)
+        rc = 1
     except BaseException:
         rc = -1
         raise

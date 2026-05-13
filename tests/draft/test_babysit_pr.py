@@ -3,6 +3,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from draft.steps.babysit_pr import (
     BabysitPrStep,
     _build_prompt,
@@ -11,6 +13,7 @@ from draft.steps.babysit_pr import (
     _render_check_failures,
     _render_verify_commands,
 )
+from pipeline import StepError
 from pipeline.runner import LLMResult
 
 
@@ -123,6 +126,7 @@ def test_prompt_contains_verify_commands_when_configured(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -153,6 +157,7 @@ def test_prompt_no_verify_commands_section_when_empty(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -204,6 +209,7 @@ def test_no_changes_after_agent_sets_verify_errors_and_continues(tmp_path):
         patch("draft.steps.babysit_pr._check_ci", side_effect=ci_side_effect),
         patch("draft.steps.babysit_pr._has_changes", return_value=False),
         patch("draft.steps.babysit_pr._is_branch_clean", return_value=True),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -252,6 +258,7 @@ def test_verify_hooks_fail_sets_errors_no_commit(tmp_path):
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
         patch("draft.steps.babysit_pr._is_branch_clean", return_value=True),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -283,6 +290,7 @@ def test_verify_passes_commits_and_pushes(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -327,6 +335,7 @@ def test_commit_message_fallback_used_and_recorded(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -371,6 +380,7 @@ def test_pre_commit_hook_failure_sets_verify_errors_no_push(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             side_effect=commit_side_effect,
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -424,6 +434,7 @@ def test_get_hooks_called_once_across_attempts(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -705,6 +716,7 @@ def test_e2e_run_llm_receives_failing_checks_block(tmp_path):
             "draft.steps.babysit_pr._run_git_capture_allow_fail",
             return_value=subprocess.CompletedProcess([], 0, b"", b""),
         ),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 
@@ -727,6 +739,7 @@ def test_e2e_no_agent_run_when_no_failures(tmp_path):
             return_value=({"success": 0, "failure": 0, "pending": 1}, []),
         ),
         patch("draft.steps.babysit_pr._is_branch_clean", return_value=False),
+        pytest.raises(StepError),
     ):
         step.run(ctx, engine, lifecycle, MagicMock())
 

@@ -45,7 +45,12 @@ def test_command_list_full_pipeline_shows_5(tmp_path, capsys):
     base = tmp_path / "runs"
     state = {
         "completed": ["worktree-create", "code-spec"],
-        "data": {"worktree_mode": "worktree", "pr_mode": "open", "skip_pr": False},
+        "data": {
+            "worktree_mode": "worktree",
+            "pr_mode": "open",
+            "skip_pr": False,
+            "pipeline": "create",
+        },
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -60,7 +65,7 @@ def test_command_list_skip_pr_shows_2(tmp_path, capsys):
     base = tmp_path / "runs"
     state = {
         "completed": ["worktree-create"],
-        "data": {"skip_pr": True},
+        "data": {"skip_pr": True, "pipeline": "create"},
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -75,7 +80,11 @@ def test_command_list_reuse_existing_shows_4(tmp_path, capsys):
     base = tmp_path / "runs"
     state = {
         "completed": ["code-spec"],
-        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+        "data": {
+            "worktree_mode": "reuse-existing",
+            "pr_mode": "open",
+            "pipeline": "create",
+        },
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -90,7 +99,7 @@ def test_command_list_reuse_pr_shows_4(tmp_path, capsys):
     base = tmp_path / "runs"
     state = {
         "completed": ["worktree-create", "code-spec"],
-        "data": {"worktree_mode": "worktree", "pr_mode": "reuse"},
+        "data": {"worktree_mode": "worktree", "pr_mode": "reuse", "pipeline": "create"},
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -99,7 +108,7 @@ def test_command_list_reuse_pr_shows_4(tmp_path, capsys):
     assert "2/4" in capsys.readouterr().out
 
 
-def test_command_list_legacy_no_keys_shows_5(tmp_path, capsys):
+def test_command_list_no_pipeline_shows_corrupt(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
@@ -111,7 +120,7 @@ def test_command_list_legacy_no_keys_shows_5(tmp_path, capsys):
 
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
-    assert "2/5" in capsys.readouterr().out
+    assert "corrupt" in capsys.readouterr().out
 
 
 def test_command_list_missing_state_shows_dash(tmp_path, capsys):
@@ -191,7 +200,7 @@ def test_command_list_workspace_column_yes(tmp_path, capsys):
     wt.mkdir()
     state = {
         "completed": [],
-        "data": {"wt_dir": str(wt)},
+        "data": {"wt_dir": str(wt), "pipeline": "create"},
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -208,7 +217,7 @@ def test_command_list_workspace_column_no(tmp_path, capsys):
     base = tmp_path / "runs"
     state = {
         "completed": [],
-        "data": {"wt_dir": str(tmp_path / "nonexistent")},
+        "data": {"wt_dir": str(tmp_path / "nonexistent"), "pipeline": "create"},
     }
     _make_list_run(base, "260508-100000", state)
 
@@ -423,7 +432,12 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
         "run_id": "260505-120000",
         "run_dir": str(run_dir),
         "completed": ["create-worktree"],
-        "data": {"branch": "fix", "wt_dir": str(wt_path), "repo": str(tmp_path)},
+        "data": {
+            "branch": "fix",
+            "wt_dir": str(wt_path),
+            "repo": str(tmp_path),
+            "pipeline": "create",
+        },
         "step_data": {},
         "step_configs": {},
         "started_at": "2026-05-05T00:00:00",
@@ -571,7 +585,7 @@ def test_is_run_finished_full_pipeline(tmp_path):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {},
+        "data": {"pipeline": "create"},
     }
     assert r.is_run_finished(state) is True
 
@@ -581,7 +595,7 @@ def test_is_run_finished_missing_pr_babysit(tmp_path):
 
     state = {
         "completed": ["create-worktree", "implement-spec", "push-commits", "open-pr"],
-        "data": {},
+        "data": {"pipeline": "create"},
     }
     assert r.is_run_finished(state) is False
 
@@ -591,7 +605,7 @@ def test_is_run_finished_skip_pr_true(tmp_path):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"skip_pr": True},
+        "data": {"skip_pr": True, "pipeline": "create"},
     }
     assert r.is_run_finished(state) is True
 
@@ -601,7 +615,7 @@ def test_is_run_finished_skip_pr_false(tmp_path):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"skip_pr": False},
+        "data": {"skip_pr": False, "pipeline": "create"},
     }
     assert r.is_run_finished(state) is False
 
@@ -632,14 +646,14 @@ def _full_state(branch="draft/feat"):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": branch},
+        "data": {"branch": branch, "pipeline": "create"},
     }
 
 
 def _partial_state(branch="draft/feat"):
     return {
         "completed": ["create-worktree"],
-        "data": {"branch": branch},
+        "data": {"branch": branch, "pipeline": "create"},
     }
 
 
@@ -1076,17 +1090,35 @@ def test_compose_active_steps_pr_reuse_skips_pr_open():
 # --- create-modes: runs.expected_steps with new keys ---
 
 
+def test_expected_steps_no_pipeline_raises():
+    import draft.runs as r
+    from draft.pipelines import CorruptStateError
+
+    state = {"completed": [], "data": {}}
+    with pytest.raises(CorruptStateError):
+        r.expected_steps(state)
+
+
+def test_expected_steps_unknown_pipeline_raises():
+    import draft.runs as r
+    from draft.pipelines import CorruptStateError
+
+    state = {"completed": [], "data": {"pipeline": "unknown"}}
+    with pytest.raises(CorruptStateError):
+        r.expected_steps(state)
+
+
 def test_expected_steps_legacy_full():
     import draft.runs as r
 
-    state = {"completed": [], "data": {}}
+    state = {"completed": [], "data": {"pipeline": "create"}}
     assert r.expected_steps(state) == r.FULL_PIPELINE_STEPS
 
 
 def test_expected_steps_legacy_skip_pr():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"skip_pr": True}}
+    state = {"completed": [], "data": {"skip_pr": True, "pipeline": "create"}}
     assert r.expected_steps(state) == r.SKIP_PR_STEPS
 
 
@@ -1095,7 +1127,11 @@ def test_expected_steps_no_worktree_open():
 
     state = {
         "completed": [],
-        "data": {"worktree_mode": "no-worktree", "pr_mode": "open"},
+        "data": {
+            "worktree_mode": "no-worktree",
+            "pr_mode": "open",
+            "pipeline": "create",
+        },
     }
     assert r.expected_steps(state) == (
         "implement-spec",
@@ -1108,7 +1144,10 @@ def test_expected_steps_no_worktree_open():
 def test_expected_steps_pr_reuse():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"worktree_mode": "worktree", "pr_mode": "reuse"}}
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "worktree", "pr_mode": "reuse", "pipeline": "create"},
+    }
     assert r.expected_steps(state) == (
         "create-worktree",
         "implement-spec",
@@ -1120,7 +1159,10 @@ def test_expected_steps_pr_reuse():
 def test_expected_steps_no_worktree_skip_pr():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"worktree_mode": "no-worktree", "skip_pr": True}}
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "no-worktree", "skip_pr": True, "pipeline": "create"},
+    }
     assert r.expected_steps(state) == ("implement-spec",)
 
 
@@ -1142,7 +1184,7 @@ def test_find_active_run_on_branch_returns_unfinished(tmp_path):
     run_dir.mkdir(parents=True)
     state = {
         "completed": ["create-worktree"],
-        "data": {"branch": "foo"},
+        "data": {"branch": "foo", "pipeline": "create"},
     }
     (run_dir / "state.json").write_text(json.dumps(state))
 
@@ -1159,7 +1201,7 @@ def test_find_active_run_on_branch_skips_finished(tmp_path):
     run_dir.mkdir(parents=True)
     state = {
         "completed": list(r.FULL_PIPELINE_STEPS),
-        "data": {"branch": "foo"},
+        "data": {"branch": "foo", "pipeline": "create"},
     }
     (run_dir / "state.json").write_text(json.dumps(state))
 
@@ -1176,7 +1218,7 @@ def test_find_active_run_on_branch_skips_other_branch(tmp_path):
     run_dir.mkdir(parents=True)
     state = {
         "completed": ["create-worktree"],
-        "data": {"branch": "other"},
+        "data": {"branch": "other", "pipeline": "create"},
     }
     (run_dir / "state.json").write_text(json.dumps(state))
 
@@ -1198,6 +1240,7 @@ def _continue_state(
     delete_worktree=False,
     skip_pr=False,
     pr_mode="open",
+    pipeline="create",
 ):
     return {
         "run_id": "260506-100000",
@@ -1211,6 +1254,7 @@ def _continue_state(
             "delete_worktree": delete_worktree,
             "skip_pr": skip_pr,
             "pr_mode": pr_mode,
+            "pipeline": pipeline,
         },
         "step_data": {},
         "step_configs": {},
@@ -1575,7 +1619,11 @@ def test_expected_steps_reuse_existing_open():
 
     state = {
         "completed": [],
-        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+        "data": {
+            "worktree_mode": "reuse-existing",
+            "pr_mode": "open",
+            "pipeline": "create",
+        },
     }
     assert r.expected_steps(state) == (
         "implement-spec",
@@ -1590,7 +1638,11 @@ def test_expected_steps_reuse_existing_pr_reuse():
 
     state = {
         "completed": [],
-        "data": {"worktree_mode": "reuse-existing", "pr_mode": "reuse"},
+        "data": {
+            "worktree_mode": "reuse-existing",
+            "pr_mode": "reuse",
+            "pipeline": "create",
+        },
     }
     assert r.expected_steps(state) == ("implement-spec", "push-commits", "babysit-pr")
 
@@ -1600,7 +1652,11 @@ def test_is_run_finished_reuse_existing():
 
     state = {
         "completed": ["implement-spec", "push-commits", "open-pr", "babysit-pr"],
-        "data": {"worktree_mode": "reuse-existing", "pr_mode": "open"},
+        "data": {
+            "worktree_mode": "reuse-existing",
+            "pr_mode": "open",
+            "pipeline": "create",
+        },
     }
     assert r.is_run_finished(state) is True
 
@@ -1760,7 +1816,7 @@ def test_compose_active_steps_skip_pr_with_delete_worktree():
 def test_expected_steps_delete_worktree_appended():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"delete_worktree": True}}
+    state = {"completed": [], "data": {"delete_worktree": True, "pipeline": "create"}}
     result = r.expected_steps(state)
     assert result[-1] == "delete-worktree"
 
@@ -1768,7 +1824,7 @@ def test_expected_steps_delete_worktree_appended():
 def test_expected_steps_delete_worktree_skipped_when_false():
     import draft.runs as r
 
-    state = {"completed": [], "data": {"delete_worktree": False}}
+    state = {"completed": [], "data": {"delete_worktree": False, "pipeline": "create"}}
     assert "delete-worktree" not in r.expected_steps(state)
 
 
@@ -1781,6 +1837,7 @@ def test_expected_steps_delete_worktree_skipped_for_no_worktree():
             "delete_worktree": True,
             "worktree_mode": "no-worktree",
             "skip_pr": True,
+            "pipeline": "create",
         },
     }
     assert "delete-worktree" not in r.expected_steps(state)
@@ -1795,17 +1852,20 @@ def test_expected_steps_delete_worktree_included_for_reuse_existing():
             "delete_worktree": True,
             "worktree_mode": "reuse-existing",
             "pr_mode": "open",
+            "pipeline": "create",
         },
     }
     result = r.expected_steps(state)
     assert result[-1] == "delete-worktree"
 
 
-def test_expected_steps_legacy_delete_worktree_missing_defaults_false():
+def test_expected_steps_no_pipeline_no_delete_worktree():
     import draft.runs as r
+    from draft.pipelines import CorruptStateError
 
     state = {"completed": [], "data": {}}
-    assert "delete-worktree" not in r.expected_steps(state)
+    with pytest.raises(CorruptStateError):
+        r.expected_steps(state)
 
 
 # --- delete-worktree: command_continue ---
@@ -1992,6 +2052,7 @@ def test_command_list_json_valid_row(tmp_path, capsys):
             "branch": "feat/foo",
             "wt_dir": str(wt),
             "pr_url": "https://github.com/org/repo/pull/1",
+            "pipeline": "create",
         },
     }
     _make_list_run(base, "260508-100000", state)
@@ -2055,7 +2116,7 @@ def test_command_list_json_workspace_yes(tmp_path, capsys):
     base = tmp_path / "runs"
     wt = tmp_path / "wt"
     wt.mkdir()
-    state = {"completed": [], "data": {"wt_dir": str(wt)}}
+    state = {"completed": [], "data": {"wt_dir": str(wt), "pipeline": "create"}}
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
@@ -2069,7 +2130,10 @@ def test_command_list_json_workspace_no(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
-    state = {"completed": [], "data": {"wt_dir": str(tmp_path / "gone")}}
+    state = {
+        "completed": [],
+        "data": {"wt_dir": str(tmp_path / "gone"), "pipeline": "create"},
+    }
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
@@ -2226,7 +2290,7 @@ def test_status_done_all_steps_show_done(tmp_path, capsys):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": "main", "wt_dir": None},
+        "data": {"branch": "main", "wt_dir": None, "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2247,7 +2311,7 @@ def test_status_running_partial_shows_active(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+        "data": {"branch": "feat", "wt_dir": "/some/wt", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2286,7 +2350,7 @@ def test_status_stopped_partial_shows_stopped(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+        "data": {"branch": "feat", "wt_dir": "/some/wt", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2331,7 +2395,11 @@ def test_status_pr_url_printed_when_present(tmp_path, capsys):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
+        "data": {
+            "branch": "feat",
+            "pr_url": "https://github.com/org/repo/pull/42",
+            "pipeline": "create",
+        },
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2357,7 +2425,7 @@ def test_status_pr_url_absent_not_printed(tmp_path, capsys):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2376,7 +2444,7 @@ def test_status_wt_dir_absent_shows_dash(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2395,7 +2463,12 @@ def test_status_skipped_steps_excluded_from_table(tmp_path, capsys):
 
     state = {
         "completed": ["implement-spec"],
-        "data": {"branch": "feat", "worktree_mode": "no-worktree", "skip_pr": True},
+        "data": {
+            "branch": "feat",
+            "worktree_mode": "no-worktree",
+            "skip_pr": True,
+            "pipeline": "create",
+        },
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2415,7 +2488,7 @@ def test_status_no_pid_steps_complete_is_done(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"branch": "feat", "skip_pr": True},
+        "data": {"branch": "feat", "skip_pr": True, "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2432,7 +2505,7 @@ def test_status_no_pid_steps_incomplete_is_stopped(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree"],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2503,7 +2576,7 @@ def test_status_json_done_all_steps(tmp_path, capsys):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": "main", "wt_dir": None},
+        "data": {"branch": "main", "wt_dir": None, "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2524,7 +2597,7 @@ def test_status_json_running_partial(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+        "data": {"branch": "feat", "wt_dir": "/some/wt", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2548,7 +2621,7 @@ def test_status_json_stopped_partial(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree", "implement-spec"],
-        "data": {"branch": "feat", "wt_dir": "/some/wt"},
+        "data": {"branch": "feat", "wt_dir": "/some/wt", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2570,7 +2643,7 @@ def test_status_json_pr_url_null_when_absent(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2595,7 +2668,11 @@ def test_status_json_pr_url_present(tmp_path, capsys):
             "open-pr",
             "babysit-pr",
         ],
-        "data": {"branch": "feat", "pr_url": "https://github.com/org/repo/pull/42"},
+        "data": {
+            "branch": "feat",
+            "pr_url": "https://github.com/org/repo/pull/42",
+            "pipeline": "create",
+        },
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2612,7 +2689,7 @@ def test_status_json_pr_url_present(tmp_path, capsys):
 def test_status_json_worktree_null_when_absent(tmp_path, capsys):
     import draft.command_status as cs
 
-    state = {"completed": [], "data": {"branch": "feat"}}
+    state = {"completed": [], "data": {"branch": "feat", "pipeline": "create"}}
     run_dir = _make_status_run(tmp_path, state=state)
 
     with (
@@ -2630,7 +2707,12 @@ def test_status_json_skipped_steps_absent_from_steps_array(tmp_path, capsys):
 
     state = {
         "completed": ["implement-spec"],
-        "data": {"branch": "feat", "worktree_mode": "no-worktree", "skip_pr": True},
+        "data": {
+            "branch": "feat",
+            "worktree_mode": "no-worktree",
+            "skip_pr": True,
+            "pipeline": "create",
+        },
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2651,7 +2733,7 @@ def test_status_json_no_json_unchanged(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2672,7 +2754,7 @@ def test_status_text_includes_logs_started_finished_runtime(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
         "sessions": [
             {
                 "started_at": "2025-01-01 10:00:00 UTC",
@@ -2702,7 +2784,7 @@ def test_status_text_empty_sessions_shows_dashes_and_zero(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2725,7 +2807,7 @@ def test_status_text_unclosed_trailing_session_uses_heartbeat_for_runtime(
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
         "sessions": [
             {
                 "started_at": "2025-01-01 10:00:00 UTC",
@@ -2754,7 +2836,7 @@ def test_status_json_includes_logs_started_finished_runtime(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
         "sessions": [
             {
                 "started_at": "2025-01-01 10:00:00 UTC",
@@ -2784,7 +2866,7 @@ def test_status_json_empty_sessions_emits_nulls_and_zero(tmp_path, capsys):
 
     state = {
         "completed": [],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
     }
     run_dir = _make_status_run(tmp_path, state=state)
 
@@ -2821,7 +2903,7 @@ def test_status_state_absent_does_not_add_new_keys(tmp_path, capsys):
 def _make_status_state_with_cost(cost):
     return {
         "completed": ["create-worktree"],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
         "sessions": [
             {
                 "command": "create",
@@ -2933,7 +3015,7 @@ def test_status_json_cost_per_step_sum_across_sessions(tmp_path, capsys):
 
     state = {
         "completed": ["create-worktree"],
-        "data": {"branch": "feat"},
+        "data": {"branch": "feat", "pipeline": "create"},
         "sessions": [
             {
                 "command": "create",
