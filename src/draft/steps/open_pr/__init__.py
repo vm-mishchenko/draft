@@ -122,7 +122,12 @@ class OpenPrStep(Step):
                 log_path=claude_log,
                 step_metrics=step_metrics,
                 allowed_tools=[],
-                extra_args=["--permission-mode", "acceptEdits"],
+                extra_args=[
+                    "--permission-mode",
+                    "acceptEdits",
+                    "--model",
+                    "claude-3-5-haiku-latest",
+                ],
                 timeout=cfg["timeout"],
             )
             if result.rc != 0:
