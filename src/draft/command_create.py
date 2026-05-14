@@ -599,6 +599,15 @@ def run(args) -> int:
         worktree_mode,
     )
 
+    try:
+        from draft.steps.implement_spec import original_spec
+
+        label = original_spec.preamble_label(ctx)
+        if label:
+            print(f"original-spec: attached from {label}", file=sys.stderr)
+    except Exception:
+        pass
+
     # 14. Lifecycle + engine
     engine = Runner()
     lifecycle = DraftLifecycle(

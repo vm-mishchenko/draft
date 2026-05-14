@@ -8,6 +8,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from draft.hooks import HookResult, _run_hook_cmd
+from draft.steps.implement_spec import original_spec
 from draft.steps.implement_spec._live_status import LiveStatusSummarizer
 from pipeline import Step, StepError
 from pipeline.runner import TIMEOUT_EXIT
@@ -30,7 +31,7 @@ def _render_verify_commands(entries: list[dict]) -> str:
         return ""
     block = "\n".join(cmds)
     return (
-        "## Verify commands\n\n"
+        "## Verified commands\n\n"
         "Draft will run the following after your changes. "
         "Run them yourself before finishing if practical.\n\n"
         f"```bash\n{block}\n```"
@@ -39,16 +40,33 @@ def _render_verify_commands(entries: list[dict]) -> str:
 
 def _render_prompt(ctx, template: str, verify_commands: str) -> str:
     spec = ctx.get("spec", "")
+    spec_section = f"## Current Spec\n\n{spec}"
     verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
     if verify_errors:
-        verify_section = f"## Test failures\n\n{verify_errors}\n\nFix the above failures before committing."
+        verify_section = f"## Verified errors\n\n{verify_errors}\n\nFix the above failures before committing."
     else:
         verify_section = ""
+    original_spec_section = original_spec.render_original_spec(ctx)
     return (
-        template.replace("{{SPEC}}", spec)
-        .replace("{{VERIFY_COMMANDS}}", verify_commands)
+        template.replace("{{VERIFY_COMMANDS}}", verify_commands)
+        .replace("{{ORIGINAL_SPEC}}", original_spec_section)
+        .replace("{{SPEC}}", spec_section)
         .replace("{{VERIFY_ERRORS}}", verify_section)
     )
+
+
+def _log_prompt(log_path, prompt: str, attempt: int, max_attempts: int) -> None:
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    block = (
+        f"=== implement-spec prompt (attempt {attempt}/{max_attempts}) @ {ts} ===\n"
+        f"{prompt}\n"
+        f"=== end prompt ===\n\n"
+    )
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(block)
+    except OSError as exc:
+        print(f"warning: could not write prompt log {log_path}: {exc}", file=sys.stderr)
 
 
 def _has_changes(cwd: str) -> bool:
@@ -355,8 +373,15 @@ class ImplementSpecStep(Step):
                         prefix=prefix,
                     ).start()
                 try:
+                    prompt = _render_prompt(ctx, impl_template, verify_commands)
+                    _log_prompt(
+                        ctx.log_path(self.name),
+                        prompt,
+                        attempt=attempt,
+                        max_attempts=cfg["max_retries"],
+                    )
                     engine.run_llm(
-                        prompt=_render_prompt(ctx, impl_template, verify_commands),
+                        prompt=prompt,
                         cwd=wt_dir,
                         log_path=ctx.log_path(self.name),
                         step_metrics=step_metrics,

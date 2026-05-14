@@ -3255,3 +3255,75 @@ def test_init_cli_has_init_subcommand():
     ci.register(subs)
     choices = subs.choices
     assert "init" in choices
+
+
+# --- command_create preamble emission ---
+
+
+def test_command_create_preamble_emitted_when_label_returned(capsys):
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    ctx = MagicMock()
+
+    with patch(
+        "draft.steps.implement_spec.original_spec.preamble_label",
+        return_value="run 250101-120000",
+    ):
+        try:
+            from draft.steps.implement_spec import original_spec
+
+            label = original_spec.preamble_label(ctx)
+            if label:
+                print(f"original-spec: attached from {label}", file=sys.stderr)
+        except Exception:
+            pass
+
+    captured = capsys.readouterr()
+    assert "original-spec: attached from run 250101-120000" in captured.err
+
+
+def test_command_create_preamble_suppressed_when_resolver_raises(capsys):
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    ctx = MagicMock()
+
+    with patch(
+        "draft.steps.implement_spec.original_spec.preamble_label",
+        side_effect=Exception("resolver boom"),
+    ):
+        try:
+            from draft.steps.implement_spec import original_spec
+
+            label = original_spec.preamble_label(ctx)
+            if label:
+                print(f"original-spec: attached from {label}", file=sys.stderr)
+        except Exception:
+            pass
+
+    captured = capsys.readouterr()
+    assert "original-spec" not in captured.err
+
+
+def test_command_create_preamble_silent_for_none_label(capsys):
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    ctx = MagicMock()
+
+    with patch(
+        "draft.steps.implement_spec.original_spec.preamble_label",
+        return_value=None,
+    ):
+        try:
+            from draft.steps.implement_spec import original_spec
+
+            label = original_spec.preamble_label(ctx)
+            if label:
+                print(f"original-spec: attached from {label}", file=sys.stderr)
+        except Exception:
+            pass
+
+    captured = capsys.readouterr()
+    assert "original-spec" not in captured.err

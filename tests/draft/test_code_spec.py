@@ -11,6 +11,7 @@ from draft.steps.implement_spec import (
     _format_suggested_failures,
     _generate_commit_message,
     _load_template,
+    _log_prompt,
     _parse_suggestions,
     _render_prompt,
     _render_verify_commands,
@@ -120,7 +121,7 @@ def test_render_prompt_empty_verify_commands_collapses_marker(tmp_path):
 
     prompt = _render_prompt(ctx, template, "")
     assert "{{VERIFY_COMMANDS}}" not in prompt
-    assert "## Verify commands" not in prompt
+    assert "## Verified commands" not in prompt
 
 
 def test_render_prompt_template_without_verify_commands_marker(tmp_path):
@@ -179,7 +180,7 @@ def test_render_verify_commands_none_like_input():
 
 def test_render_verify_commands_single_entry():
     result = _render_verify_commands([{"cmd": "make test"}])
-    assert "## Verify commands" in result
+    assert "## Verified commands" in result
     assert "Run them yourself before finishing if practical" in result
     assert "```bash" in result
     assert "make test" in result
@@ -334,7 +335,7 @@ def test_run_prompt_contains_verify_commands_when_configured(tmp_path):
         step.run(ctx, engine, lifecycle, MagicMock())
 
     prompt = engine.run_llm.call_args[1]["prompt"]
-    assert "## Verify commands" in prompt
+    assert "## Verified commands" in prompt
     assert "make test" in prompt
 
 
@@ -1466,3 +1467,189 @@ def test_bundled_summarize_status_has_tail_placeholder():
         files("draft.steps.implement_spec").joinpath("summarize_status.md").read_text()
     )
     assert "{{TAIL}}" in content
+
+
+# --- heading rename tests ---
+
+
+def test_render_verify_commands_heading_is_verified_commands():
+    result = _render_verify_commands([{"cmd": "make lint"}])
+    assert result.startswith("## Verified commands")
+
+
+def test_render_prompt_verify_errors_section_uses_verified_errors_heading(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = "some error"
+
+    prompt = _render_prompt(ctx, template, "")
+    assert "## Verified errors" in prompt
+    assert "## Test failures" not in prompt
+
+
+# --- _render_prompt four-placeholder tests ---
+
+
+def test_render_prompt_substitutes_spec_with_current_spec_heading(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "/path/to/spec.md"
+    ctx.step_get.return_value = ""
+
+    prompt = _render_prompt(ctx, template, "")
+    assert "## Current Spec" in prompt
+    assert "/path/to/spec.md" in prompt
+    assert "{{SPEC}}" not in prompt
+
+
+def test_render_prompt_never_contains_spec_placeholder():
+    bundled = _load_template({})
+    ctx = MagicMock()
+    ctx.get.return_value = "the spec"
+    ctx.step_get.return_value = ""
+
+    prompt = _render_prompt(ctx, bundled, "")
+    assert "{{SPEC}}" not in prompt
+    assert "## Current Spec" in prompt
+
+
+def test_render_prompt_substitutes_original_spec(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text(
+        "{{ORIGINAL_SPEC}}\n{{SPEC}}\n{{VERIFY_COMMANDS}}\n{{VERIFY_ERRORS}}"
+    )
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.side_effect = lambda key, default=None: {
+        "spec": "my-spec",
+        "branch_source": "existing",
+        "branch": "my-branch",
+        "project": "proj",
+        "base_branch": "origin/main",
+    }.get(key, default)
+    ctx.step_get.return_value = ""
+
+    from unittest.mock import patch
+
+    with patch(
+        "draft.steps.implement_spec.original_spec.render_original_spec",
+        return_value="## Original spec\n\nsome context",
+    ):
+        prompt = _render_prompt(ctx, template, "")
+
+    assert "## Original spec" in prompt
+    assert "some context" in prompt
+    assert "{{ORIGINAL_SPEC}}" not in prompt
+
+
+def test_render_prompt_custom_template_without_original_spec_still_runs(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec-content"
+    ctx.step_get.return_value = ""
+
+    prompt = _render_prompt(ctx, template, "")
+    assert "spec-content" in prompt
+    assert "{{SPEC}}" not in prompt
+
+
+# --- _log_prompt tests ---
+
+
+def test_log_prompt_appends_bracketed_block(tmp_path):
+    log_path = tmp_path / "implement-spec.log"
+    _log_prompt(log_path, "my prompt text", attempt=1, max_attempts=3)
+    content = log_path.read_text()
+    assert "=== implement-spec prompt (attempt 1/3) @" in content
+    assert "my prompt text" in content
+    assert "=== end prompt ===" in content
+
+
+def test_log_prompt_two_retries_produce_two_blocks(tmp_path):
+    log_path = tmp_path / "implement-spec.log"
+    _log_prompt(log_path, "first prompt", attempt=1, max_attempts=2)
+    _log_prompt(log_path, "second prompt", attempt=2, max_attempts=2)
+    content = log_path.read_text()
+    assert content.index("attempt 1/2") < content.index("attempt 2/2")
+    assert "first prompt" in content
+    assert "second prompt" in content
+
+
+def test_log_prompt_oserror_prints_warning_and_continues(tmp_path, capsys):
+    log_path = tmp_path / "implement-spec.log"
+
+    with patch("builtins.open", side_effect=OSError("permission denied")):
+        _log_prompt(log_path, "prompt", attempt=1, max_attempts=1)
+
+    captured = capsys.readouterr()
+    assert "warning" in captured.err
+    assert "permission denied" in captured.err
+
+
+def test_log_prompt_called_before_run_llm(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60}
+    log_path = tmp_path / "implement-spec.log"
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    ctx.log_path.return_value = log_path
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    call_order = []
+
+    def fake_log_prompt(*a, **kw):
+        call_order.append("log")
+
+    llm_result = MagicMock()
+    llm_result.rc = 0
+    llm_result.final_text = "commit msg"
+
+    def fake_run_llm(*a, **kw):
+        call_order.append("llm")
+        return llm_result
+
+    engine = MagicMock()
+    stage_ctx = MagicMock()
+    stage_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    stage_ctx.__exit__ = MagicMock(return_value=False)
+    engine.stage.return_value = stage_ctx
+    engine.run_llm.side_effect = fake_run_llm
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._log_prompt", side_effect=fake_log_prompt
+        ) as mock_log,
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    assert call_order == ["log", "llm"]
+    mock_log.assert_called_once()
+
+
+# --- bundled template markers ---
+
+
+def test_bundled_implement_spec_has_original_spec_marker():
+    bundled = _load_template({})
+    assert "{{ORIGINAL_SPEC}}" in bundled
