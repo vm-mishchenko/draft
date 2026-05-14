@@ -1,25 +1,40 @@
 # draft
 
-CLI that takes a spec, runs it through an AI-powered pipeline, opens a draft pull request, and watches CI until it goes green.
+CLI that implements a spec, opens a PR, and watches CI until green.
 
 ```shell
 draft create spec.md
 ```
 
-## Table of Content
+## Table of Contents
 
-- [Install](#install)
+- [Features](#features)
 - [Requirements](#requirements)
+- [Install](#install)
 - [Commands](#commands)
-- [How it works](#how-it-works)
-- [Use Cases](#use-cases)
 - [Config](#config)
 
-## Install
+## Features
 
-- Clone and `cd` into the repo
-- Run `make setup` and put the venv on your PATH (the command prints where it is)
-- Nuclear option: `make clean && make setup`
+- Project-agnostic — no assumptions about language, framework, or build system
+- Hooks to run custom shell scripts at every pipeline stage
+- Configurable quality checks the generated code must pass
+- Discovers and runs tests for the affected files
+- Code review by a separate agent
+- Configurable PR templates, execution timeouts, and retry attempts
+- Log files for every step and hook
+- Resumable runs — stop and continue at any point
+- Tracks time and cost spent on each spec
+
+Steps in order:
+
+- `create-worktree` — isolated copy of the repo on a new branch
+- `implement-spec` — agent edits code and retries until your checks go green
+- `review-implementation` — second agent reviews implementation
+- `push-commits` — pushes the branch to the remote
+- `open-pr` — opens a draft PR on GitHub
+- `babysit-pr` — watches CI on the PR; failing checks are fed back to the agent until green
+- `delete-worktree` — removes the worktree on success; off by default
 
 ## Requirements
 
@@ -28,8 +43,16 @@ draft create spec.md
 - [`claude`](https://docs.anthropic.com/en/docs/claude-code) CLI, authenticated
 - [`gh`](https://cli.github.com/) CLI, authenticated against the target repo
 
+## Install
+
+- Clone and `cd` into the repo
+- Run `make setup` and put the venv on your PATH (the command prints where it is)
+- Nuclear option: `make clean && make setup`
+
+
 ## Commands
 
+- [draft init](#draft-init) — create a default `.draft/config.yaml` in the current repo
 - [draft list](#draft-list) — list recent runs
 - [draft status](#draft-status) — show status of a single run
 - [draft create](#draft-create) — start a new run from a spec or prompt
@@ -39,21 +62,27 @@ draft create spec.md
 - [draft delete](#draft-delete) — remove a single run
 - [draft prune](#draft-prune) — bulk-delete finished runs
 
+### draft init
+
+Create `<repo>/.draft/config.yaml` populated with default `timeout` and `max_retries` for every step. Must be run inside a git repository. Fails if `.draft/config.yaml` already exists.
+
+```shell
+draft init
+```
+
 ### draft list
 
-List the 15 most recent runs across all projects. Runs are ordered by `started_at` (from `state.json`), so custom run ids sort correctly by recency.
+List the 15 most recent runs across all projects.
 
-```
+```shell
 draft list
 ```
 
-No options.
-
 ### draft status
 
-Show the status of a single run: run-level state, step-by-step progress, branch, worktree path, and PR URL.
+Show the status of a single run.
 
-```
+```shell
 draft status <run-id>
 ```
 
@@ -65,42 +94,30 @@ draft status <run-id>
 
 Start a fresh run from a spec file or inline prompt.
 
-```
+```shell
 draft create <spec-path>
-draft create --prompt "TEXT"
 ```
 
 **Arguments**
 
 - `spec-path` — path to the spec file; omit when using `--prompt`
 - `--prompt TEXT` — inline prompt text instead of a spec file
-- `--run-id NAME` — custom run id instead of the auto-generated timestamp; allowed characters: `[a-z0-9._-]`, 1–64 chars, must not start or end with `-`, `_`, or `.`, must not contain `..` or match `YYMMDD-HHMMSS`
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp
 - `--from BRANCH` — base branch for the new worktree (default: `origin/main` or `origin/master`)
 - `--branch [NAME]` — use an existing local branch; omit `NAME` to use current `HEAD`
-- `--skip-pr` — stop after code generation; skip push and PR steps
+- `--skip-pr` — stop the run after code generation; skip push and PR steps
 - `--no-worktree` — run in the main repo instead of a linked worktree; requires `--branch`
 - `--delete-worktree` — remove the worktree after the run succeeds
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 
 `--branch` and `--from` are mutually exclusive. `--delete-worktree` and `--no-worktree` are mutually exclusive.
 
-**Example with custom run id**
-
-```
-draft create spec.md --run-id auth-refactor
-draft continue auth-refactor
-draft status auth-refactor
-draft delete auth-refactor
-```
-
 ### draft babysit
 
-Watch CI on an existing PR and feed failing checks back to the agent until every check is green or the retry budget is exhausted. Use this when a PR already exists (opened manually or by another tool) and you want `draft` to take over CI babysitting without rerunning code generation.
+Watch CI on an existing PR and feed failing checks back to the agent until every check is green or the retry budget is exhausted.
 
-```
+```shell
 draft babysit <pr>
-draft babysit <pr> --spec path/to/spec.md
-draft babysit <pr> --no-worktree
 ```
 
 **Arguments**
@@ -109,19 +126,17 @@ draft babysit <pr> --no-worktree
 - `--spec PATH` — path to a spec file used as context for the fixer; defaults to the PR body
 - `--no-worktree` — run in the main repo instead of a linked worktree
 - `--delete-worktree` — remove the worktree after the run succeeds
-- `--run-id NAME` — custom run id instead of the auto-generated timestamp; same character rules as `draft create`
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 
-`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head (sync with `gh pr checkout <pr>` if not). If CI is already green, the command exits without running the pipeline.
+`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. If CI is already green, the command exits without running the pipeline.
 
 ### draft fix-pr
 
 Apply a single round of fixes to failing PR checks locally. The agent edits the working tree and creates a commit, but `draft` does not push and does not poll checks afterwards. Use this when you want to inspect or hand-edit the fix before publishing it.
 
-```
+```shell
 draft fix-pr <pr>
-draft fix-pr <pr> --watch
-draft fix-pr <pr> --no-worktree
 ```
 
 **Arguments**
@@ -130,31 +145,30 @@ draft fix-pr <pr> --no-worktree
 - `--spec PATH` — path to a spec file used as context for the fixer; defaults to the PR body
 - `--no-worktree` — run in the main repo instead of a linked worktree
 - `--delete-worktree` — remove the worktree after the run succeeds
-- `--run-id NAME` — custom run id instead of the auto-generated timestamp; same character rules as `draft create`
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 - `--watch` — wait for the first failing check to appear instead of exiting early when CI is pending or has no failures
 
-`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. Without `--watch`, the command exits early if CI is green (`0`), has no configured checks (`2`), or is still pending (`2`); with `--watch`, it polls until a failure appears, the PR head moves on the remote, or `fix-pr.watch_timeout` elapses (`124`).
+`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. Without `--watch`, the command exits early if CI is green, has no configured checks, or is still pending; with `--watch`, it polls until a failure appears, the PR head moves on the remote, or watch timeout elapses.
 
 ### draft continue
 
 Resume a stopped or failed run.
 
-```
-draft continue [run-id]
+```shell
+draft continue <run-id>
 ```
 
 **Arguments**
 
-- `run-id` — run to resume; defaults to the most recent run (determined by `started_at`, not id sort)
+- `run-id` — run to resume; defaults to the most recent run
 
 ### draft delete
 
 Remove a single run's state directory and its linked git worktree.
 
-```
+```shell
 draft delete <run-id>
-draft delete <run-id> --delete-branch
 ```
 
 **Arguments**
@@ -166,7 +180,7 @@ draft delete <run-id> --delete-branch
 
 Bulk-delete finished runs. By default operates on the current project.
 
-```
+```shell
 draft prune
 draft prune --yes
 draft prune --dry-run
@@ -185,163 +199,158 @@ draft prune --delete-branch
 - `--all-projects` — operate across every project under `~/.draft/runs/`; mutually exclusive with `--project`
 - `--delete-branch` — also delete the local git branch for each pruned run
 
-## How it works
-
-`draft` turns a spec or prompt into a merge-ready pull request without you babysitting it. It's project-agnostic — no assumptions about language, framework, or build system. A run walks through a fixed sequence of steps. If any step fails, the run stops at that point and `draft continue` picks up where it left off.
-
-Steps in order:
-
-- `create-worktree` — sets up an isolated copy of your repo on a new branch. Your current checkout is never touched, so you can keep working on something else while a run is in progress.
-- `implement-spec` — the agent reads your spec and edits code. After each attempt `draft` runs your verification commands (tests, linters, anything you configure under `hooks.verify`); failures are handed back to the agent for another attempt. When verification passes, a second agent run drafts a commit message and `draft` creates the commit.
-- `push-commits` — publishes the new branch to your remote.
-- `open-pr` — composes a PR title and body from the spec and opens a draft pull request on GitHub.
-- `babysit-pr` — watches CI. Every failing check is fed back to the agent for a fix; the loop continues until every check is green or the retry budget is exhausted.
-- `delete-worktree` — removes the isolated working copy when the run is done. Off by default; opt in per run with `--delete-worktree`.
-
-Every step exposes lifecycle hooks where you can attach custom shell commands — bootstrap the environment, run your tests, send notifications — without forking `draft`. See [Config](#config) for the full reference.
-
-`--skip-pr` stops the run after `implement-spec`. The commits stay on a local branch; nothing is pushed and no PR is opened.
-
-## Use Cases
-
-- [Spec or prompt to PR](#spec-or-prompt-to-pr) — generate code and open a draft PR
-- [Spec or prompt to commit](#spec-or-prompt-to-commit) — generate code locally without pushing
-- [Continue after failure](#continue-after-failure) — resume a stopped or failed run
-- [Iterate on an existing branch](#iterate-on-an-existing-branch) — run against a branch that already has work
-- [Clean up finished runs](#clean-up-finished-runs) — remove finished runs in bulk
-
-### Spec or prompt to PR
-
-Write a spec file describing the change, then run:
-
-```
-draft create path/to/spec.md
-```
-
-Or skip the file and pass an inline description:
-
-```
-draft create --prompt "add a health-check endpoint"
-```
-
-`draft` creates a worktree on a new branch, runs `claude` against the spec until the code is clean and tests pass, pushes the branch, opens a draft PR, then polls CI and asks `claude` to fix any failures until every check goes green.
-
-### Spec or prompt to commit
-
-Use `--skip-pr` to stop after code generation. No push or PR is created; the commits land on a local branch in a worktree.
-
-```
-draft create path/to/spec.md --skip-pr
-```
-
-Add `--delete-worktree` to clean up the worktree automatically once the commits are done:
-
-```
-draft create path/to/spec.md --skip-pr --delete-worktree
-```
-
-### Continue after failure
-
-If a run stops partway through (network error, CI timeout, etc.), resume it:
-
-```
-draft continue
-```
-
-To resume a specific run rather than the most recent one:
-
-```
-draft continue 260506-143201
-```
-
-### Iterate on an existing branch
-
-Point `draft` at a branch that already has some work on it. `draft` reuses or creates the canonical worktree for that branch and, if a draft PR is already open, skips straight to babysitting CI.
-
-```
-draft create path/to/spec.md --branch my-feature-branch
-```
-
-Use current `HEAD` without typing the branch name:
-
-```
-draft create path/to/spec.md --branch
-```
-
-### Clean up finished runs
-
-Remove all successfully finished runs for the current project:
-
-```
-draft prune
-```
-
-Preview what would be deleted:
-
-```
-draft prune --dry-run
-```
-
-Remove runs for every project and also delete their branches:
-
-```
-draft prune --all-projects --delete-branch --yes
-```
-
 ## Config
 
-Project config: `.draft/config.yaml`
-Global config: `~/.draft/config.yaml`
+Config files:
+
+- Project: `.draft/config.yaml`
+- Global: `~/.draft/config.yaml`
 
 Project values override global; both merge on top of each step's defaults. `--set <step>.<key>=<value>` overrides a single field for one run.
+
+General configuration structure:
+```yaml
+steps:
+  create-worktree:
+    # step configuration
+  ...
+```
+
+Configuration for each pipeline step.
+
+### create-worktree
 
 ```yaml
 steps:
   create-worktree:
-    hooks:
-      post:
-        - cmd: pwd
-  implement-spec:
-    max_retries: 10
-    timeout: 1200
-    hooks:
-      pre:
-        - cmd: make setup
-      verify:
-        - cmd: make test
-  open-pr:
-    title_prefix: "PROJ-12345: "
-  babysit-pr:
-    checks_delay: 30
+    timeout: 60
 ```
-
-### Step fields
-
-Common fields (all steps):
 
 - `timeout` — per-attempt timeout in seconds
 
-Step-specific fields:
+### implement-spec
 
-- `implement-spec.max_retries` — maximum implementation attempts before failing the step
-- `babysit-pr.max_retries` — maximum babysit iterations before giving up
-- `open-pr.title_prefix` — string prepended to the PR title
-- `open-pr.pr_body_template` — path to a file used as structural guidance for the PR body; supports `~` and is resolved relative to the project root; contents are inlined into the prompt (not passed as a path)
-- `babysit-pr.checks_delay` — seconds to wait before the next CI poll
-- `implement-spec.prompt_template` — path to a file that fully replaces the built-in implement-spec prompt; supports `~` and is resolved relative to the project root
+```yaml
+steps:
+  implement-spec:
+    max_retries: 10
+    timeout: 1200
+    suggest_extra_checks: true
+    max_checks: 5
+    per_check_timeout: 120
+    suggester_timeout: 120
+    suggester_total_budget: 300
+    prompt_template: prompts/my_implement.md
+```
 
-Defaults per step:
+- `max_retries` — max implementation attempts before failing the step
+- `timeout` — per-attempt timeout in seconds
+- `suggest_extra_checks` — let an LLM propose extra spec-scoped checks after verify hooks pass
+- `max_checks` — cap on suggested checks per attempt
+- `per_check_timeout` — per-suggested-check timeout in seconds
+- `suggester_timeout` — per-call timeout for the suggester LLM
+- `suggester_total_budget` — total time budget for suggester calls per attempt
+- `prompt_template` — path to a file that fully replaces the built-in prompt; supports `~`; resolved relative to project root; no default
 
-- `create-worktree`: `timeout=60`
-- `implement-spec`: `max_retries=10`, `timeout=1200`
-- `push-commits`: `timeout=120`
-- `open-pr`: `timeout=300`, `title_prefix=""`
-- `babysit-pr`: `max_retries=100`, `timeout=1200`, `checks_delay=30`
-- `delete-worktree`: `timeout=60`
+Step-specific hook event:
+
+- `verify` — runs after each agent attempt, before the commit. Non-zero output is fed back into the next attempt as test failures, and the failing changes stay in the working tree.
+
+```yaml
+steps:
+  implement-spec:
+    hooks:
+      verify:
+        - cmd: make test
+        - cmd: make lint
+```
+
+For common hook events (`pre`, `post`, `on_success`, `on_error`) see [Hooks](#hooks).
+
+### review-implementation
+
+```yaml
+steps:
+  review-implementation:
+    cmd: ""
+    max_retries: 10
+    timeout: 300
+    suggest_extra_checks: true
+```
+
+- `cmd` — command that invokes the review agent; `draft` has no default review implementation, so generating the review is fully up to this command; it should print review feedback in free-text format to stdout, and that output is fed back to the agent for consideration
+- `max_retries` — max review-and-fix attempts before failing the step
+- `timeout` — per-attempt timeout in seconds
+- `suggest_extra_checks` — let an LLM propose extra checks before committing review fixes
+
+### push-commits
+
+```yaml
+steps:
+  push-commits:
+    timeout: 120
+```
+
+- `timeout` — per-attempt timeout in seconds
+
+### open-pr
+
+```yaml
+steps:
+  open-pr:
+    timeout: 300
+    title_prefix: ""
+    pr_body_template: .draft/pr-template.md
+```
+
+- `timeout` — per-attempt timeout in seconds
+- `title_prefix` — string prepended to the PR title
+- `pr_body_template` — path to structural guidance for the PR body; supports `~`; resolved relative to project root; contents are inlined into the prompt; no default
+
+### babysit-pr
+
+```yaml
+steps:
+  babysit-pr:
+    max_retries: 100
+    timeout: 1200
+    checks_delay: 60
+```
+
+- `max_retries` — max babysit iterations before giving up
+- `timeout` — per-attempt timeout in seconds
+- `checks_delay` — seconds to wait before the next CI poll
+
+Step-specific hook event:
+
+- `verify` — runs locally after the agent fixes failing CI checks, before the fix is pushed. Non-zero output is fed back into the next attempt as test failures.
+
+```yaml
+steps:
+  babysit-pr:
+    hooks:
+      verify:
+        - cmd: make test
+        - cmd: make lint
+```
+
+For common hook events (`pre`, `post`, `on_success`, `on_error`) see [Hooks](#hooks).
+
+### delete-worktree
+
+```yaml
+steps:
+  delete-worktree:
+    timeout: 60
+```
+
+- `timeout` — per-attempt timeout in seconds
 
 ### Hooks
 
-A hook is a shell command attached to a step lifecycle event. Hooks live under `steps.<step-name>.hooks.<event>` and run sequentially; the first non-zero exit aborts the chain and fails the step.
+A hook is a shell command attached to a step lifecycle event. Hooks run sequentially; the first non-zero exit aborts the chain.
+
+Some steps also expose step-specific events on top of the common ones below. See the corresponding step configuration section.
 
 ```yaml
 steps:
@@ -350,10 +359,8 @@ steps:
       pre:
         - cmd: make setup
           timeout: 60
-      verify:
-        - cmd: make test
-      on_error:
-        - cmd: notify-slack
+        - cmd: pip install -r requirements-dev.txt
+        - cmd: ./scripts/seed-db.sh
 ```
 
 Entry fields:
@@ -366,85 +373,4 @@ Events available on every step:
 - `pre` — before the step runs
 - `post` — after the step finishes, success or failure
 - `on_success` — after the step succeeds
-- `on_error` — after the step raises a `StepError`
-
-Step-specific events:
-
-- `implement-spec.verify` — invoked after the agent edits the working tree, before draft commits; non-zero output is fed back into the next implement-spec attempt as test failures, and the failing changes stay in the working tree.
-
-### Live status during implement
-
-While the implement agent runs, the stage status line is updated every 20 seconds with a 1–4 word summary generated by a cheap `claude-3-5-haiku-latest` call reading the last 4 KiB of `implement-spec.log`. The live status is only shown when stdout is a TTY; in CI or when piped, the status stays at the static `implementing` label. The additional cost (roughly $0.16 per implement-spec run) is rolled into the existing `implement-spec` step metrics visible in `draft status`.
-
-### LLM-suggested extra checks
-
-After every static verify hook passes on an attempt, `implement-spec` (by default) makes one additional LLM call to propose a small set of spec-scoped lightweight checks, then runs them as an extra gate before committing. Any failure is fed back to the implement agent for the next retry, exactly like a static verify failure.
-
-**Security note:** the LLM-suggested commands run verbatim in the worktree under `shell=True`. This is the same threat model as user-configured verify hooks, except the commands originate from the LLM rather than the user. The suggester is given only `Read` tool access; it cannot execute the commands it proposes. All commands are logged to `implement-spec.suggested.log` before execution. To opt out:
-
-```yaml
-steps:
-  implement-spec:
-    suggest_extra_checks: false
-```
-
-When `suggest_extra_checks` is `false`, no extra LLM call is made, no additional log files are created, and behaviour is identical to before this feature was introduced.
-
-### Custom implement-spec prompt
-
-Set `implement-spec.prompt_template` to replace the built-in prompt with your own file.
-
-**Template contract**
-
-- `{{SPEC}}` is required — draft substitutes the spec content here.
-- `{{VERIFY_COMMANDS}}` is optional — draft substitutes the list of configured `steps.implement-spec.hooks.verify` commands here as a fenced bash block; omit it to suppress the section (no warning). The rendered block is informational; the agent is encouraged but not required to run the commands before finishing.
-- `{{VERIFY_ERRORS}}` is recommended — draft substitutes verify hook failures here on retries; omitting it means Claude will not see failure output and a warning is printed.
-- Your template must not instruct the agent to commit; draft creates the commit. Including a "commit your work" line will cause the agent to commit, leaving the working tree clean, and the step will loop until max_retries.
-
-**Path resolution**
-
-The path is expanded with `~` support, then resolved relative to the project root (the directory containing `.draft/`). The resolved absolute path is snapshotted into `state.json` at `draft create` time; `draft continue` uses that snapshot. If the file is removed between create and continue, the step fails with an error naming the path.
-
-**Precedence**
-
-Default built-in → `~/.draft/config.yaml` → `.draft/config.yaml` → `--set implement-spec.prompt_template=<path>`
-
-**Example**
-
-```yaml
-steps:
-  implement-spec:
-    prompt_template: prompts/my_implement.md
-```
-
-The default template lives at `src/draft/steps/implement_spec/implement_spec.md` — copy it as a starting point.
-
-### Custom PR body template
-
-Set `open-pr.pr_body_template` to give the agent a file with structural guidance for the PR body. Before invoking Claude, `draft` precomputes the body template content, `git diff <base>..HEAD`, and `git log <base>..HEAD --format=%s%n%n%b`, and inlines all three directly into the prompt — Claude does not read any files or run any git commands itself. Note that prompt size grows linearly with diff and log length on branches with many changes.
-
-**Path resolution**
-
-The path is expanded with `~` support, then resolved relative to the project root (the directory containing `.draft/`). The resolved absolute path is snapshotted into `state.json` at `draft create` time; `draft continue` uses that snapshot. If the file is removed between create and continue, the step fails with an error naming the path.
-
-**Precedence**
-
-Bundled default → `~/.draft/config.yaml` → `.draft/config.yaml` → `--set open-pr.pr_body_template=<path>`
-
-**Example**
-
-```yaml
-steps:
-  open-pr:
-    pr_body_template: .draft/pr-template.md
-```
-
-The bundled default lives at `src/draft/steps/open_pr/pull-request-template.md` — copy it as a starting point.
-
-**Migration note**
-
-In previous versions, draft automatically looked for a PR body template at `<repo>/.draft/pull-request-template.md` and `~/.draft/pull-request-template.md`. This convention-path search has been removed. If you relied on either path, add an explicit `steps.open-pr.pr_body_template` entry pointing to the same file.
-
-**Migration note: retry fields removed**
-
-`retry_delay` has been removed from all steps. `max_retries` has been removed from `create-worktree`, `push-commits`, `open-pr`, and `delete-worktree` — those steps run exactly once. Setting either field on an unsupported step now fails preflight with a clear error message (exit 3 for YAML config, exit 2 for `--set`).
+- `on_error` — after the step fails
