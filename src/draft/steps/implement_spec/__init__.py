@@ -30,12 +30,10 @@ def _render_verify_commands(entries: list[dict]) -> str:
     if not cmds:
         return ""
     block = "\n".join(cmds)
-    return (
-        "## Verified commands\n\n"
-        "Draft will run the following after your changes. "
-        "Run them yourself before finishing if practical.\n\n"
-        f"```bash\n{block}\n```"
+    template = (
+        files("draft.steps.implement_spec").joinpath("verify_commands.md").read_text()
     )
+    return template.replace("{{COMMANDS}}", block)
 
 
 def _render_prompt(ctx, template: str, verify_commands: str) -> str:
@@ -43,7 +41,10 @@ def _render_prompt(ctx, template: str, verify_commands: str) -> str:
     spec_section = f"## Current Spec\n\n{spec}"
     verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
     if verify_errors:
-        verify_section = f"## Verified errors\n\n{verify_errors}\n\nFix the above failures before committing."
+        verify_template = (
+            files("draft.steps.implement_spec").joinpath("verify_errors.md").read_text()
+        )
+        verify_section = verify_template.replace("{{ERRORS}}", verify_errors)
     else:
         verify_section = ""
     original_spec_section = original_spec.render_original_spec(ctx)
