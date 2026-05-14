@@ -33,6 +33,8 @@ draft create spec.md
 - [draft list](#draft-list) — list recent runs
 - [draft status](#draft-status) — show status of a single run
 - [draft create](#draft-create) — start a new run from a spec or prompt
+- [draft babysit](#draft-babysit) — watch CI on an existing PR and fix failures
+- [draft fix-pr](#draft-fix-pr) — fix the current CI failures on a PR locally without pushing
 - [draft continue](#draft-continue) — resume a stopped or failed run
 - [draft delete](#draft-delete) — remove a single run
 - [draft prune](#draft-prune) — bulk-delete finished runs
@@ -90,6 +92,49 @@ draft continue auth-refactor
 draft status auth-refactor
 draft delete auth-refactor
 ```
+
+### draft babysit
+
+Watch CI on an existing PR and feed failing checks back to the agent until every check is green or the retry budget is exhausted. Use this when a PR already exists (opened manually or by another tool) and you want `draft` to take over CI babysitting without rerunning code generation.
+
+```
+draft babysit <pr>
+draft babysit <pr> --spec path/to/spec.md
+draft babysit <pr> --no-worktree
+```
+
+**Arguments**
+
+- `pr` — PR URL or number (required)
+- `--spec PATH` — path to a spec file used as context for the fixer; defaults to the PR body
+- `--no-worktree` — run in the main repo instead of a linked worktree
+- `--delete-worktree` — remove the worktree after the run succeeds
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp; same character rules as `draft create`
+- `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+
+`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head (sync with `gh pr checkout <pr>` if not). If CI is already green, the command exits without running the pipeline.
+
+### draft fix-pr
+
+Apply a single round of fixes to failing PR checks locally. The agent edits the working tree and creates a commit, but `draft` does not push and does not poll checks afterwards. Use this when you want to inspect or hand-edit the fix before publishing it.
+
+```
+draft fix-pr <pr>
+draft fix-pr <pr> --watch
+draft fix-pr <pr> --no-worktree
+```
+
+**Arguments**
+
+- `pr` — PR URL or number (required)
+- `--spec PATH` — path to a spec file used as context for the fixer; defaults to the PR body
+- `--no-worktree` — run in the main repo instead of a linked worktree
+- `--delete-worktree` — remove the worktree after the run succeeds
+- `--run-id NAME` — custom run id instead of the auto-generated timestamp; same character rules as `draft create`
+- `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+- `--watch` — wait for the first failing check to appear instead of exiting early when CI is pending or has no failures
+
+`--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. Without `--watch`, the command exits early if CI is green (`0`), has no configured checks (`2`), or is still pending (`2`); with `--watch`, it polls until a failure appears, the PR head moves on the remote, or `fix-pr.watch_timeout` elapses (`124`).
 
 ### draft continue
 
