@@ -162,6 +162,68 @@ def test_validate_config_rejects_retry_delay_on_any_step():
         assert "retry_delay" in str(exc.value)
 
 
+def test_validate_config_accepts_top_level_model_string():
+    validate_config({"model": "opus"})
+    validate_config({"model": "claude-sonnet-4-5-20250929"})
+
+
+def test_validate_config_absent_top_level_model_is_ok():
+    validate_config({})
+    validate_config({"steps": {"implement-spec": {"max_retries": 3}}})
+
+
+def test_validate_config_rejects_blank_top_level_model():
+    for bad in ("", "   "):
+        with pytest.raises(ConfigError) as exc:
+            validate_config({"model": bad})
+        assert "model" in str(exc.value)
+
+
+def test_validate_config_rejects_non_string_top_level_model():
+    for bad in (None, 42, True, ["opus"], {"name": "opus"}):
+        with pytest.raises(ConfigError) as exc:
+            validate_config({"model": bad})
+        assert "model" in str(exc.value)
+
+
+def test_validate_config_top_level_model_paired_with_steps_still_validates_steps():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {"model": "opus", "steps": {"implement-spec": {"retry_delay": 5}}}
+        )
+
+
+def test_load_config_top_level_model_project_overrides_global(tmp_path):
+    global_dir = tmp_path / "home" / ".draft"
+    global_dir.mkdir(parents=True)
+    (global_dir / "config.yaml").write_text("model: sonnet\n")
+    repo_dir = tmp_path / "repo"
+    project_dir = repo_dir / ".draft"
+    project_dir.mkdir(parents=True)
+    (project_dir / "config.yaml").write_text("model: opus\n")
+    import unittest.mock as mock
+
+    with mock.patch.object(Path, "home", return_value=tmp_path / "home"):
+        result = load_config(str(repo_dir))
+    assert result["model"] == "opus"
+
+
+def test_load_config_top_level_model_global_only_visible(tmp_path):
+    global_dir = tmp_path / "home" / ".draft"
+    global_dir.mkdir(parents=True)
+    (global_dir / "config.yaml").write_text("model: sonnet\n")
+    repo_dir = tmp_path / "repo"
+    (repo_dir / ".draft").mkdir(parents=True)
+    (repo_dir / ".draft" / "config.yaml").write_text(
+        "steps:\n  implement-spec:\n    max_retries: 3\n"
+    )
+    import unittest.mock as mock
+
+    with mock.patch.object(Path, "home", return_value=tmp_path / "home"):
+        result = load_config(str(repo_dir))
+    assert result["model"] == "sonnet"
+
+
 def test_validate_config_rejects_max_retries_on_single_shot_steps():
     for step in ("create-worktree", "push-commits", "open-pr", "delete-worktree"):
         with pytest.raises(ConfigError) as exc:

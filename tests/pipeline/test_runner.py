@@ -311,3 +311,96 @@ def test_run_llm_log_path_none_step_metrics_updated():
         )
 
     assert step_metrics.add.call_count >= 4
+
+
+def test_run_llm_injects_model_when_set():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner(model="opus").run_llm(
+            prompt="x", cwd=None, log_path=None, step_metrics=step_metrics
+        )
+    argv = popen.call_args.args[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_run_llm_omits_model_when_unset():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner().run_llm(prompt="x", cwd=None, log_path=None, step_metrics=step_metrics)
+    assert "--model" not in popen.call_args.args[0]
+
+
+def test_run_llm_does_not_double_inject_model_when_extra_args_has_one():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner(model="opus").run_llm(
+            prompt="x",
+            cwd=None,
+            log_path=None,
+            step_metrics=step_metrics,
+            extra_args=["--model", "haiku"],
+        )
+    argv = popen.call_args.args[0]
+    assert argv.count("--model") == 1
+    assert argv[argv.index("--model") + 1] == "haiku"
+
+
+def test_run_llm_normalises_blank_model_to_none():
+    step_metrics = MagicMock()
+    for blank in ("", "   ", None):
+        proc = _mock_popen()
+        with patch("subprocess.Popen", return_value=proc) as popen:
+            Runner(model=blank).run_llm(
+                prompt="x", cwd=None, log_path=None, step_metrics=step_metrics
+            )
+        assert "--model" not in popen.call_args.args[0]
+
+
+def test_run_llm_strips_whitespace_from_model():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner(model="  opus  ").run_llm(
+            prompt="x", cwd=None, log_path=None, step_metrics=step_metrics
+        )
+    argv = popen.call_args.args[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_run_llm_model_and_other_extra_args_coexist():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner(model="opus").run_llm(
+            prompt="x",
+            cwd=None,
+            log_path=None,
+            step_metrics=step_metrics,
+            extra_args=["--permission-mode", "acceptEdits"],
+        )
+    argv = popen.call_args.args[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert "--permission-mode" in argv
+    assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+
+
+def test_live_status_style_caller_keeps_its_model_under_global_setting():
+    proc = _mock_popen()
+    step_metrics = MagicMock()
+    with patch("subprocess.Popen", return_value=proc) as popen:
+        Runner(model="opus").run_llm(
+            prompt="x",
+            cwd=None,
+            log_path=None,
+            step_metrics=step_metrics,
+            extra_args=["--model", "claude-3-5-haiku-latest"],
+        )
+    argv = popen.call_args.args[0]
+    assert argv.count("--model") == 1
+    assert argv[argv.index("--model") + 1] == "claude-3-5-haiku-latest"

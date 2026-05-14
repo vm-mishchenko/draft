@@ -314,7 +314,7 @@ def run(args) -> int:
         worktree_mode,
     )
 
-    engine = Runner()
+    engine = Runner(model=config.get("model"))
     lifecycle = DraftLifecycle(
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )
