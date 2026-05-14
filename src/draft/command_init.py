@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from draft.config import _LOOPING_STEPS, ConfigError, load_config, validate_config
-from draft.steps import STEPS
+from draft.pipelines import PIPELINES
 
 
 def _repo_root() -> str:
@@ -45,7 +45,7 @@ def run(args) -> int:
         return 1
 
     body = {"steps": {}}
-    for step in STEPS:
+    for step in PIPELINES["create"].steps:
         d = step.defaults()
         cfg = {}
         if "timeout" in d:

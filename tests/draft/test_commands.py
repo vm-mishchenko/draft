@@ -1715,7 +1715,7 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
 
 def test_preamble_reused_annotation_for_reuse_existing(capsys):
     import draft.command_create as cmd
-    from draft.steps import STEPS
+    from draft.pipelines import PIPELINES
 
     skipped = {"create-worktree"}
     cmd._print_preamble(
@@ -1724,7 +1724,7 @@ def test_preamble_reused_annotation_for_reuse_existing(capsys):
         "/wt",
         "/runs/rid",
         "started",
-        STEPS,
+        PIPELINES["create"].steps,
         skipped,
         "reuse-existing",
     )
@@ -1734,7 +1734,7 @@ def test_preamble_reused_annotation_for_reuse_existing(capsys):
 
 def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
     import draft.command_create as cmd
-    from draft.steps import STEPS
+    from draft.pipelines import PIPELINES
 
     skipped = {"create-worktree"}
     cmd._print_preamble(
@@ -1743,7 +1743,7 @@ def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
         "/repo",
         "/runs/rid",
         "started",
-        STEPS,
+        PIPELINES["create"].steps,
         skipped,
         "no-worktree",
     )
@@ -1754,10 +1754,17 @@ def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
 
 def test_preamble_no_skipped_annotation_for_active_step(capsys):
     import draft.command_create as cmd
-    from draft.steps import STEPS
+    from draft.pipelines import PIPELINES
 
     cmd._print_preamble(
-        "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, set(), "worktree"
+        "rid",
+        "feature-x",
+        "/wt",
+        "/runs/rid",
+        "started",
+        PIPELINES["create"].steps,
+        set(),
+        "worktree",
     )
     out = capsys.readouterr().out
     assert "create-worktree\n" in out  # no suffix
@@ -3160,11 +3167,11 @@ def test_init_values_match_defaults(tmp_path):
     import yaml
 
     from draft.config import _LOOPING_STEPS
-    from draft.steps import STEPS
+    from draft.pipelines import PIPELINES
 
     _run_init(tmp_path)
     data = yaml.safe_load((tmp_path / ".draft" / "config.yaml").read_text())
-    for step in STEPS:
+    for step in PIPELINES["create"].steps:
         d = step.defaults()
         cfg = data["steps"][step.name]
         if "timeout" in d:
