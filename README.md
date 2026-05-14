@@ -201,6 +201,15 @@ draft prune --delete-branch
 
 ## Config
 
+- [create-worktree](#create-worktree) — isolated copy of the repo on a new branch
+- [implement-spec](#implement-spec) — agent edits code and retries until your checks go green
+- [review-implementation](#review-implementation) — second agent reviews implementation
+- [push-commits](#push-commits) — pushes the branch to the remote
+- [open-pr](#open-pr) — opens a draft PR on GitHub
+- [babysit-pr](#babysit-pr) — watches CI on the PR; failing checks are fed back to the agent until green
+- [delete-worktree](#delete-worktree) — removes the worktree on success; off by default
+- [Hooks](#hooks) — shell commands attached to step lifecycle events
+
 Config files:
 
 - Project: `.draft/config.yaml`
