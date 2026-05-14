@@ -1653,3 +1653,98 @@ def test_log_prompt_called_before_run_llm(tmp_path):
 def test_bundled_implement_spec_has_original_spec_marker():
     bundled = _load_template({})
     assert "{{ORIGINAL_SPEC}}" in bundled
+
+
+# --- verify_commands.md / verify_errors.md template tests ---
+
+
+def test_render_verify_commands_no_literal_placeholder():
+    result = _render_verify_commands([{"cmd": "make test"}])
+    assert "{{COMMANDS}}" not in result
+
+
+def test_render_verify_commands_multiple_entries_joined():
+    result = _render_verify_commands([{"cmd": "make lint"}, {"cmd": "make test"}])
+    assert "make lint\nmake test" in result
+
+
+def test_render_verify_commands_empty_returns_empty_without_template():
+    from importlib.resources import files
+    from unittest.mock import patch as _patch
+
+    def boom(*a, **kw):
+        raise RuntimeError("should not open template")
+
+    with _patch.object(
+        files("draft.steps.implement_spec").joinpath("verify_commands.md").__class__,
+        "read_text",
+        boom,
+    ):
+        assert _render_verify_commands([]) == ""
+
+
+def test_render_prompt_verify_errors_no_literal_placeholder(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = "boom"
+
+    prompt = _render_prompt(ctx, template, "")
+    assert "{{ERRORS}}" not in prompt
+    assert "Fix the above failures." in prompt
+
+
+def test_render_prompt_empty_verify_errors_no_fix_sentence(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = ""
+
+    prompt = _render_prompt(ctx, template, "")
+    assert "## Verified errors" not in prompt
+    assert "Fix the above failures." not in prompt
+
+
+def test_render_verify_commands_byte_equivalence():
+    result = _render_verify_commands([{"cmd": "make test"}])
+    expected = (
+        "## Verified commands\n\n"
+        "Draft will run the following after your changes. "
+        "Run them yourself before finishing if practical.\n\n"
+        "```bash\nmake test\n```"
+    )
+    assert result == expected
+
+
+def test_render_prompt_verify_errors_byte_equivalence(tmp_path):
+    tpl = tmp_path / "tpl.md"
+    tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
+    template = tpl.read_text()
+
+    ctx = MagicMock()
+    ctx.get.return_value = "spec"
+    ctx.step_get.return_value = "boom"
+
+    prompt = _render_prompt(ctx, template, "")
+    expected_errors_section = "## Verified errors\n\nboom\n\nFix the above failures."
+    assert expected_errors_section in prompt
+
+
+def test_verify_template_files_exist():
+    from importlib.resources import files
+
+    assert files("draft.steps.implement_spec").joinpath("verify_commands.md").is_file()
+    assert files("draft.steps.implement_spec").joinpath("verify_errors.md").is_file()
+
+
+def test_render_verify_commands_cmd_containing_placeholder():
+    result = _render_verify_commands([{"cmd": "echo {{COMMANDS}}"}])
+    assert result.count("{{COMMANDS}}") == 1
+    assert "```bash" in result
+    assert "echo {{COMMANDS}}" in result
