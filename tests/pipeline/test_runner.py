@@ -9,6 +9,7 @@ from pipeline.runner import (
     StageHandle,
     _format_event,
     _summarize_tool_input,
+    _truncate_tool_result,
 )
 
 
@@ -215,6 +216,81 @@ def test_summarize_tool_input_unchanged_branches():
 
 def test_first_line_helper_removed():
     assert not hasattr(_runner_mod, "_first_line")
+
+
+def test_truncate_tool_result_single_line_passthrough():
+    assert _truncate_tool_result("a") == "a"
+
+
+def test_truncate_tool_result_ten_lines_passthrough():
+    text = "\n".join(str(i) for i in range(10))
+    assert _truncate_tool_result(text) == text
+
+
+def test_truncate_tool_result_eleven_lines_truncated():
+    text = "\n".join(str(i) for i in range(11))
+    result = _truncate_tool_result(text)
+    assert result == "\n".join(str(i) for i in range(10)) + "\n... 1 more lines ..."
+
+
+def test_truncate_tool_result_250_lines_truncated():
+    text = "\n".join("x" for _ in range(250))
+    result = _truncate_tool_result(text)
+    assert result.endswith("\n... 240 more lines ...")
+    assert result.count("\n") == 10
+
+
+def test_truncate_tool_result_empty_string():
+    assert _truncate_tool_result("") == ""
+
+
+def test_format_event_ok_ten_lines_no_marker():
+    text = "\n".join(str(i) for i in range(10))
+    event = _user_tool_result_event(text)
+    result = _format_event(event)
+    assert result == f"\n[ok]   {text}"
+    assert "more lines" not in result
+
+
+def test_format_event_ok_eleven_lines_marker():
+    text = "\n".join(str(i) for i in range(11))
+    event = _user_tool_result_event(text)
+    result = _format_event(event)
+    expected_body = "\n".join(str(i) for i in range(10)) + "\n... 1 more lines ..."
+    assert result == f"\n[ok]   {expected_body}"
+
+
+def test_format_event_ok_is_error_still_truncated():
+    lines = "\n".join(str(i) for i in range(12))
+    event = {
+        "type": "user",
+        "message": {
+            "content": [{"type": "tool_result", "is_error": True, "content": lines}]
+        },
+    }
+    result = _format_event(event)
+    assert "... 2 more lines ..." in result
+
+
+def test_format_event_ok_list_content_truncated():
+    part1 = "\n".join(str(i) for i in range(8))
+    part2 = "\n".join(str(i) for i in range(8, 11))
+    event = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "text", "text": part1},
+                        {"type": "text", "text": "\n" + part2},
+                    ],
+                }
+            ]
+        },
+    }
+    result = _format_event(event)
+    assert "... 1 more lines ..." in result
 
 
 def test_run_llm_log_path_none_step_metrics_updated():
