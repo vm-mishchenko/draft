@@ -199,6 +199,17 @@ draft prune --delete-branch
 
 ## Config
 
+- [Model](#model)
+- Commands configuration
+  - [create-worktree](#create-worktree)
+  - [implement-spec](#implement-spec)
+  - [review-implementation](#review-implementation)
+  - [push-commits](#push-commits)
+  - [open-pr](#open-pr)
+  - [babysit-pr](#babysit-pr)
+  - [delete-worktree](#delete-worktree)
+- [Hooks](#hooks)
+
 Config files:
 
 - Project: `.draft/config.yaml`
