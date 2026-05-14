@@ -207,7 +207,7 @@ def _generate_commit_message(
             log_path=log_path,
             step_metrics=step_metrics,
             allowed_tools=["Read", "Bash"],
-            extra_args=["--model", "claude-haiku-4-5-20251001"],
+            extra_args=["--model", "claude-haiku-4-5"],
             timeout=timeout,
         )
         msg = result.final_text.strip()
