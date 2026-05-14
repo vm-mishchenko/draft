@@ -119,6 +119,24 @@ def is_run_finished(state: dict) -> bool:
     return all(s in state.get("completed", []) for s in expected_steps(state))
 
 
+def find_original_run_on_branch(project: str, branch: str) -> Path | None:
+    candidates = []
+    for run_dir in project_runs(project):
+        state = load_state(run_dir)
+        if state is None:
+            continue
+        data = state.get("data", {})
+        if data.get("branch") != branch:
+            continue
+        if data.get("branch_source") != "new":
+            continue
+        started = _run_started_at(run_dir) or 0.0
+        candidates.append((started, run_dir))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: x[0])[1]
+
+
 def find_active_run_on_branch(project: str, branch: str) -> Path | None:
     from draft.pipelines import CorruptStateError
 

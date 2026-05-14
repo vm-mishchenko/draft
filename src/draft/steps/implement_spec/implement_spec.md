@@ -13,7 +13,7 @@ You must not run `git commit`, `git add`, `git push`, `git stash`, or any comman
 
 {{VERIFY_COMMANDS}}
 
-## Spec
+{{ORIGINAL_SPEC}}
 
 {{SPEC}}
 
