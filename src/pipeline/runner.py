@@ -29,6 +29,14 @@ def _summarize_tool_input(name: str, inp: dict) -> str:
     return json.dumps(inp, ensure_ascii=False)
 
 
+def _truncate_tool_result(text: str) -> str:
+    lines = text.split("\n")
+    if len(lines) <= 10:
+        return text
+    dropped = len(lines) - 10
+    return "\n".join(lines[:10] + [f"... {dropped} more lines ..."])
+
+
 def _format_event(event: dict) -> str | None:
     kind = event.get("type")
 
@@ -62,7 +70,7 @@ def _format_event(event: dict) -> str | None:
                     )
                 text = str(content).strip()
                 if text:
-                    return f"\n[ok]   {text}"
+                    return f"\n[ok]   {_truncate_tool_result(text)}"
         return None
 
     if kind == "system":
