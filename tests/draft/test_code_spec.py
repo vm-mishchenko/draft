@@ -1732,9 +1732,7 @@ def test_render_prompt_verify_errors_byte_equivalence(tmp_path):
     ctx.step_get.return_value = "boom"
 
     prompt = _render_prompt(ctx, template, "")
-    expected_errors_section = (
-        "## Verified errors\n\nboom\n\nFix the above failures."
-    )
+    expected_errors_section = "## Verified errors\n\nboom\n\nFix the above failures."
     assert expected_errors_section in prompt
 
 
