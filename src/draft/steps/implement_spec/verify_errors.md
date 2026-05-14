@@ -2,4 +2,4 @@
 
 {{ERRORS}}
 
-Fix the above failures before committing.
+Fix the above failures.
