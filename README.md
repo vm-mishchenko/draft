@@ -28,7 +28,7 @@ Steps in order:
 
 - `create-worktree` — isolated copy of the repo on a new branch
 - `implement-spec` — agent edits code and retries until your checks go green
-- `review-implementation` — second agent reviews implementation
+- `review-implementation` — runs your configured reviewers; each reviews the implementation and may produce a follow-up commit
 - `push-commits` — pushes the branch to the remote
 - `open-pr` — opens a draft PR on GitHub
 - `babysit-pr` — watches CI on the PR; failing checks are fed back to the agent until green
@@ -270,16 +270,50 @@ For common hook events (`pre`, `post`, `on_success`, `on_error`) see [Hooks](#ho
 ```yaml
 steps:
   review-implementation:
-    cmd: ""
-    max_retries: 10
-    timeout: 300
     suggest_extra_checks: true
+    reviewers:
+      - name: code-quality
+        cmd: scripts/review-code-quality.sh
+        timeout: 300
+        max_retries: 10
+      - name: docs
+        cmd: scripts/review-docs.sh
+      - name: observability
+        cmd: scripts/review-observability.sh
 ```
 
-- `cmd` — command that invokes the review agent; `draft` has no default review implementation, so generating the review is fully up to this command; it should print review feedback in free-text format to stdout, and that output is fed back to the agent for consideration
-- `max_retries` — max review-and-fix attempts before failing the step
-- `timeout` — per-attempt timeout in seconds
-- `suggest_extra_checks` — let an LLM propose extra checks before committing review fixes
+- `reviewers` — ordered list of reviewers; each runs sequentially against the worktree as it stands after the previous reviewer's commit
+- `reviewers[].name` — unique identifier used in log file names and state; must match `[A-Za-z0-9_-]+`
+- `reviewers[].cmd` — command that invokes the reviewer; prints free-text feedback to stdout; empty stdout means approve (no address loop, no commit)
+- `reviewers[].timeout` — per-invocation timeout in seconds (default 300)
+- `reviewers[].max_retries` — max address-and-fix attempts for that reviewer before failing the step (default 10)
+- `suggest_extra_checks` — when true, each reviewer's address loop asks an LLM to propose extra checks before committing
+
+Reviewers run sequentially in declared order. An approve (empty stdout) produces no commit. A reject (non-empty stdout) feeds the feedback to the address loop, which produces exactly one commit if it succeeds. Any reviewer failure aborts the step.
+
+Per-reviewer log files are named `review-implementation.<name>.<suffix>.log` (e.g. `review-implementation.code-quality.review.log`).
+
+**Upgrading from earlier versions**
+
+If your config uses the removed top-level `cmd:` key:
+
+```yaml
+# old
+steps:
+  review-implementation:
+    cmd: scripts/review.sh
+```
+
+Rewrite it as a single-element `reviewers:` list:
+
+```yaml
+# new
+steps:
+  review-implementation:
+    reviewers:
+      - name: review
+        cmd: scripts/review.sh
+```
 
 ### push-commits
 

@@ -1093,6 +1093,35 @@ def test_compose_active_steps_pr_reuse_skips_pr_open():
     assert "delete-worktree" in skipped
 
 
+def test_compose_active_steps_with_any_reviewer_active():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "open", False, skip_review=False, has_any_reviewer=True
+    )
+    names = [s.name for s in active]
+    assert "review-implementation" in names
+    assert "review-implementation" not in skipped
+
+
+def test_compose_active_steps_with_any_reviewer_skip_review():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "open", False, skip_review=True, has_any_reviewer=True
+    )
+    assert "review-implementation" in skipped
+
+
+def test_compose_active_steps_no_reviewer():
+    import draft.command_create as cmd
+
+    active, skipped = cmd._compose_active_steps(
+        "worktree", "open", False, has_any_reviewer=False
+    )
+    assert "review-implementation" in skipped
+
+
 # --- create-modes: runs.expected_steps with new keys ---
 
 

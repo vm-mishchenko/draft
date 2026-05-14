@@ -490,3 +490,315 @@ def test_validate_suggester_keys_on_other_step_silently_allowed():
     validate_config(
         {"steps": {"babysit-pr": {"max_checks": 99, "suggest_extra_checks": "yes"}}}
     )
+
+
+# --- validate_config: review-implementation reviewers ---
+
+
+def test_review_impl_step_level_cmd_rejected():
+    with pytest.raises(ConfigError, match="reviewers\\[\\]\\.cmd"):
+        validate_config({"steps": {"review-implementation": {"cmd": "echo hi"}}})
+
+
+def test_review_impl_step_level_timeout_rejected():
+    with pytest.raises(ConfigError, match="reviewers\\[\\]\\.timeout"):
+        validate_config({"steps": {"review-implementation": {"timeout": 300}}})
+
+
+def test_review_impl_step_level_max_retries_rejected():
+    with pytest.raises(ConfigError, match="reviewers\\[\\]\\.max_retries"):
+        validate_config({"steps": {"review-implementation": {"max_retries": 5}}})
+
+
+def test_review_impl_reviewers_not_list_rejected():
+    with pytest.raises(ConfigError, match="must be a list"):
+        validate_config({"steps": {"review-implementation": {"reviewers": "bad"}}})
+
+
+def test_review_impl_reviewers_empty_list_accepted():
+    validate_config({"steps": {"review-implementation": {"reviewers": []}}})
+
+
+def test_review_impl_reviewer_missing_name_rejected():
+    with pytest.raises(ConfigError, match="missing 'name'"):
+        validate_config(
+            {"steps": {"review-implementation": {"reviewers": [{"cmd": "echo hi"}]}}}
+        )
+
+
+def test_review_impl_reviewer_empty_name_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "", "cmd": "echo hi"}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_name_with_space_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "code quality", "cmd": "echo hi"}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_name_with_dotdot_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "../etc", "cmd": "echo hi"}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_duplicate_name_rejected():
+    with pytest.raises(ConfigError, match="duplicate reviewer name"):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [
+                            {"name": "code-quality", "cmd": "echo a"},
+                            {"name": "code-quality", "cmd": "echo b"},
+                        ]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_missing_cmd_rejected():
+    with pytest.raises(ConfigError, match="cmd is required"):
+        validate_config(
+            {"steps": {"review-implementation": {"reviewers": [{"name": "r1"}]}}}
+        )
+
+
+def test_review_impl_reviewer_empty_cmd_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {"reviewers": [{"name": "r1", "cmd": ""}]}
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_unparseable_cmd_rejected():
+    with pytest.raises(ConfigError, match="not parseable"):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "r1", "cmd": 'echo "unterminated'}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_timeout_zero_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "r1", "cmd": "echo hi", "timeout": 0}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_timeout_over_limit_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "r1", "cmd": "echo hi", "timeout": 3601}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_timeout_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [
+                            {"name": "r1", "cmd": "echo hi", "timeout": "600"}
+                        ]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_max_retries_zero_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [
+                            {"name": "r1", "cmd": "echo hi", "max_retries": 0}
+                        ]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_max_retries_bool_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [
+                            {"name": "r1", "cmd": "echo hi", "max_retries": True}
+                        ]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_max_retries_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [
+                            {"name": "r1", "cmd": "echo hi", "max_retries": "5"}
+                        ]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_reviewer_valid_minimal():
+    validate_config(
+        {
+            "steps": {
+                "review-implementation": {
+                    "reviewers": [{"name": "r1", "cmd": "echo hi"}]
+                }
+            }
+        }
+    )
+
+
+def test_review_impl_reviewer_unknown_key_rejected():
+    with pytest.raises(ConfigError, match="unknown reviewer key 'foo'"):
+        validate_config(
+            {
+                "steps": {
+                    "review-implementation": {
+                        "reviewers": [{"name": "r1", "cmd": "echo hi", "foo": 1}]
+                    }
+                }
+            }
+        )
+
+
+def test_review_impl_suggest_extra_checks_string_rejected():
+    with pytest.raises(ConfigError):
+        validate_config(
+            {"steps": {"review-implementation": {"suggest_extra_checks": "yes"}}}
+        )
+
+
+def test_review_impl_suggest_extra_checks_false_with_valid_reviewers_accepted():
+    validate_config(
+        {
+            "steps": {
+                "review-implementation": {
+                    "suggest_extra_checks": False,
+                    "reviewers": [{"name": "r1", "cmd": "echo hi"}],
+                }
+            }
+        }
+    )
+
+
+# --- validate_reviewer_argv0s ---
+
+
+def test_validate_reviewer_argv0s_empty_reviewers(tmp_path):
+    from draft.config import validate_reviewer_argv0s
+
+    validate_reviewer_argv0s(
+        {"steps": {"review-implementation": {"reviewers": []}}}, str(tmp_path)
+    )
+
+
+def test_validate_reviewer_argv0s_valid_executable(tmp_path):
+    from draft.config import validate_reviewer_argv0s
+
+    script = tmp_path / "review.sh"
+    script.write_text("#!/bin/sh\necho hi")
+    script.chmod(0o755)
+
+    config = {
+        "steps": {
+            "review-implementation": {"reviewers": [{"name": "r1", "cmd": str(script)}]}
+        }
+    }
+    validate_reviewer_argv0s(config, str(tmp_path))
+
+
+def test_validate_reviewer_argv0s_missing_file_rejected(tmp_path):
+    from draft.config import ConfigError, validate_reviewer_argv0s
+
+    config = {
+        "steps": {
+            "review-implementation": {
+                "reviewers": [{"name": "r1", "cmd": "/nonexistent/script.sh"}]
+            }
+        }
+    }
+    with pytest.raises(ConfigError, match="reviewers\\[0\\]\\.cmd"):
+        validate_reviewer_argv0s(config, str(tmp_path))
+
+
+def test_validate_reviewer_argv0s_second_reviewer_failing(tmp_path):
+    from draft.config import ConfigError, validate_reviewer_argv0s
+
+    script = tmp_path / "review.sh"
+    script.write_text("#!/bin/sh\necho hi")
+    script.chmod(0o755)
+
+    config = {
+        "steps": {
+            "review-implementation": {
+                "reviewers": [
+                    {"name": "r1", "cmd": str(script)},
+                    {"name": "r2", "cmd": "/nonexistent/script.sh"},
+                ]
+            }
+        }
+    }
+    with pytest.raises(ConfigError, match="reviewers\\[1\\]\\.cmd"):
+        validate_reviewer_argv0s(config, str(tmp_path))
