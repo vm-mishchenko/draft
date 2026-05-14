@@ -1694,7 +1694,7 @@ def test_render_prompt_verify_errors_no_literal_placeholder(tmp_path):
 
     prompt = _render_prompt(ctx, template, "")
     assert "{{ERRORS}}" not in prompt
-    assert "Fix the above failures before committing." in prompt
+    assert "Fix the above failures." in prompt
 
 
 def test_render_prompt_empty_verify_errors_no_fix_sentence(tmp_path):
@@ -1708,7 +1708,7 @@ def test_render_prompt_empty_verify_errors_no_fix_sentence(tmp_path):
 
     prompt = _render_prompt(ctx, template, "")
     assert "## Verified errors" not in prompt
-    assert "Fix the above failures before committing." not in prompt
+    assert "Fix the above failures." not in prompt
 
 
 def test_render_verify_commands_byte_equivalence():
@@ -1733,7 +1733,7 @@ def test_render_prompt_verify_errors_byte_equivalence(tmp_path):
 
     prompt = _render_prompt(ctx, template, "")
     expected_errors_section = (
-        "## Verified errors\n\nboom\n\nFix the above failures before committing."
+        "## Verified errors\n\nboom\n\nFix the above failures."
     )
     assert expected_errors_section in prompt
 
