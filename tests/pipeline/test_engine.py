@@ -85,27 +85,6 @@ def test_run_command_nonzero_exit_returns_nonzero(tmp_path):
     assert rc != 0
 
 
-def test_sleep_outside_stage_writes_to_stdout(capsys):
-    runner = Runner()
-    with patch.object(sys.stdout, "isatty", return_value=False):
-        runner.sleep(0.01, "waiting")
-    captured = capsys.readouterr()
-    assert len(captured.out) > 0
-
-
-def test_sleep_inside_stage_updates_status_no_countdown(capsys):
-    runner = Runner()
-    with (
-        patch.object(sys.stdout, "isatty", return_value=False),
-        runner.stage("my-stage") as s,
-    ):
-        runner.sleep(0.01, "my-sleep-label")
-        assert s._status == "ok"  # prev_status restored after sleep
-    captured = capsys.readouterr()
-    assert captured.out.rstrip().endswith("ok")
-    assert "s..." not in captured.out
-
-
 # --- FakeStepMetrics helper ---
 
 

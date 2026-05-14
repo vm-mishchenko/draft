@@ -159,9 +159,9 @@ class OpenPrStep(Step):
             if rc != 0:
                 raise StepError(self.name, rc)
 
-        for line in log_path.read_text().splitlines():
-            if line.startswith("https://"):
-                print(line)
-                ctx.set("pr_url", line)
-                ctx.save()
-                break
+            for line in log_path.read_text().splitlines():
+                if line.startswith("https://"):
+                    ctx.set("pr_url", line)
+                    ctx.save()
+                    s.update(line)
+                    break

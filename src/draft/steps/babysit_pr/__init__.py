@@ -249,8 +249,9 @@ class BabysitPrStep(Step):
         pr_url = ctx.get("pr_url", "")
         wt_dir = ctx.get("wt_dir")
 
-        engine.sleep(INITIAL_PR_CHECK_DELAY, "waiting before pr-checks")
         with engine.stage(self.name) as s:
+            s.update("waiting for first poll")
+            s.sleep(INITIAL_PR_CHECK_DELAY)
             commit_msg_log = ctx.run_dir / "babysit-pr-commit-msg.log"
             verify_commands = _render_verify_commands(
                 lifecycle.get_hooks(self.name, "verify")
@@ -267,7 +268,7 @@ class BabysitPrStep(Step):
                     entries = []
 
                 total = sum(counts.values())
-                print(
+                s.update(
                     f"CI: {counts['success']}/{total} passed, "
                     f"{counts['failure']} failed, "
                     f"{counts['pending']} pending"
@@ -281,7 +282,6 @@ class BabysitPrStep(Step):
                     ctx.step_set(self.name, "attempts", attempt)
                     ctx.save()
                     s.update(f"green ({attempt} checks)")
-                    print(f"PR is green: {pr_url}")
                     return
 
                 if counts["failure"] > 0:
@@ -305,7 +305,7 @@ class BabysitPrStep(Step):
                         )
                         ctx.step_set(self.name, "attempts", attempt)
                         ctx.save()
-                        engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
+                        s.sleep(cfg["checks_delay"])
                         continue
 
                     results = lifecycle.run_hooks(self.name, "verify")
@@ -318,7 +318,7 @@ class BabysitPrStep(Step):
                         )
                         ctx.step_set(self.name, "attempts", attempt)
                         ctx.save()
-                        engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
+                        s.sleep(cfg["checks_delay"])
                         continue
 
                     last_errors = ctx.step_get(self.name, "verify_errors", "")
@@ -357,7 +357,7 @@ class BabysitPrStep(Step):
                         )
                         ctx.step_set(self.name, "attempts", attempt)
                         ctx.save()
-                        engine.sleep(cfg["checks_delay"], "waiting before pr-checks")
+                        s.sleep(cfg["checks_delay"])
                         continue
 
                     sha = _run_git_capture(
@@ -381,7 +381,7 @@ class BabysitPrStep(Step):
                 next_delay = (
                     INITIAL_PR_CHECK_DELAY if pushed_this_iter else cfg["checks_delay"]
                 )
-                engine.sleep(next_delay, "waiting before pr-checks")
+                s.sleep(next_delay)
 
-        print(f"babysit-pr: exhausted attempts. PR: {pr_url}")
-        raise StepError(self.name, 1)
+            s.stderr(f"babysit-pr: exhausted attempts. PR: {pr_url}")
+            raise StepError(self.name, 1)

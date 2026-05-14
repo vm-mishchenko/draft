@@ -210,6 +210,7 @@ def _run_suggested_checks(
     run_dir: Path,
     engine,
     cfg: dict,
+    stage,
 ) -> list[HookResult]:
     log_path = run_dir / "review-implementation.suggested.log"
     failures: list[HookResult] = []
@@ -237,17 +238,14 @@ def _run_suggested_checks(
                 int(entry.get("timeout") or cfg["per_check_timeout"]),
                 cfg["per_check_timeout"],
             )
-            label = f"review-implementation.suggested[{i}] {cmd}"
-
             if log_fd:
                 ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 log_fd.write(f"=== review-implementation.suggested[{i}] @ {ts} ===\n")
                 log_fd.write(f"$ {cmd}\n")
                 log_fd.flush()
 
-            with engine.tty_ticker(label) as set_status:
-                result = _run_hook_cmd(cmd, timeout, wt_dir)
-                set_status("ok" if result.rc == 0 else f"fail rc={result.rc}")
+            stage.update(f"suggested check {i + 1}/{len(suggested)}: {cmd}")
+            result = _run_hook_cmd(cmd, timeout, wt_dir)
 
             if log_fd:
                 if result.output:
@@ -485,6 +483,7 @@ class ReviewImplementationStep(Step):
                     ctx.step_set(self.name, "review_done", True)
                     ctx.step_set(self.name, "review_issues", "")
                     ctx.save()
+                    s.update("ok no review")
                     return
                 ctx.step_set(self.name, "review_done", True)
                 ctx.step_set(self.name, "review_issues", verdict.stdout)
@@ -492,7 +491,8 @@ class ReviewImplementationStep(Step):
 
             review_issues = ctx.step_get(self.name, "review_issues", "")
             if not review_issues:
-                return  # approval
+                s.update("ok no suggestions")
+                return
 
             # Phase B: address loop
             impl_template = (
@@ -538,11 +538,9 @@ class ReviewImplementationStep(Step):
 
                 if not _has_changes(wt_dir):
                     if attempt == 1:
-                        print(
-                            "review-implementation: feedback has no changes:",
-                            file=sys.stderr,
-                        )
-                        print(review_issues, file=sys.stderr)
+                        s.update("ok suggestions ignored")
+                        s.stderr("review-implementation: feedback has no changes:")
+                        s.stderr(review_issues)
                         ctx.step_set(self.name, "no_changes", True)
                         ctx.step_set(self.name, "verify_errors", "")
                         ctx.save()
@@ -580,7 +578,7 @@ class ReviewImplementationStep(Step):
                     ctx.save()
                     s.update(f"{prefix}running suggested checks")
                     suggest_failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, _SUGGESTER_CFG
+                        suggested, wt_dir, ctx.run_dir, engine, _SUGGESTER_CFG, s
                     )
                     if suggest_failures:
                         ctx.step_set(
@@ -634,6 +632,7 @@ class ReviewImplementationStep(Step):
                 if cfg["suggest_extra_checks"]:
                     ctx.step_set(self.name, "suggested_checks", [])
                 ctx.save()
+                s.update("ok suggestions addressed")
                 return
 
             raise StepError(self.name, 1)

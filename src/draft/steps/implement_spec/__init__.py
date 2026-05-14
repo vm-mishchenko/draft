@@ -247,6 +247,7 @@ def _run_suggested_checks(
     run_dir: Path,
     engine,
     cfg: dict,
+    stage,
 ) -> list[HookResult]:
     log_path = run_dir / "implement-spec.suggested.log"
     failures: list[HookResult] = []
@@ -274,17 +275,14 @@ def _run_suggested_checks(
                 int(entry.get("timeout") or cfg["per_check_timeout"]),
                 cfg["per_check_timeout"],
             )
-            label = f"implement-spec.suggested[{i}] {cmd}"
-
             if log_fd:
                 ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 log_fd.write(f"=== implement-spec.suggested[{i}] @ {ts} ===\n")
                 log_fd.write(f"$ {cmd}\n")
                 log_fd.flush()
 
-            with engine.tty_ticker(label) as set_status:
-                result = _run_hook_cmd(cmd, timeout, wt_dir)
-                set_status("ok" if result.rc == 0 else f"fail rc={result.rc}")
+            stage.update(f"suggested check {i + 1}/{len(suggested)}: {cmd}")
+            result = _run_hook_cmd(cmd, timeout, wt_dir)
 
             if log_fd:
                 if result.output:
@@ -409,7 +407,7 @@ class ImplementSpecStep(Step):
 
                     s.update(f"{prefix}running suggested checks")
                     suggest_failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, cfg
+                        suggested, wt_dir, ctx.run_dir, engine, cfg, s
                     )
                     if suggest_failures:
                         ctx.step_set(
@@ -466,6 +464,7 @@ class ImplementSpecStep(Step):
                 if cfg["suggest_extra_checks"]:
                     ctx.step_set(self.name, "suggested_checks", [])
                 ctx.save()
+                s.update("ok")
                 return
 
             raise StepError(self.name, 1)

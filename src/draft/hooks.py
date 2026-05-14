@@ -46,9 +46,7 @@ def _run_hook_cmd(cmd: str, timeout: int, cwd: str | None) -> HookResult:
 def _status_text(rc: int) -> str:
     if rc == 0:
         return "ok"
-    if rc == 124:
-        return "timeout"
-    return f"fail rc={rc}"
+    return "failed"
 
 
 def _footer(rc: int, duration: float, timeout: int) -> str:
