@@ -14,16 +14,11 @@ from pipeline.metrics import KnownMetric, fmt_duration, now_human
 TIMEOUT_EXIT = 124
 
 
-def _first_line(text: str) -> str:
-    return text.splitlines()[0]
-
-
 def _summarize_tool_input(name: str, inp: dict) -> str:
     if name in ("Read", "Write", "Edit"):
         return inp.get("file_path", "")
     if name == "Bash":
-        cmd = inp.get("command") or ""
-        return _first_line(cmd)[:100] if cmd else ""
+        return inp.get("command") or ""
     if name == "Grep":
         return repr(inp.get("pattern", ""))
     if name == "Glob":
@@ -31,8 +26,7 @@ def _summarize_tool_input(name: str, inp: dict) -> str:
     if name == "TodoWrite":
         todos = inp.get("todos") or []
         return f"{len(todos)} todos"
-    compact = json.dumps(inp, ensure_ascii=False)
-    return compact[:100]
+    return json.dumps(inp, ensure_ascii=False)
 
 
 def _format_event(event: dict) -> str | None:
@@ -45,11 +39,11 @@ def _format_event(event: dict) -> str | None:
             if bt == "text":
                 text = (block.get("text") or "").strip()
                 if text:
-                    parts.append(f"[text] {_first_line(text)}")
+                    parts.append(f"\n[text] {text}")
             elif bt == "thinking":
                 thought = (block.get("thinking") or "").strip()
                 if thought:
-                    parts.append(f"[think] {_first_line(thought)}")
+                    parts.append(f"\n[think] {thought}")
             elif bt == "tool_use":
                 name = block.get("name", "?")
                 summary = _summarize_tool_input(name, block.get("input") or {})
@@ -68,7 +62,7 @@ def _format_event(event: dict) -> str | None:
                     )
                 text = str(content).strip()
                 if text:
-                    return f"[ok]   {_first_line(text)[:120]}"
+                    return f"\n[ok]   {text}"
         return None
 
     if kind == "system":

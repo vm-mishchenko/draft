@@ -1,8 +1,15 @@
 import io
 from unittest.mock import MagicMock, patch
 
+import pipeline.runner as _runner_mod
 from draft.hooks import _status_text
-from pipeline.runner import LLMResult, Runner, StageHandle
+from pipeline.runner import (
+    LLMResult,
+    Runner,
+    StageHandle,
+    _format_event,
+    _summarize_tool_input,
+)
 
 
 def _make_runner():
@@ -133,6 +140,81 @@ def test_status_text_nonzero_is_failed():
     assert _status_text(1) == "failed"
     assert _status_text(124) == "failed"
     assert _status_text(2) == "failed"
+
+
+def _assistant_event(blocks):
+    return {"type": "assistant", "message": {"content": blocks}}
+
+
+def _user_tool_result_event(content):
+    return {
+        "type": "user",
+        "message": {"content": [{"type": "tool_result", "content": content}]},
+    }
+
+
+def test_format_event_text_full_multiline():
+    event = _assistant_event([{"type": "text", "text": "line1\nline2\nline3"}])
+    assert _format_event(event) == "\n[text] line1\nline2\nline3"
+
+
+def test_format_event_think_full_multiline():
+    event = _assistant_event([{"type": "thinking", "thinking": "a\nb"}])
+    assert _format_event(event) == "\n[think] a\nb"
+
+
+def test_format_event_ok_full_multiline():
+    event = _user_tool_result_event("x\ny\nz")
+    assert _format_event(event) == "\n[ok]   x\ny\nz"
+
+
+def test_format_event_assistant_block_separators():
+    event = _assistant_event(
+        [
+            {"type": "thinking", "thinking": "T"},
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/p"}},
+            {"type": "text", "text": "X"},
+        ]
+    )
+    result = _format_event(event)
+    assert result == "\n[think] T\n[tool] Read(/p)\n\n[text] X"
+
+
+def test_format_event_text_whitespace_only_skipped():
+    event = _assistant_event([{"type": "text", "text": "   \n  "}])
+    assert _format_event(event) is None
+
+
+def test_summarize_tool_input_bash_full_multiline_heredoc():
+    cmd = "cat <<'EOF'\nline1\nline2\nEOF\n"
+    assert _summarize_tool_input("Bash", {"command": cmd}) == cmd
+
+
+def test_summarize_tool_input_bash_long_single_line():
+    cmd = "x" * 250
+    result = _summarize_tool_input("Bash", {"command": cmd})
+    assert len(result) == 250
+    assert result == cmd
+
+
+def test_summarize_tool_input_default_branch_long_payload():
+    inp = {"big": "x" * 5000}
+    result = _summarize_tool_input("mcp_some_tool", inp)
+    assert len(result) > 5000
+    assert result.startswith('{"big":')
+
+
+def test_summarize_tool_input_unchanged_branches():
+    assert _summarize_tool_input("Read", {"file_path": "/f"}) == "/f"
+    assert _summarize_tool_input("Write", {"file_path": "/f"}) == "/f"
+    assert _summarize_tool_input("Edit", {"file_path": "/f"}) == "/f"
+    assert _summarize_tool_input("Grep", {"pattern": "abc"}) == repr("abc")
+    assert _summarize_tool_input("Glob", {"pattern": "*.py"}) == repr("*.py")
+    assert _summarize_tool_input("TodoWrite", {"todos": [1, 2, 3]}) == "3 todos"
+
+
+def test_first_line_helper_removed():
+    assert not hasattr(_runner_mod, "_first_line")
 
 
 def test_run_llm_log_path_none_step_metrics_updated():
