@@ -73,8 +73,6 @@ def register(subparsers):
 
 
 def run(args) -> int:
-    _assert_on_path("claude")
-
     params = CreateParams(
         spec_path=args.spec_path,
         prompt=args.prompt,
@@ -89,6 +87,7 @@ def run(args) -> int:
     )
 
     try:
+        _assert_on_path("claude")
         result = create(params, llm=SubprocessLLMClient())
     except StepFailedError as exc:
         print(f"\nerror: {exc}", file=sys.stderr)
