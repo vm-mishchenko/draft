@@ -176,8 +176,13 @@ def _suggest_checks(
     wt_dir: str,
     static_cmds: list[str],
     suggest_template: str,
+    log_path: Path = None,
 ) -> list[dict]:
-    suggest_log = ctx.run_dir / "review-implementation.suggest.log"
+    suggest_log = (
+        log_path
+        if log_path is not None
+        else ctx.run_dir / "review-implementation.suggest.log"
+    )
     changed_files = _run_git_capture(
         ["git", "diff", "--name-status", "HEAD"], wt_dir, 60, suggest_log
     )
@@ -211,8 +216,13 @@ def _run_suggested_checks(
     engine,
     cfg: dict,
     stage,
+    log_path: Path = None,
 ) -> list[HookResult]:
-    log_path = run_dir / "review-implementation.suggested.log"
+    log_path = (
+        log_path
+        if log_path is not None
+        else run_dir / "review-implementation.suggested.log"
+    )
     failures: list[HookResult] = []
     elapsed = 0.0
 
@@ -273,6 +283,7 @@ def _generate_commit_message(
     max_attempts: int,
     engine,
     step_metrics,
+    reviewer_name: str = "",
 ) -> tuple[str, bool]:
     template = (
         files("draft.steps.review_implementation")
@@ -286,6 +297,7 @@ def _generate_commit_message(
         template.replace("{{REVIEW_ISSUES}}", review_issues)
         .replace("{{DIFF}}", diff_section)
         .replace("{{SPEC}}", spec)
+        .replace("{{REVIEWER_NAME}}", reviewer_name)
     )
 
     for attempt in range(1, max_attempts + 1):
@@ -324,6 +336,51 @@ def _resolve_argv0(argv0: str, repo: str) -> str:
         return str((Path(repo) / argv0).resolve())
     found = shutil.which(argv0)
     return found if found is not None else argv0
+
+
+def _record_set(ctx, step_name, reviewer_name, key, value):
+    records = ctx.step_get(step_name, "reviewers", {}) or {}
+    rec = dict(records.get(reviewer_name) or {})
+    rec[key] = value
+    records[reviewer_name] = rec
+    ctx.step_set(step_name, "reviewers", records)
+
+
+def _record_get(ctx, step_name, reviewer_name, key, default=None):
+    records = ctx.step_get(step_name, "reviewers", {}) or {}
+    return (records.get(reviewer_name) or {}).get(key, default)
+
+
+def _log_paths(run_dir, name):
+    return {
+        "review": run_dir / f"review-implementation.{name}.review.log",
+        "addr": run_dir / f"review-implementation.{name}.log",
+        "suggest": run_dir / f"review-implementation.{name}.suggest.log",
+        "suggested": run_dir / f"review-implementation.{name}.suggested.log",
+        "commit": run_dir / f"review-implementation-commit-msg.{name}.log",
+    }
+
+
+_LEGACY_KEYS = (
+    "review_done",
+    "review_issues",
+    "verify_errors",
+    "suggested_checks",
+    "commit_sha",
+    "commit_message_fallback",
+    "no_changes",
+)
+
+
+def _guard_legacy_state(ctx, step_name):
+    if ctx.step_get(step_name, "reviewers", None) is not None:
+        return
+    if any(ctx.step_get(step_name, k, None) is not None for k in _LEGACY_KEYS):
+        print(
+            "review-implementation: legacy state.json shape detected; start a fresh run",
+            file=sys.stderr,
+        )
+        raise StepError(step_name, 1)
 
 
 def _short_base(base: str) -> str:
@@ -441,198 +498,239 @@ class ReviewImplementationStep(Step):
 
     def defaults(self) -> dict:
         return {
-            "cmd": "",
-            "timeout": 300,
-            "max_retries": 10,
+            "reviewers": [],
             "suggest_extra_checks": True,
         }
 
     def run(self, ctx, engine, lifecycle, step_metrics):
         cfg = ctx.config(self.name)
+        reviewers = cfg.get("reviewers") or []
+        if not reviewers:
+            return
+
+        _guard_legacy_state(ctx, self.name)
+
+        records = ctx.step_get(self.name, "reviewers", {}) or {}
+        ctx.step_set(self.name, "reviewers", records)
+        ctx.step_set(self.name, "order", [r["name"] for r in reviewers])
+        ctx.save()
+
+        with engine.stage(self.name) as s:
+            for r in reviewers:
+                existing = records.get(r["name"]) or {}
+                if existing.get("status") in ("approved", "addressed"):
+                    continue
+                ctx.step_set(self.name, "current", r["name"])
+                ctx.save()
+                self._run_reviewer(ctx, engine, lifecycle, step_metrics, s, r)
+            ctx.step_set(self.name, "current", None)
+            ctx.save()
+
+    def _run_reviewer(self, ctx, engine, lifecycle, step_metrics, s, reviewer):
+        name = reviewer["name"]
+        cmd = reviewer["cmd"]
+        timeout = reviewer.get("timeout", 300)
+        max_retries = reviewer.get("max_retries", 10)
+
         wt_dir = ctx.get("wt_dir")
         spec_path = ctx.get("spec", "")
         branch = ctx.get("branch", "")
         base_branch = ctx.get("base_branch", "")
-        log_review = ctx.run_dir / "review-implementation.review.log"
-        log_addr = ctx.log_path(self.name)
-        log_commit = ctx.run_dir / "review-implementation-commit-msg.log"
+        logs = _log_paths(ctx.run_dir, name)
 
-        if ctx.step_get(self.name, "verify_errors", None) is None:
-            ctx.step_set(self.name, "verify_errors", "")
+        if _record_get(ctx, self.name, name, "verify_errors", None) is None:
+            _record_set(ctx, self.name, name, "verify_errors", "")
 
-        with engine.stage(self.name) as s:
-            # Phase A: invoke script once per step run
-            if not ctx.step_get(self.name, "review_done", False):
-                s.update("reviewing")
-                argv = shlex.split(cfg["cmd"])
-                argv[0] = _resolve_argv0(argv[0], ctx.get("repo"))
-                env = {
-                    **os.environ,
-                    "DRAFT_REPO_DIR": wt_dir,
-                    "DRAFT_BRANCH": branch,
-                    "DRAFT_BASE_BRANCH": _short_base(base_branch),
-                    "DRAFT_SPEC_FILE": spec_path,
-                }
-                verdict = _invoke_script(argv, wt_dir, env, cfg["timeout"], log_review)
-                if verdict.kind == "infra_failure":
-                    print(
-                        f"review-implementation: review script failed ({verdict.reason});"
-                        " proceeding without address loop",
-                        file=sys.stderr,
-                    )
-                    ctx.step_set(self.name, "review_done", True)
-                    ctx.step_set(self.name, "review_issues", "")
-                    ctx.save()
-                    s.update("ok no review")
-                    return
-                ctx.step_set(self.name, "review_done", True)
-                ctx.step_set(self.name, "review_issues", verdict.stdout)
+        # Phase A: invoke script once per reviewer
+        if not _record_get(ctx, self.name, name, "review_done", False):
+            s.update(f"[{name}] reviewing")
+            argv = shlex.split(cmd)
+            argv[0] = _resolve_argv0(argv[0], ctx.get("repo"))
+            env = {
+                **os.environ,
+                "DRAFT_REPO_DIR": wt_dir,
+                "DRAFT_BRANCH": branch,
+                "DRAFT_BASE_BRANCH": _short_base(base_branch),
+                "DRAFT_SPEC_FILE": spec_path,
+                "DRAFT_REVIEWER_NAME": name,
+            }
+            verdict = _invoke_script(argv, wt_dir, env, timeout, logs["review"])
+            if verdict.kind == "infra_failure":
+                print(
+                    f"review-implementation: review script failed ({verdict.reason});"
+                    f" reviewer: {name}",
+                    file=sys.stderr,
+                )
+                _record_set(ctx, self.name, name, "status", "failed")
                 ctx.save()
+                raise StepError(self.name, 1)
+            _record_set(ctx, self.name, name, "review_done", True)
+            _record_set(ctx, self.name, name, "review_issues", verdict.stdout)
+            ctx.save()
 
-            review_issues = ctx.step_get(self.name, "review_issues", "")
-            if not review_issues:
-                s.update("ok no suggestions")
-                return
+        review_issues = _record_get(ctx, self.name, name, "review_issues", "")
+        if not review_issues:
+            _record_set(ctx, self.name, name, "status", "approved")
+            _record_set(ctx, self.name, name, "commit_sha", None)
+            s.update(f"[{name}] ok no review")
+            return
 
-            # Phase B: address loop
-            impl_template = (
-                files("draft.steps.review_implementation")
-                .joinpath("review_implementation.md")
-                .read_text()
-            )
-            suggest_template = (
-                files("draft.steps.review_implementation")
-                .joinpath("suggest_checks.md")
-                .read_text()
-                if cfg["suggest_extra_checks"]
-                else None
-            )
-            verify_hook_entries = lifecycle.get_hooks(self.name, "verify")
-            verify_commands = _render_verify_commands(verify_hook_entries)
-            static_cmds = [
-                e["cmd"]
-                for e in verify_hook_entries
-                if isinstance(e, dict) and e.get("cmd")
-            ]
-            spec_text = _read_spec_text(spec_path)
+        # Phase B: address loop
+        impl_template = (
+            files("draft.steps.review_implementation")
+            .joinpath("review_implementation.md")
+            .read_text()
+        )
+        suggest_template = (
+            files("draft.steps.review_implementation")
+            .joinpath("suggest_checks.md")
+            .read_text()
+            if ctx.config(self.name).get("suggest_extra_checks", True)
+            else None
+        )
+        verify_hook_entries = lifecycle.get_hooks(self.name, "verify")
+        verify_commands = _render_verify_commands(verify_hook_entries)
+        static_cmds = [
+            e["cmd"]
+            for e in verify_hook_entries
+            if isinstance(e, dict) and e.get("cmd")
+        ]
+        spec_text = _read_spec_text(spec_path)
 
-            for attempt in range(1, cfg["max_retries"] + 1):
-                prefix = (
-                    "" if attempt == 1 else f"attempt {attempt}/{cfg['max_retries']} — "
-                )
-                s.update(prefix + "addressing review")
-                engine.run_llm(
-                    prompt=_render_addr_prompt(
-                        impl_template,
-                        spec_text,
-                        review_issues,
-                        verify_commands,
-                        ctx.step_get(self.name, "verify_errors", ""),
-                    ),
-                    cwd=wt_dir,
-                    log_path=log_addr,
-                    step_metrics=step_metrics,
-                    allowed_tools=["Bash", "Edit", "Write", "Read"],
-                    timeout=cfg["timeout"],
-                )
-
-                if not _has_changes(wt_dir):
-                    if attempt == 1:
-                        s.update("ok suggestions ignored")
-                        s.stderr("review-implementation: feedback has no changes:")
-                        s.stderr(review_issues)
-                        ctx.step_set(self.name, "no_changes", True)
-                        ctx.step_set(self.name, "verify_errors", "")
-                        ctx.save()
-                        return
-                    ctx.step_set(self.name, "verify_errors", _NO_CHANGES_MSG)
-                    ctx.save()
-                    continue
-
-                s.update(f"{prefix}verifying")
-                failures = [
-                    r for r in lifecycle.run_hooks(self.name, "verify") if r.rc != 0
-                ]
-                if failures:
-                    ctx.step_set(
-                        self.name,
-                        "verify_errors",
-                        "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures),
-                    )
-                    ctx.save()
-                    continue
-
-                if cfg["suggest_extra_checks"]:
-                    s.update(f"{prefix}suggesting checks")
-                    suggested = _suggest_checks(
-                        ctx,
-                        engine,
-                        step_metrics,
-                        _SUGGESTER_CFG,
-                        spec_text,
-                        wt_dir,
-                        static_cmds,
-                        suggest_template,
-                    )
-                    ctx.step_set(self.name, "suggested_checks", suggested)
-                    ctx.save()
-                    s.update(f"{prefix}running suggested checks")
-                    suggest_failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, _SUGGESTER_CFG, s
-                    )
-                    if suggest_failures:
-                        ctx.step_set(
-                            self.name,
-                            "verify_errors",
-                            _format_suggested_failures(suggest_failures),
-                        )
-                        ctx.save()
-                        continue
-
-                s.update(f"{prefix}writing commit")
-                message, used_fallback = _generate_commit_message(
-                    review_issues,
+        for attempt in range(1, max_retries + 1):
+            prefix = "" if attempt == 1 else f"attempt {attempt}/{max_retries} — "
+            s.update(f"[{name}] {prefix}addressing review")
+            engine.run_llm(
+                prompt=_render_addr_prompt(
+                    impl_template,
                     spec_text,
-                    wt_dir,
-                    log_commit,
-                    120,
-                    3,
+                    review_issues,
+                    verify_commands,
+                    _record_get(ctx, self.name, name, "verify_errors", ""),
+                ),
+                cwd=wt_dir,
+                log_path=logs["addr"],
+                step_metrics=step_metrics,
+                allowed_tools=["Bash", "Edit", "Write", "Read"],
+                timeout=timeout,
+            )
+
+            if not _has_changes(wt_dir):
+                if attempt == 1:
+                    _record_set(ctx, self.name, name, "status", "approved")
+                    _record_set(ctx, self.name, name, "commit_sha", None)
+                    s.update(f"[{name}] ok suggestions ignored")
+                    s.stderr("review-implementation: feedback has no changes:")
+                    s.stderr(review_issues)
+                    _record_set(ctx, self.name, name, "no_changes", True)
+                    _record_set(ctx, self.name, name, "verify_errors", "")
+                    ctx.save()
+                    return
+                _record_set(ctx, self.name, name, "verify_errors", _NO_CHANGES_MSG)
+                ctx.save()
+                continue
+
+            s.update(f"[{name}] {prefix}verifying")
+            failures = [
+                r for r in lifecycle.run_hooks(self.name, "verify") if r.rc != 0
+            ]
+            if failures:
+                _record_set(
+                    ctx,
+                    self.name,
+                    name,
+                    "verify_errors",
+                    "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures),
+                )
+                ctx.save()
+                continue
+
+            if ctx.config(self.name).get("suggest_extra_checks", True):
+                s.update(f"[{name}] {prefix}suggesting checks")
+                suggested = _suggest_checks(
+                    ctx,
                     engine,
                     step_metrics,
+                    _SUGGESTER_CFG,
+                    spec_text,
+                    wt_dir,
+                    static_cmds,
+                    suggest_template,
+                    log_path=logs["suggest"],
                 )
-                _run_git_capture(["git", "add", "-A"], wt_dir, 60, log_commit)
-                commit = _run_git_capture_allow_fail(
-                    ["git", "commit", "-m", message], wt_dir, 60, log_commit
+                _record_set(ctx, self.name, name, "suggested_checks", suggested)
+                ctx.save()
+                s.update(f"[{name}] {prefix}running suggested checks")
+                suggest_failures = _run_suggested_checks(
+                    suggested,
+                    wt_dir,
+                    ctx.run_dir,
+                    engine,
+                    _SUGGESTER_CFG,
+                    s,
+                    log_path=logs["suggested"],
                 )
-                if commit.returncode != 0:
-                    stdout_str = (
-                        commit.stdout
-                        if isinstance(commit.stdout, str)
-                        else commit.stdout.decode("utf-8", errors="replace")
-                    )
-                    stderr_str = (
-                        commit.stderr
-                        if isinstance(commit.stderr, str)
-                        else commit.stderr.decode("utf-8", errors="replace")
-                    )
-                    ctx.step_set(
+                if suggest_failures:
+                    _record_set(
+                        ctx,
                         self.name,
+                        name,
                         "verify_errors",
-                        _format_pre_commit_errors(stdout_str, stderr_str),
+                        _format_suggested_failures(suggest_failures),
                     )
                     ctx.save()
                     continue
 
-                sha = _run_git_capture(
-                    ["git", "rev-parse", "HEAD"], wt_dir, 30, log_commit
-                ).strip()
-                ctx.step_set(self.name, "commit_sha", sha)
-                ctx.step_set(self.name, "commit_message_fallback", used_fallback)
-                ctx.step_set(self.name, "verify_errors", "")
-                if cfg["suggest_extra_checks"]:
-                    ctx.step_set(self.name, "suggested_checks", [])
+            s.update(f"[{name}] {prefix}writing commit")
+            message, used_fallback = _generate_commit_message(
+                review_issues,
+                spec_text,
+                wt_dir,
+                logs["commit"],
+                120,
+                3,
+                engine,
+                step_metrics,
+                reviewer_name=name,
+            )
+            _run_git_capture(["git", "add", "-A"], wt_dir, 60, logs["commit"])
+            commit = _run_git_capture_allow_fail(
+                ["git", "commit", "-m", message], wt_dir, 60, logs["commit"]
+            )
+            if commit.returncode != 0:
+                stdout_str = (
+                    commit.stdout
+                    if isinstance(commit.stdout, str)
+                    else commit.stdout.decode("utf-8", errors="replace")
+                )
+                stderr_str = (
+                    commit.stderr
+                    if isinstance(commit.stderr, str)
+                    else commit.stderr.decode("utf-8", errors="replace")
+                )
+                _record_set(
+                    ctx,
+                    self.name,
+                    name,
+                    "verify_errors",
+                    _format_pre_commit_errors(stdout_str, stderr_str),
+                )
                 ctx.save()
-                s.update("ok suggestions addressed")
-                return
+                continue
 
-            raise StepError(self.name, 1)
+            sha = _run_git_capture(
+                ["git", "rev-parse", "HEAD"], wt_dir, 30, logs["commit"]
+            ).strip()
+            _record_set(ctx, self.name, name, "commit_sha", sha)
+            _record_set(ctx, self.name, name, "commit_message_fallback", used_fallback)
+            _record_set(ctx, self.name, name, "verify_errors", "")
+            _record_set(ctx, self.name, name, "status", "addressed")
+            if ctx.config(self.name).get("suggest_extra_checks", True):
+                _record_set(ctx, self.name, name, "suggested_checks", [])
+            ctx.save()
+            s.update(f"[{name}] ok suggestions addressed")
+            return
+
+        _record_set(ctx, self.name, name, "status", "failed")
+        ctx.save()
+        raise StepError(self.name, 1)

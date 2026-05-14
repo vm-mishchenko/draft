@@ -1,10 +1,13 @@
 import os
+import re
 import shlex
 import shutil
 import sys
 from pathlib import Path
 
 import yaml
+
+_REVIEWER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class ConfigError(Exception):
@@ -190,26 +193,11 @@ def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
                 )
 
     if step_name == "review-implementation":
-        if "cmd" in step_cfg:
-            val = step_cfg["cmd"]
-            if not isinstance(val, str):
-                raise ConfigError("steps.review-implementation.cmd must be a string")
-            if val.strip():
-                try:
-                    shlex.split(val)
-                except ValueError as e:
-                    raise ConfigError(
-                        f"steps.review-implementation.cmd is not parseable: {e}"
-                    ) from e
-        if "timeout" in step_cfg:
-            val = step_cfg["timeout"]
-            if (
-                not isinstance(val, int)
-                or isinstance(val, bool)
-                or not (1 <= val <= 3600)
-            ):
+        for removed_key in ("cmd", "timeout", "max_retries"):
+            if removed_key in step_cfg:
                 raise ConfigError(
-                    "steps.review-implementation.timeout must be an int between 1 and 3600"
+                    f"steps.review-implementation.{removed_key} was removed;"
+                    f" move it to steps.review-implementation.reviewers[].{removed_key}"
                 )
         if "suggest_extra_checks" in step_cfg:
             val = step_cfg["suggest_extra_checks"]
@@ -217,33 +205,123 @@ def _validate_step_keys(step_name: str, step_cfg: dict) -> None:
                 raise ConfigError(
                     "steps.review-implementation.suggest_extra_checks must be a bool (true or false)"
                 )
+        if "reviewers" in step_cfg:
+            val = step_cfg["reviewers"]
+            if not isinstance(val, list):
+                raise ConfigError(
+                    "steps.review-implementation.reviewers must be a list"
+                )
+            _validate_reviewers(val)
 
 
-def validate_review_cmd_argv0(config: dict, repo: str) -> None:
-    cmd = config.get("steps", {}).get("review-implementation", {}).get("cmd", "")
-    if not isinstance(cmd, str) or not cmd.strip():
+def _validate_reviewers(reviewers: list) -> None:
+    seen: set[str] = set()
+    for i, entry in enumerate(reviewers):
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}] must be a mapping"
+            )
+        allowed = {"name", "cmd", "timeout", "max_retries"}
+        for bad in entry:
+            if bad not in allowed:
+                raise ConfigError(
+                    f"unknown reviewer key '{bad}' for"
+                    f" steps.review-implementation.reviewers[{i}]"
+                )
+        name = entry.get("name")
+        if name is None:
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}]: missing 'name'"
+            )
+        if not isinstance(name, str) or not name:
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}].name must be a non-empty string"
+            )
+        if not _REVIEWER_NAME_RE.match(name):
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}].name must match"
+                f" [A-Za-z0-9_-]+: {name!r}"
+            )
+        if name in seen:
+            raise ConfigError(
+                f"steps.review-implementation.reviewers: duplicate reviewer name {name!r}"
+            )
+        seen.add(name)
+        cmd = entry.get("cmd")
+        if cmd is None:
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}].cmd is required"
+            )
+        if not isinstance(cmd, str) or not cmd.strip():
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}].cmd must be a non-empty string"
+            )
+        try:
+            shlex.split(cmd)
+        except ValueError as e:
+            raise ConfigError(
+                f"steps.review-implementation.reviewers[{i}].cmd is not parseable: {e}"
+            ) from e
+        if "timeout" in entry:
+            val = entry["timeout"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 3600)
+            ):
+                raise ConfigError(
+                    f"steps.review-implementation.reviewers[{i}].timeout"
+                    f" must be an int between 1 and 3600"
+                )
+        if "max_retries" in entry:
+            val = entry["max_retries"]
+            if (
+                not isinstance(val, int)
+                or isinstance(val, bool)
+                or not (1 <= val <= 100)
+            ):
+                raise ConfigError(
+                    f"steps.review-implementation.reviewers[{i}].max_retries"
+                    f" must be an int between 1 and 100"
+                )
+
+
+def validate_reviewer_argv0s(config: dict, repo: str) -> None:
+    reviewers = (
+        config.get("steps", {}).get("review-implementation", {}).get("reviewers", [])
+    ) or []
+    if not isinstance(reviewers, list):
         return
-    try:
-        argv = shlex.split(cmd)
-    except ValueError:
-        return
-    argv0 = argv[0]
-    if os.path.isabs(argv0):
-        if not (Path(argv0).is_file() and os.access(argv0, os.X_OK)):
-            raise ConfigError(
-                f"steps.review-implementation.cmd: argv[0] not an executable file: {argv0}"
-            )
-    elif os.sep in argv0 or argv0.startswith("."):
-        resolved = (Path(repo) / argv0).resolve()
-        if not (resolved.is_file() and os.access(resolved, os.X_OK)):
-            raise ConfigError(
-                f"steps.review-implementation.cmd: argv[0] not an executable file: {resolved}"
-            )
-    else:
-        if shutil.which(argv0) is None:
-            raise ConfigError(
-                f"steps.review-implementation.cmd: argv[0] not found on PATH: {argv0}"
-            )
+    for i, entry in enumerate(reviewers):
+        if not isinstance(entry, dict):
+            continue
+        cmd = entry.get("cmd", "")
+        if not isinstance(cmd, str) or not cmd.strip():
+            continue
+        try:
+            argv = shlex.split(cmd)
+        except ValueError:
+            continue
+        argv0 = argv[0]
+        if os.path.isabs(argv0):
+            if not (Path(argv0).is_file() and os.access(argv0, os.X_OK)):
+                raise ConfigError(
+                    f"steps.review-implementation.reviewers[{i}].cmd:"
+                    f" argv[0] not an executable file: {argv0}"
+                )
+        elif os.sep in argv0 or argv0.startswith("."):
+            resolved = (Path(repo) / argv0).resolve()
+            if not (resolved.is_file() and os.access(resolved, os.X_OK)):
+                raise ConfigError(
+                    f"steps.review-implementation.reviewers[{i}].cmd:"
+                    f" argv[0] not an executable file: {resolved}"
+                )
+        else:
+            if shutil.which(argv0) is None:
+                raise ConfigError(
+                    f"steps.review-implementation.reviewers[{i}].cmd:"
+                    f" argv[0] not found on PATH: {argv0}"
+                )
 
 
 def validate_config(config: dict) -> None:
