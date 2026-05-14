@@ -16,15 +16,13 @@ draft create spec.md
 
 ## Features
 
-- Project-agnostic — no assumptions about language, framework, or build system
-- Hooks to run custom shell scripts at every pipeline stage
-- Configurable quality checks the generated code must pass
-- Discovers and runs tests for the affected files
-- Code review by a separate agent
-- Configurable PR templates, execution timeouts, and retry attempts
-- Log files for every step and hook
-- Resumable runs — stop and continue at any point
-- Tracks time and cost spent on each spec
+- Project-agnostic - no assumptions about language, framework, or build system
+- Hooks - custom shell scripts at every pipeline stage
+- Configured checks - you define which checks the generated code must pass
+- Discovered tests - LLM picks which tests to run based on spec and edited files
+- Code review - performed by a separate agent
+- Resumable runs - stop and continue at any point
+- Cost tracking - time and cost spent on each spec
 
 Steps in order:
 
