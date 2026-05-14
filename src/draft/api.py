@@ -332,7 +332,10 @@ def create(params: CreateParams, *, llm: LLMClient) -> CreateResult:
     if params.spec_path and not params.prompt:
         _assert_spec_readable(params.spec_path)
 
-    _assert_on_path("claude")
+    from pipeline.runner import SubprocessLLMClient
+
+    if isinstance(llm, SubprocessLLMClient):
+        _assert_on_path("claude")
     _assert_git_repo()
     _assert_main_clone()
     if not params.skip_pr:
