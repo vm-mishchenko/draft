@@ -348,11 +348,12 @@ class FixPrStep(Step):
                 ctx.step_set(self.name, "verify_errors", "")
                 ctx.step_set(self.name, "attempts", attempt)
                 ctx.save()
-                print(
+                s.update(f"committed on {branch} ({shortstat}); not pushed")
+                s.stderr(
                     f"fix-pr: committed on {branch}; {shortstat}; "
                     f"not pushed (run `git push origin HEAD` when ready)"
                 )
                 return
 
-        print(f"fix-pr: exhausted attempts. PR: {pr_url}")
-        raise StepError(self.name, 1)
+            s.stderr(f"fix-pr: exhausted attempts. PR: {pr_url}")
+            raise StepError(self.name, 1)

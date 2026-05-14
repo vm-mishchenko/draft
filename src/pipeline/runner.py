@@ -98,9 +98,27 @@ class StageHandle:
     def __init__(self):
         self._status = "ok"
         self._countdown_until: float | None = None
+        self._stderr_lines: list[str] = []
 
     def update(self, text: str) -> None:
         self._status = text
+
+    def sleep(self, seconds: float, label: str | None = None) -> None:
+        if seconds <= 0:
+            return
+        prev = self._status
+        if label is not None:
+            self._status = label
+        self._countdown_until = time.monotonic() + seconds
+        try:
+            time.sleep(seconds)
+        finally:
+            self._countdown_until = None
+            if label is not None:
+                self._status = prev
+
+    def stderr(self, text: str) -> None:
+        self._stderr_lines.append(text)
 
 
 class Runner:
@@ -193,6 +211,9 @@ class Runner:
             else:
                 sys.stdout.write(f"{line}\n")
             sys.stdout.flush()
+            for msg in handle._stderr_lines:
+                sys.stderr.write(msg + ("\n" if not msg.endswith("\n") else ""))
+            sys.stderr.flush()
 
     def run_command(
         self,
@@ -337,36 +358,3 @@ class Runner:
         step_metrics.add(KnownMetric.LLM_DURATION_MS, state["duration_ms"])
 
         return LLMResult(rc=rc, final_text=state["final_text"])
-
-    def sleep(self, seconds: float, label: str = "waiting"):
-        if seconds <= 0:
-            return
-        if self._active_stage is not None:
-            handle = self._active_stage
-            prev_status = handle._status
-            handle._status = label
-            handle._countdown_until = time.monotonic() + seconds
-            try:
-                time.sleep(seconds)
-            finally:
-                handle._countdown_until = None
-                handle._status = prev_status
-            return
-        is_tty = sys.stdout.isatty()
-        padded = label[: self.LABEL_WIDTH].ljust(self.LABEL_WIDTH)
-        end = time.monotonic() + seconds
-        while True:
-            remaining = end - time.monotonic()
-            if remaining <= 0:
-                break
-            line = f"{padded} {int(remaining):>6}s..."
-            if is_tty:
-                sys.stdout.write(f"\r\033[K{line}")
-                sys.stdout.flush()
-            time.sleep(1)
-        if is_tty:
-            sys.stdout.write("\r\033[K")
-            sys.stdout.flush()
-        else:
-            sys.stdout.write("\n")
-            sys.stdout.flush()

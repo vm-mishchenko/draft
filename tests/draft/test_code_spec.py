@@ -797,18 +797,16 @@ def test_run_suggested_checks_all_pass(tmp_path):
     cfg = _make_run_suggested_cfg()
 
     engine = MagicMock()
-    ticker_ctx = MagicMock()
-    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
-    ticker_ctx.__exit__ = MagicMock(return_value=False)
-    engine.tty_ticker.return_value = ticker_ctx
+    stage = MagicMock()
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=_make_hook_result(rc=0),
     ):
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
 
     assert failures == []
+    assert stage.update.call_count == 2
     log_content = (tmp_path / "implement-spec.suggested.log").read_text()
     assert "--- exit 0" in log_content
 
@@ -818,10 +816,7 @@ def test_run_suggested_checks_first_failure_short_circuits(tmp_path):
     cfg = _make_run_suggested_cfg()
 
     engine = MagicMock()
-    ticker_ctx = MagicMock()
-    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
-    ticker_ctx.__exit__ = MagicMock(return_value=False)
-    engine.tty_ticker.return_value = ticker_ctx
+    stage = MagicMock()
 
     fail_result = _make_hook_result(cmd="false", rc=1, output="fail\n")
 
@@ -829,7 +824,7 @@ def test_run_suggested_checks_first_failure_short_circuits(tmp_path):
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=fail_result,
     ) as mock_hook:
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
 
     assert len(failures) == 1
     assert failures[0].rc == 1
@@ -841,16 +836,13 @@ def test_run_suggested_checks_timeout_capped(tmp_path):
     cfg = _make_run_suggested_cfg(per_check_timeout=120)
 
     engine = MagicMock()
-    ticker_ctx = MagicMock()
-    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
-    ticker_ctx.__exit__ = MagicMock(return_value=False)
-    engine.tty_ticker.return_value = ticker_ctx
+    stage = MagicMock()
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=_make_hook_result(),
     ) as mock_hook:
-        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
 
     mock_hook.assert_called_once_with("slow", 120, "/wt")
 
@@ -860,16 +852,13 @@ def test_run_suggested_checks_default_timeout_used(tmp_path):
     cfg = _make_run_suggested_cfg(per_check_timeout=90)
 
     engine = MagicMock()
-    ticker_ctx = MagicMock()
-    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
-    ticker_ctx.__exit__ = MagicMock(return_value=False)
-    engine.tty_ticker.return_value = ticker_ctx
+    stage = MagicMock()
 
     with patch(
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=_make_hook_result(),
     ) as mock_hook:
-        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
 
     mock_hook.assert_called_once_with("echo ok", 90, "/wt")
 
@@ -879,10 +868,7 @@ def test_run_suggested_checks_budget_exhausted(tmp_path):
     cfg = _make_run_suggested_cfg(suggester_total_budget=5)
 
     engine = MagicMock()
-    ticker_ctx = MagicMock()
-    ticker_ctx.__enter__ = MagicMock(return_value=MagicMock())
-    ticker_ctx.__exit__ = MagicMock(return_value=False)
-    engine.tty_ticker.return_value = ticker_ctx
+    stage = MagicMock()
 
     long_result = _make_hook_result(cmd="long", rc=0, duration=10.0)
 
@@ -890,7 +876,7 @@ def test_run_suggested_checks_budget_exhausted(tmp_path):
         "draft.steps.implement_spec._run_hook_cmd",
         return_value=long_result,
     ) as mock_hook:
-        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg)
+        failures = _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
 
     assert failures == []
     assert mock_hook.call_count == 1
@@ -1067,7 +1053,7 @@ def test_suggest_enabled_check_fails_verify_errors_set_commit_not_taken(tmp_path
     fail_result = HookResult(cmd="false", rc=1, output="fail\n", duration=0.1)
     sugg_call_count = 0
 
-    def run_suggested_side(suggested, wt_dir, run_dir, eng, c):
+    def run_suggested_side(suggested, wt_dir, run_dir, eng, c, stage):
         nonlocal sugg_call_count
         sugg_call_count += 1
         if sugg_call_count == 1:
@@ -1377,7 +1363,9 @@ def test_first_attempt_status_has_no_prefix(tmp_path):
     s = _run_step_capturing_s(cfg, tmp_path, lifecycle)
 
     calls = [c.args[0] for c in s.update.call_args_list]
-    assert all(c in ("implementing", "verifying", "writing commit") for c in calls)
+    assert all(
+        c in ("implementing", "verifying", "writing commit", "ok") for c in calls
+    )
     assert not any("attempt" in c or "—" in c for c in calls)
 
 
@@ -1398,7 +1386,8 @@ def test_second_attempt_status_has_prefix(tmp_path):
     attempt1_calls = calls[:boundary]
     attempt2_calls = calls[boundary:]
     assert not any("attempt" in c for c in attempt1_calls)
-    assert all(c.startswith("attempt 2/3 — ") for c in attempt2_calls)
+    non_ok = [c for c in attempt2_calls if c != "ok"]
+    assert all(c.startswith("attempt 2/3 — ") for c in non_ok)
 
 
 def test_max_retries_exhausted_last_status_has_prefix(tmp_path):
