@@ -1,7 +1,6 @@
 import sys
 
 from draft.api import CreateParams, create
-from draft.command_common import _assert_on_path
 from draft.errors import DraftError, StepFailedError
 from pipeline.runner import SubprocessLLMClient
 
@@ -87,7 +86,6 @@ def run(args) -> int:
     )
 
     try:
-        _assert_on_path("claude")
         result = create(params, llm=SubprocessLLMClient())
     except StepFailedError as exc:
         print(f"\nerror: {exc}", file=sys.stderr)
