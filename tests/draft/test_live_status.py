@@ -139,7 +139,7 @@ def test_tick_file_grows_calls_run_llm(tmp_path):
     s._tick()
     call_kwargs = engine.run_llm.call_args[1]
     assert call_kwargs["log_path"] is None
-    assert call_kwargs["extra_args"] == ["--model", "claude-3-5-haiku-latest"]
+    assert call_kwargs["extra_args"] == ["--model", "haiku"]
     assert call_kwargs["allowed_tools"] == []
     assert call_kwargs["timeout"] == 10
     assert "x" * 10 in call_kwargs["prompt"]

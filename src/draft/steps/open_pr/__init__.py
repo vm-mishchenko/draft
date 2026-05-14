@@ -126,7 +126,7 @@ class OpenPrStep(Step):
                     "--permission-mode",
                     "acceptEdits",
                     "--model",
-                    "claude-3-5-haiku-latest",
+                    "haiku",
                 ],
                 timeout=cfg["timeout"],
             )
