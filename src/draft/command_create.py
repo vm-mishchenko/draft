@@ -613,7 +613,7 @@ def run(args) -> int:
         pass
 
     # 14. Lifecycle + engine
-    engine = Runner()
+    engine = Runner(model=config.get("model"))
     lifecycle = DraftLifecycle(
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )

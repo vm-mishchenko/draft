@@ -433,7 +433,7 @@ def run(args) -> int:
     print("mode: local commit (no push)")
     print()
 
-    engine = Runner()
+    engine = Runner(model=config.get("model"))
     lifecycle = DraftLifecycle(
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )

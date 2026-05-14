@@ -126,8 +126,11 @@ class StageHandle:
 class Runner:
     LABEL_WIDTH = 36
 
-    def __init__(self):
+    def __init__(self, *, model: str | None = None):
         self._active_stage: StageHandle | None = None
+        self._model = (
+            model.strip() if isinstance(model, str) and model.strip() else None
+        )
 
     @contextmanager
     def tty_ticker(self, label: str):
@@ -285,6 +288,8 @@ class Runner:
         argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
         if allowed_tools:
             argv += ["--allowedTools", ",".join(allowed_tools)]
+        if self._model and "--model" not in extra_args:
+            argv += ["--model", self._model]
         argv += list(extra_args)
 
         wall_start = monotonic()

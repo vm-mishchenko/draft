@@ -216,6 +216,21 @@ steps:
 
 Configuration for each pipeline step.
 
+### Model
+
+```yaml
+model: opus
+
+steps:
+  implement-spec:
+    ...
+```
+
+- The value is passed verbatim to `claude --model`, so any value the installed `claude` CLI accepts is valid (aliases like `opus`, `sonnet`, `haiku`; or full IDs like `claude-sonnet-4-5-20250929`).
+- When the key is absent, `draft` does not pass `--model` and the `claude` CLI's own default applies.
+- The setting is global to the run: every step uses it, and per-step overrides are not supported.
+- It merges across global / project configs the same way every other config key does (project wins).
+
 ### create-worktree
 
 ```yaml

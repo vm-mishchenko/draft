@@ -325,6 +325,11 @@ def validate_reviewer_argv0s(config: dict, repo: str) -> None:
 
 
 def validate_config(config: dict) -> None:
+    if "model" in config:
+        val = config["model"]
+        if not isinstance(val, str) or not val.strip():
+            raise ConfigError("top-level 'model' must be a non-empty string")
+
     steps = config.get("steps")
     if steps is None:
         return
