@@ -3,7 +3,7 @@ from importlib.resources import files
 from pathlib import Path
 
 INTERVAL = 20
-MODEL = "claude-3-5-haiku-latest"
+MODEL = "haiku"
 TAIL_BYTES = 4096
 MIN_BYTES = 200
 MAX_CHARS = 30
