@@ -21,11 +21,13 @@ from draft.command_common import (
     _validate_run_id,
 )
 from draft.config import ConfigError, load_config, step_config, validate_config
+from draft.errors import DraftError, StepFailedError, UserInputError
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
 from draft.steps.fix_pr import FixPrStep
-from pipeline import RunContext, Runner, StepError
+from pipeline import Pipeline, RunContext, StepError
 from pipeline.heartbeat import HeartbeatPulse
+from pipeline.runner import Runner, SubprocessLLMClient
 
 
 def register(subparsers):
@@ -91,24 +93,15 @@ def _fetch_pr(pr_input: str, repo: str) -> dict:
     )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
-        print(f"error: {stderr}", file=sys.stderr)
-        sys.exit(2)
+        raise UserInputError(stderr)
     return json.loads(result.stdout)
 
 
 def _assert_pr_acceptable(pr: dict) -> None:
     if pr["state"] != "OPEN":
-        print(
-            f"error: PR is not open (state: {pr['state']})",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        raise UserInputError(f"PR is not open (state: {pr['state']})")
     if pr.get("isCrossRepository"):
-        print(
-            "error: cross-repository (fork) PRs are not supported",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        raise UserInputError("cross-repository (fork) PRs are not supported")
 
 
 def _assert_branch_exists_and_matches(
@@ -121,15 +114,17 @@ def _assert_branch_exists_and_matches(
         cwd=repo,
     )
     if result.returncode != 0:
-        print(f"error: branch '{branch}' does not exist locally", file=sys.stderr)
-        print(f"       fetch it with: gh pr checkout {pr_number}", file=sys.stderr)
-        sys.exit(2)
+        raise UserInputError(
+            f"branch '{branch}' does not exist locally\n"
+            f"       fetch it with: gh pr checkout {pr_number}"
+        )
     local_sha = result.stdout.strip()
     if local_sha != expected_sha:
-        print(f"error: local branch '{branch}' is at {local_sha}", file=sys.stderr)
-        print(f"       PR headRefOid is {expected_sha}", file=sys.stderr)
-        print(f"       sync with: gh pr checkout {pr_number}", file=sys.stderr)
-        sys.exit(2)
+        raise UserInputError(
+            f"local branch '{branch}' is at {local_sha}\n"
+            f"       PR headRefOid is {expected_sha}\n"
+            f"       sync with: gh pr checkout {pr_number}"
+        )
 
 
 def _assert_working_tree_clean(wt_dir: str) -> None:
@@ -140,9 +135,7 @@ def _assert_working_tree_clean(wt_dir: str) -> None:
         cwd=wt_dir,
     )
     if result.stdout.strip():
-        print("error: working tree is dirty:", file=sys.stderr)
-        print(result.stdout, file=sys.stderr, end="")
-        sys.exit(2)
+        raise UserInputError(f"working tree is dirty:\n{result.stdout.rstrip()}")
 
 
 def _resolve_worktree_for_fix_pr(
@@ -289,6 +282,17 @@ def run(args) -> int:
         )
         return 2
 
+    try:
+        return _run(args)
+    except StepFailedError as exc:
+        print(f"\nerror: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except DraftError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+
+def _run(args) -> int:
     _assert_git_repo()
     _assert_main_clone()
     _assert_on_path("gh")
@@ -308,28 +312,24 @@ def run(args) -> int:
     existing = runs.find_active_run_on_branch(project, branch)
     if existing is not None:
         run_id_existing = existing.name
-        print(
-            f"error: branch '{branch}' is already targeted by an unresolved run '{run_id_existing}'",
-            file=sys.stderr,
+        raise UserInputError(
+            f"branch '{branch}' is already targeted by an unresolved run '{run_id_existing}'\n"
+            f"       resume it: draft continue {run_id_existing}\n"
+            f"       or remove it: draft delete {run_id_existing}"
         )
-        print(f"       resume it: draft continue {run_id_existing}", file=sys.stderr)
-        print(f"       or remove it: draft delete {run_id_existing}", file=sys.stderr)
-        sys.exit(2)
 
     wt_dir, worktree_mode = _resolve_worktree_for_fix_pr(repo, project, branch, args)
 
     try:
         config = load_config(repo)
     except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+        raise DraftError(str(exc)) from exc
     _validate_overrides(args.overrides)
     config = _apply_overrides(config, args.overrides)
     try:
         validate_config(config)
     except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
+        raise DraftError(str(exc)) from exc
 
     fix_cfg = step_config(config, "fix-pr", FixPrStep().defaults())
 
@@ -362,18 +362,15 @@ def run(args) -> int:
         return 124
     if gate == "sha-changed":
         return 2
-    # gate == "failure": fall through to pipeline
 
     existing = runs.find_active_run_on_branch(project, branch)
     if existing is not None:
         run_id_existing = existing.name
-        print(
-            f"error: branch '{branch}' is already targeted by an unresolved run '{run_id_existing}'",
-            file=sys.stderr,
+        raise UserInputError(
+            f"branch '{branch}' is already targeted by an unresolved run '{run_id_existing}'\n"
+            f"       resume it: draft continue {run_id_existing}\n"
+            f"       or remove it: draft delete {run_id_existing}"
         )
-        print(f"       resume it: draft continue {run_id_existing}", file=sys.stderr)
-        print(f"       or remove it: draft delete {run_id_existing}", file=sys.stderr)
-        return 2
 
     if args.run_id:
         _validate_run_id(args.run_id, project)
@@ -415,8 +412,6 @@ def run(args) -> int:
     else:
         Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
 
-    from pipeline import Pipeline
-
     session_metrics = ctx.metrics.session_begin("fix-pr")
     ctx.save()
     started_at = ctx._sessions[-1]["started_at"]
@@ -433,7 +428,7 @@ def run(args) -> int:
     print("mode: local commit (no push)")
     print()
 
-    engine = Runner()
+    engine = Runner(SubprocessLLMClient())
     lifecycle = DraftLifecycle(
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )
@@ -443,11 +438,10 @@ def run(args) -> int:
     try:
         Pipeline(active_steps).run(ctx, engine, lifecycle, session_metrics)
     except StepError as exc:
-        print(
-            f"\nerror: step '{exc.step_name}' failed (exit {exc.exit_code})",
-            file=sys.stderr,
-        )
         rc = 1
+        raise StepFailedError(
+            f"step '{exc.step_name}' failed (exit {exc.exit_code})"
+        ) from exc
     except BaseException:
         rc = -1
         raise
@@ -457,6 +451,5 @@ def run(args) -> int:
         ctx.save()
         pid_file.unlink(missing_ok=True)
 
-    if rc == 0:
-        print("done.")
-    return rc
+    print("done.")
+    return 0

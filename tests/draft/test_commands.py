@@ -921,84 +921,93 @@ def _make_create_args(**kwargs):
         branch = None
         no_worktree = False
         delete_worktree = False
+        no_review = False
+        run_id = None
 
     for k, v in kwargs.items():
         setattr(FakeArgs, k, v)
     return FakeArgs()
 
 
-def test_reject_branch_and_from_together(capsys):
-    import draft.command_create as cmd
+def test_reject_branch_and_from_together():
+    from draft.api import CreateParams, _validate_create_flags
+    from draft.errors import UserInputError
 
-    with pytest.raises(SystemExit) as exc:
-        cmd._reject_flag_conflicts(_make_create_args(branch="foo", from_branch="main"))
-    assert exc.value.code == 2
-    assert "mutually exclusive" in capsys.readouterr().err
-
-
-def test_reject_delete_worktree_with_no_worktree(capsys):
-    import draft.command_create as cmd
-
-    with pytest.raises(SystemExit) as exc:
-        cmd._reject_flag_conflicts(
-            _make_create_args(delete_worktree=True, no_worktree=True)
+    with pytest.raises(UserInputError) as exc_info:
+        _validate_create_flags(
+            CreateParams(spec_path="spec.md", branch="foo", from_branch="main")
         )
-    assert exc.value.code == 2
-    assert "--delete-worktree" in capsys.readouterr().err
+    assert exc_info.value.exit_code == 2
+    assert "mutually exclusive" in str(exc_info.value)
+
+
+def test_reject_delete_worktree_with_no_worktree():
+    from draft.api import CreateParams, _validate_create_flags
+    from draft.errors import UserInputError
+
+    with pytest.raises(UserInputError) as exc_info:
+        _validate_create_flags(
+            CreateParams(spec_path="spec.md", delete_worktree=True, no_worktree=True)
+        )
+    assert exc_info.value.exit_code == 2
+    assert "--delete-worktree" in str(exc_info.value)
 
 
 def test_reject_flag_conflicts_no_op_when_clean():
-    import draft.command_create as cmd
+    from draft.api import CreateParams, _validate_create_flags
 
-    cmd._reject_flag_conflicts(_make_create_args())  # must not raise
+    _validate_create_flags(CreateParams(spec_path="spec.md"))  # must not raise
 
 
 # --- create-modes: spec precheck ---
 
 
 def test_assert_spec_readable_accepts_existing_file(tmp_path):
-    import draft.command_create as cmd
+    from draft.api import _assert_spec_readable
 
     spec = tmp_path / "spec.md"
     spec.write_text("content")
-    cmd._assert_spec_readable(str(spec))  # must not raise
+    _assert_spec_readable(str(spec))  # must not raise
 
 
-def test_assert_spec_readable_missing_file(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_assert_spec_readable_missing_file(tmp_path):
+    from draft.api import _assert_spec_readable
+    from draft.errors import UserInputError
 
-    with pytest.raises(SystemExit) as exc:
-        cmd._assert_spec_readable(str(tmp_path / "missing.md"))
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "spec file not found" in err
-    assert str(tmp_path / "missing.md") in err
-
-
-def test_assert_spec_readable_directory(tmp_path, capsys):
-    import draft.command_create as cmd
-
-    with pytest.raises(SystemExit) as exc:
-        cmd._assert_spec_readable(str(tmp_path))
-    assert exc.value.code == 2
-    assert "not a regular file" in capsys.readouterr().err
+    with pytest.raises(UserInputError) as exc_info:
+        _assert_spec_readable(str(tmp_path / "missing.md"))
+    assert exc_info.value.exit_code == 2
+    assert "spec file not found" in str(exc_info.value)
+    assert str(tmp_path / "missing.md") in str(exc_info.value)
 
 
-def test_assert_spec_readable_broken_symlink(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_assert_spec_readable_directory(tmp_path):
+    from draft.api import _assert_spec_readable
+    from draft.errors import UserInputError
+
+    with pytest.raises(UserInputError) as exc_info:
+        _assert_spec_readable(str(tmp_path))
+    assert exc_info.value.exit_code == 2
+    assert "not a regular file" in str(exc_info.value)
+
+
+def test_assert_spec_readable_broken_symlink(tmp_path):
+    from draft.api import _assert_spec_readable
+    from draft.errors import UserInputError
 
     link = tmp_path / "link"
     link.symlink_to(tmp_path / "ghost")
-    with pytest.raises(SystemExit) as exc:
-        cmd._assert_spec_readable(str(link))
-    assert exc.value.code == 2
-    assert "spec file not found" in capsys.readouterr().err
+    with pytest.raises(UserInputError) as exc_info:
+        _assert_spec_readable(str(link))
+    assert exc_info.value.exit_code == 2
+    assert "spec file not found" in str(exc_info.value)
 
 
-def test_assert_spec_readable_unreadable_file(tmp_path, capsys):
+def test_assert_spec_readable_unreadable_file(tmp_path):
     import os
 
-    import draft.command_create as cmd
+    from draft.api import _assert_spec_readable
+    from draft.errors import UserInputError
 
     if os.geteuid() == 0:
         pytest.skip("root bypasses mode bits")
@@ -1006,30 +1015,30 @@ def test_assert_spec_readable_unreadable_file(tmp_path, capsys):
     spec.write_text("content")
     os.chmod(spec, 0o000)
     try:
-        with pytest.raises(SystemExit) as exc:
-            cmd._assert_spec_readable(str(spec))
-        assert exc.value.code == 2
-        assert "cannot read spec file" in capsys.readouterr().err
+        with pytest.raises(UserInputError) as exc_info:
+            _assert_spec_readable(str(spec))
+        assert exc_info.value.exit_code == 2
+        assert "cannot read spec file" in str(exc_info.value)
     finally:
         os.chmod(spec, 0o600)
 
 
-def test_assert_spec_readable_relative_path(tmp_path, monkeypatch, capsys):
-    import draft.command_create as cmd
+def test_assert_spec_readable_relative_path(tmp_path, monkeypatch):
+    from draft.api import _assert_spec_readable
 
     spec = tmp_path / "spec.md"
     spec.write_text("content")
     monkeypatch.chdir(tmp_path)
-    cmd._assert_spec_readable("spec.md")  # must not raise
+    _assert_spec_readable("spec.md")  # must not raise
 
 
 def test_assert_spec_readable_tilde_expansion(tmp_path, monkeypatch):
-    import draft.command_create as cmd
+    from draft.api import _assert_spec_readable
 
     monkeypatch.setenv("HOME", str(tmp_path))
     spec = tmp_path / "spec.md"
     spec.write_text("content")
-    cmd._assert_spec_readable("~/spec.md")  # must not raise
+    _assert_spec_readable("~/spec.md")  # must not raise
 
 
 def test_run_exits_before_creating_run_dir(tmp_path, monkeypatch, capsys):
@@ -1037,9 +1046,8 @@ def test_run_exits_before_creating_run_dir(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setenv("HOME", str(tmp_path))
     args = _make_create_args(spec_path=str(tmp_path / "missing.md"))
-    with pytest.raises(SystemExit) as exc:
-        cmd.run(args)
-    assert exc.value.code == 2
+    result = cmd.run(args)
+    assert result == 2
     assert not (tmp_path / ".draft" / "runs").exists()
 
 
@@ -1047,9 +1055,9 @@ def test_run_exits_before_creating_run_dir(tmp_path, monkeypatch, capsys):
 
 
 def test_compose_active_steps_default():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("worktree", "open", False)
+    active, skipped = _compose_active_steps("worktree", "open", False)
     assert [s.name for s in active] == [
         "create-worktree",
         "implement-spec",
@@ -1061,17 +1069,17 @@ def test_compose_active_steps_default():
 
 
 def test_compose_active_steps_no_worktree():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("no-worktree", "open", False)
+    active, skipped = _compose_active_steps("no-worktree", "open", False)
     assert "create-worktree" not in [s.name for s in active]
     assert "create-worktree" in skipped
 
 
 def test_compose_active_steps_skip_pr():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("worktree", "skip", True)
+    active, skipped = _compose_active_steps("worktree", "skip", True)
     assert [s.name for s in active] == ["create-worktree", "implement-spec"]
     assert skipped == {
         "push-commits",
@@ -1083,9 +1091,9 @@ def test_compose_active_steps_skip_pr():
 
 
 def test_compose_active_steps_pr_reuse_skips_pr_open():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("worktree", "reuse", False)
+    active, skipped = _compose_active_steps("worktree", "reuse", False)
     names = [s.name for s in active]
     assert "open-pr" not in names
     assert "babysit-pr" in names
@@ -1400,10 +1408,10 @@ def _canonical(project: str, branch: str) -> str:
 
 
 def test_resolve_worktree_no_existing_returns_create():
-    import draft.command_create as cmd
+    from draft.api import _resolve_worktree_for_existing_branch
 
-    with patch("draft.command_create._branch_worktrees", return_value=[]):
-        wt_dir, mode = cmd._resolve_worktree_for_existing_branch(
+    with patch("draft.api._branch_worktrees", return_value=[]):
+        wt_dir, mode = _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
@@ -1412,18 +1420,18 @@ def test_resolve_worktree_no_existing_returns_create():
 
 
 def test_resolve_worktree_canonical_clean_reuses(tmp_path):
-    import draft.command_create as cmd
+    from draft.api import _resolve_worktree_for_existing_branch
 
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
-        patch("draft.command_create._current_head_branch", return_value="feature-x"),
-        patch("draft.command_create._is_working_tree_clean", return_value=True),
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.api._current_head_branch", return_value="feature-x"),
+        patch("draft.api._is_working_tree_clean", return_value=True),
     ):
-        wt_dir, mode = cmd._resolve_worktree_for_existing_branch(
+        wt_dir, mode = _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
@@ -1431,47 +1439,48 @@ def test_resolve_worktree_canonical_clean_reuses(tmp_path):
     assert wt_dir == str(canonical)
 
 
-def test_resolve_worktree_no_value_form_refuses(capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_no_value_form_refuses():
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     with (
-        patch("draft.command_create._branch_worktrees", return_value=["/some/path"]),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._branch_worktrees", return_value=["/some/path"]),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=False
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "(current HEAD)" in err
-    assert "--branch feature-x" in err
+    assert exc_info.value.exit_code == 2
+    assert "(current HEAD)" in str(exc_info.value)
+    assert "--branch feature-x" in str(exc_info.value)
 
 
-def test_resolve_worktree_non_canonical_path_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_non_canonical_path_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "canonical"
     other = tmp_path / "other"
     other.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(other)]),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(other)]),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "non-canonical" in err
-    assert str(other) in err
+    assert exc_info.value.exit_code == 2
+    assert "non-canonical" in str(exc_info.value)
+    assert str(other) in str(exc_info.value)
 
 
-def test_resolve_worktree_multiple_paths_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_multiple_paths_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "canonical"
     canonical.mkdir()
@@ -1479,116 +1488,115 @@ def test_resolve_worktree_multiple_paths_refuses(tmp_path, capsys):
     extra.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
         patch(
-            "draft.command_create._branch_worktrees",
+            "draft.api._branch_worktrees",
             return_value=[str(canonical), str(extra)],
         ),
-        pytest.raises(SystemExit) as exc,
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "non-canonical" in err
-    assert str(extra) in err
+    assert exc_info.value.exit_code == 2
+    assert "non-canonical" in str(exc_info.value)
+    assert str(extra) in str(exc_info.value)
 
 
-def test_resolve_worktree_stale_registration_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_stale_registration_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "missing"  # does not exist on disk
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(canonical)]),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "stale worktree registration" in err
-    assert "git worktree prune" in err
+    assert exc_info.value.exit_code == 2
+    assert "stale worktree registration" in str(exc_info.value)
+    assert "git worktree prune" in str(exc_info.value)
 
 
-def test_resolve_worktree_detached_head_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_detached_head_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
-        patch("draft.command_create._current_head_branch", return_value=None),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.api._current_head_branch", return_value=None),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "detached HEAD" in err
+    assert exc_info.value.exit_code == 2
+    assert "detached HEAD" in str(exc_info.value)
 
 
-def test_resolve_worktree_wrong_branch_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_wrong_branch_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
-        patch("draft.command_create._current_head_branch", return_value="other-branch"),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.api._current_head_branch", return_value="other-branch"),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "other-branch" in err
-    assert "feature-x" in err
+    assert exc_info.value.exit_code == 2
+    assert "other-branch" in str(exc_info.value)
+    assert "feature-x" in str(exc_info.value)
 
 
-def test_resolve_worktree_dirty_refuses(tmp_path, capsys):
-    import draft.command_create as cmd
+def test_resolve_worktree_dirty_refuses(tmp_path):
+    from draft.api import _resolve_worktree_for_existing_branch
+    from draft.errors import UserInputError
 
     canonical = tmp_path / "wt"
     canonical.mkdir()
 
     with (
-        patch("draft.command_create._canonical_worktree_path", return_value=canonical),
-        patch("draft.command_create._branch_worktrees", return_value=[str(canonical)]),
-        patch("draft.command_create._current_head_branch", return_value="feature-x"),
-        patch("draft.command_create._is_working_tree_clean", return_value=False),
-        pytest.raises(SystemExit) as exc,
+        patch("draft.api._canonical_worktree_path", return_value=canonical),
+        patch("draft.api._branch_worktrees", return_value=[str(canonical)]),
+        patch("draft.api._current_head_branch", return_value="feature-x"),
+        patch("draft.api._is_working_tree_clean", return_value=False),
+        pytest.raises(UserInputError) as exc_info,
     ):
-        cmd._resolve_worktree_for_existing_branch(
+        _resolve_worktree_for_existing_branch(
             "/repo", "proj", "feature-x", branch_was_explicit=True
         )
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "dirty" in err
-    assert "git -C" in err
+    assert exc_info.value.exit_code == 2
+    assert "dirty" in str(exc_info.value)
+    assert "git -C" in str(exc_info.value)
 
 
 # --- reuse-worktree: _compose_active_steps and runs.expected_steps ---
 
 
 def test_compose_active_steps_reuse_existing_skips_worktree_create():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("reuse-existing", "open", False)
+    active, skipped = _compose_active_steps("reuse-existing", "open", False)
     names = [s.name for s in active]
     assert "create-worktree" not in names
     assert names == ["implement-spec", "push-commits", "open-pr", "babysit-pr"]
@@ -1597,9 +1605,9 @@ def test_compose_active_steps_reuse_existing_skips_worktree_create():
 
 
 def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("reuse-existing", "reuse", False)
+    active, skipped = _compose_active_steps("reuse-existing", "reuse", False)
     names = [s.name for s in active]
     assert names == ["implement-spec", "push-commits", "babysit-pr"]
     assert skipped == {
@@ -1611,9 +1619,9 @@ def test_compose_active_steps_reuse_existing_with_pr_reuse_drops_both():
 
 
 def test_compose_active_steps_reuse_existing_with_skip_pr():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps("reuse-existing", "skip", True)
+    active, skipped = _compose_active_steps("reuse-existing", "skip", True)
     names = [s.name for s in active]
     assert names == ["implement-spec"]
     assert skipped == {
@@ -1714,11 +1722,11 @@ def test_continue_reuse_finished_with_deleted_worktree_exits_clean(tmp_path, cap
 
 
 def test_preamble_reused_annotation_for_reuse_existing(capsys):
-    import draft.command_create as cmd
+    from draft.api import _print_preamble
     from draft.steps import STEPS
 
     skipped = {"create-worktree"}
-    cmd._print_preamble(
+    _print_preamble(
         "rid",
         "feature-x",
         "/wt",
@@ -1733,11 +1741,11 @@ def test_preamble_reused_annotation_for_reuse_existing(capsys):
 
 
 def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
-    import draft.command_create as cmd
+    from draft.api import _print_preamble
     from draft.steps import STEPS
 
     skipped = {"create-worktree"}
-    cmd._print_preamble(
+    _print_preamble(
         "rid",
         "feature-x",
         "/repo",
@@ -1753,10 +1761,10 @@ def test_preamble_skipped_no_reuse_for_no_worktree(capsys):
 
 
 def test_preamble_no_skipped_annotation_for_active_step(capsys):
-    import draft.command_create as cmd
+    from draft.api import _print_preamble
     from draft.steps import STEPS
 
-    cmd._print_preamble(
+    _print_preamble(
         "rid", "feature-x", "/wt", "/runs/rid", "started", STEPS, set(), "worktree"
     )
     out = capsys.readouterr().out
@@ -1768,9 +1776,9 @@ def test_preamble_no_skipped_annotation_for_active_step(capsys):
 
 
 def test_compose_active_steps_delete_worktree_included_for_worktree_mode():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps(
+    active, skipped = _compose_active_steps(
         "worktree", "open", False, delete_worktree=True
     )
     names = [s.name for s in active]
@@ -1779,9 +1787,9 @@ def test_compose_active_steps_delete_worktree_included_for_worktree_mode():
 
 
 def test_compose_active_steps_delete_worktree_included_for_reuse_existing():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps(
+    active, skipped = _compose_active_steps(
         "reuse-existing", "open", False, delete_worktree=True
     )
     names = [s.name for s in active]
@@ -1790,9 +1798,9 @@ def test_compose_active_steps_delete_worktree_included_for_reuse_existing():
 
 
 def test_compose_active_steps_delete_worktree_skipped_when_false():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps(
+    active, skipped = _compose_active_steps(
         "worktree", "open", False, delete_worktree=False
     )
     names = [s.name for s in active]
@@ -1801,9 +1809,9 @@ def test_compose_active_steps_delete_worktree_skipped_when_false():
 
 
 def test_compose_active_steps_delete_worktree_skipped_for_no_worktree():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps(
+    active, skipped = _compose_active_steps(
         "no-worktree", "open", False, delete_worktree=True
     )
     names = [s.name for s in active]
@@ -1812,9 +1820,9 @@ def test_compose_active_steps_delete_worktree_skipped_for_no_worktree():
 
 
 def test_compose_active_steps_skip_pr_with_delete_worktree():
-    import draft.command_create as cmd
+    from draft.api import _compose_active_steps
 
-    active, skipped = cmd._compose_active_steps(
+    active, skipped = _compose_active_steps(
         "worktree", "skip", True, delete_worktree=True
     )
     names = [s.name for s in active]
@@ -3078,47 +3086,47 @@ def test_status_json_cost_per_step_sum_across_sessions(tmp_path, capsys):
 # --- _validate_overrides ---
 
 
-def test_validate_overrides_rejects_max_retries_on_single_shot_step(capsys):
-    import draft.command_create as cmd
+def test_validate_overrides_rejects_max_retries_on_single_shot_step():
+    from draft.command_common import _validate_overrides
+    from draft.errors import UserInputError
 
-    with pytest.raises(SystemExit) as exc:
-        cmd._validate_overrides(["push-commits.max_retries=3"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "push-commits" in err
-    assert "max_retries" in err
-
-
-def test_validate_overrides_rejects_retry_delay_on_implement_spec(capsys):
-    import draft.command_create as cmd
-
-    with pytest.raises(SystemExit) as exc:
-        cmd._validate_overrides(["implement-spec.retry_delay=0"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "retry_delay" in err
+    with pytest.raises(UserInputError) as exc_info:
+        _validate_overrides(["push-commits.max_retries=3"])
+    assert exc_info.value.exit_code == 2
+    assert "push-commits" in str(exc_info.value)
+    assert "max_retries" in str(exc_info.value)
 
 
-def test_validate_overrides_rejects_retry_delay_on_babysit_pr(capsys):
-    import draft.command_create as cmd
+def test_validate_overrides_rejects_retry_delay_on_implement_spec():
+    from draft.command_common import _validate_overrides
+    from draft.errors import UserInputError
 
-    with pytest.raises(SystemExit) as exc:
-        cmd._validate_overrides(["babysit-pr.retry_delay=10"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "retry_delay" in err
+    with pytest.raises(UserInputError) as exc_info:
+        _validate_overrides(["implement-spec.retry_delay=0"])
+    assert exc_info.value.exit_code == 2
+    assert "retry_delay" in str(exc_info.value)
+
+
+def test_validate_overrides_rejects_retry_delay_on_babysit_pr():
+    from draft.command_common import _validate_overrides
+    from draft.errors import UserInputError
+
+    with pytest.raises(UserInputError) as exc_info:
+        _validate_overrides(["babysit-pr.retry_delay=10"])
+    assert exc_info.value.exit_code == 2
+    assert "retry_delay" in str(exc_info.value)
 
 
 def test_validate_overrides_accepts_max_retries_on_implement_spec():
-    import draft.command_create as cmd
+    from draft.command_common import _validate_overrides
 
-    cmd._validate_overrides(["implement-spec.max_retries=3"])  # must not raise
+    _validate_overrides(["implement-spec.max_retries=3"])  # must not raise
 
 
 def test_validate_overrides_malformed_is_ignored():
-    import draft.command_create as cmd
+    from draft.command_common import _validate_overrides
 
-    cmd._validate_overrides(["foo"])  # must not raise
+    _validate_overrides(["foo"])  # must not raise
 
 
 # --- command_init ---

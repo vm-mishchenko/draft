@@ -8,7 +8,13 @@ from pipeline.metrics import (
     fmt_duration,
 )
 from pipeline.pipeline import Pipeline, PipelineLifecycle, Step, StepError
-from pipeline.runner import Runner, StageHandle
+from pipeline.runner import (
+    LLMClient,
+    LLMResult,
+    Runner,
+    StageHandle,
+    SubprocessLLMClient,
+)
 
 __all__ = [
     "Pipeline",
@@ -18,6 +24,9 @@ __all__ = [
     "RunContext",
     "Runner",
     "StageHandle",
+    "LLMClient",
+    "LLMResult",
+    "SubprocessLLMClient",
     "RunMetrics",
     "SessionMetrics",
     "StepMetrics",

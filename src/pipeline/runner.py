@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
+from typing import Protocol
 
 from pipeline.metrics import KnownMetric, fmt_duration, now_human
 
@@ -92,6 +93,123 @@ def _format_event(event: dict) -> str | None:
 class LLMResult:
     rc: int
     final_text: str
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_ms: int = 0
+
+
+class LLMClient(Protocol):
+    def run(
+        self,
+        prompt: str,
+        cwd,
+        log_path: Path | None,
+        *,
+        allowed_tools: list[str] = (),
+        extra_args: list[str] = (),
+        timeout: float | None = None,
+    ) -> LLMResult: ...
+
+
+class SubprocessLLMClient:
+    def run(
+        self,
+        prompt: str,
+        cwd,
+        log_path: Path | None,
+        *,
+        allowed_tools: list[str] = (),
+        extra_args: list[str] = (),
+        timeout: float | None = None,
+    ) -> LLMResult:
+        argv = [
+            "claude",
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        if allowed_tools:
+            argv += ["--allowedTools", ",".join(allowed_tools)]
+        argv += list(extra_args)
+
+        wall_start = monotonic()
+        state = {
+            "final_text": "",
+            "cost": 0.0,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "duration_ms": 0,
+        }
+
+        with open(log_path if log_path is not None else os.devnull, "a") as log_fd:
+            log_fd.write(f"=== new attempt @ {now_human()} ===\n")
+            log_fd.flush()
+
+            try:
+                proc = subprocess.Popen(
+                    argv,
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+            except FileNotFoundError as err:
+                raise RuntimeError("claude binary not found on PATH") from err
+
+            def _stream():
+                for raw_line in proc.stdout:
+                    line = raw_line.decode(errors="replace")
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        log_fd.write(line)
+                        log_fd.flush()
+                        continue
+                    formatted = _format_event(event)
+                    if formatted:
+                        log_fd.write(formatted + "\n")
+                        log_fd.flush()
+                    if event.get("type") == "assistant":
+                        for block in event.get("message", {}).get("content", []):
+                            if (
+                                block.get("type") == "text"
+                                and (block.get("text") or "").strip()
+                            ):
+                                state["final_text"] = block["text"]
+                    elif event.get("type") == "result":
+                        state["cost"] = event.get("total_cost_usd") or 0.0
+                        state["duration_ms"] = event.get("duration_ms") or 0
+                        usage = event.get("usage") or {}
+                        state["tokens_in"] = usage.get("input_tokens") or 0
+                        state["tokens_out"] = usage.get("output_tokens") or 0
+
+            streamer = threading.Thread(target=_stream, daemon=True)
+            streamer.start()
+
+            rc = TIMEOUT_EXIT
+            try:
+                proc.wait(timeout=timeout)
+                rc = proc.returncode
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                rc = TIMEOUT_EXIT
+            finally:
+                streamer.join()
+
+        if state["duration_ms"] == 0:
+            state["duration_ms"] = int((monotonic() - wall_start) * 1000)
+
+        return LLMResult(
+            rc=rc,
+            final_text=state["final_text"],
+            cost_usd=state["cost"],
+            input_tokens=state["tokens_in"],
+            output_tokens=state["tokens_out"],
+            duration_ms=state["duration_ms"],
+        )
 
 
 class StageHandle:
@@ -106,8 +224,9 @@ class StageHandle:
 class Runner:
     LABEL_WIDTH = 36
 
-    def __init__(self):
+    def __init__(self, llm: LLMClient | None = None):
         self._active_stage: StageHandle | None = None
+        self.llm: LLMClient = llm if llm is not None else SubprocessLLMClient()
 
     @contextmanager
     def tty_ticker(self, label: str):
@@ -259,84 +378,19 @@ class Runner:
         extra_args: list[str] = (),
         timeout: float | None = None,
     ) -> LLMResult:
-        argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
-        if allowed_tools:
-            argv += ["--allowedTools", ",".join(allowed_tools)]
-        argv += list(extra_args)
-
-        wall_start = monotonic()
-        state = {
-            "final_text": "",
-            "cost": 0.0,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "duration_ms": 0,
-        }
-
-        with open(log_path if log_path is not None else os.devnull, "a") as log_fd:
-            log_fd.write(f"=== new attempt @ {now_human()} ===\n")
-            log_fd.flush()
-
-            try:
-                proc = subprocess.Popen(
-                    argv,
-                    cwd=cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
-            except FileNotFoundError as err:
-                raise RuntimeError("claude binary not found on PATH") from err
-
-            def _stream():
-                for raw_line in proc.stdout:
-                    line = raw_line.decode(errors="replace")
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        log_fd.write(line)
-                        log_fd.flush()
-                        continue
-                    formatted = _format_event(event)
-                    if formatted:
-                        log_fd.write(formatted + "\n")
-                        log_fd.flush()
-                    if event.get("type") == "assistant":
-                        for block in event.get("message", {}).get("content", []):
-                            if (
-                                block.get("type") == "text"
-                                and (block.get("text") or "").strip()
-                            ):
-                                state["final_text"] = block["text"]
-                    elif event.get("type") == "result":
-                        state["cost"] = event.get("total_cost_usd") or 0.0
-                        state["duration_ms"] = event.get("duration_ms") or 0
-                        usage = event.get("usage") or {}
-                        state["tokens_in"] = usage.get("input_tokens") or 0
-                        state["tokens_out"] = usage.get("output_tokens") or 0
-
-            streamer = threading.Thread(target=_stream, daemon=True)
-            streamer.start()
-
-            rc = TIMEOUT_EXIT
-            try:
-                proc.wait(timeout=timeout)
-                rc = proc.returncode
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                rc = TIMEOUT_EXIT
-            finally:
-                streamer.join()
-
-        if state["duration_ms"] == 0:
-            state["duration_ms"] = int((monotonic() - wall_start) * 1000)
-
-        step_metrics.add(KnownMetric.LLM_COST_USD, state["cost"])
-        step_metrics.add(KnownMetric.LLM_INPUT_TOKENS, state["tokens_in"])
-        step_metrics.add(KnownMetric.LLM_OUTPUT_TOKENS, state["tokens_out"])
-        step_metrics.add(KnownMetric.LLM_DURATION_MS, state["duration_ms"])
-
-        return LLMResult(rc=rc, final_text=state["final_text"])
+        result = self.llm.run(
+            prompt,
+            cwd,
+            log_path,
+            allowed_tools=allowed_tools,
+            extra_args=extra_args,
+            timeout=timeout,
+        )
+        step_metrics.add(KnownMetric.LLM_COST_USD, result.cost_usd)
+        step_metrics.add(KnownMetric.LLM_INPUT_TOKENS, result.input_tokens)
+        step_metrics.add(KnownMetric.LLM_OUTPUT_TOKENS, result.output_tokens)
+        step_metrics.add(KnownMetric.LLM_DURATION_MS, result.duration_ms)
+        return result
 
     def sleep(self, seconds: float, label: str = "waiting"):
         if seconds <= 0:

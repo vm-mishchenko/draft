@@ -7,8 +7,9 @@ from draft import runs
 from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import CorruptStateError, get_pipeline
-from pipeline import Pipeline, RunContext, Runner, StepError
+from pipeline import Pipeline, RunContext, StepError
 from pipeline.heartbeat import HeartbeatPulse
+from pipeline.runner import Runner, SubprocessLLMClient
 
 
 def register(subparsers):
@@ -192,7 +193,7 @@ def run(args) -> int:
 
     _print_preamble(ctx, active_steps)
 
-    engine = Runner()
+    engine = Runner(SubprocessLLMClient())
     lifecycle = DraftLifecycle(
         HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
     )
