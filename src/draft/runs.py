@@ -46,6 +46,12 @@ def _run_started_at(run_dir: Path) -> float | None:
     try:
         return parse_human(started).timestamp()
     except (ValueError, TypeError):
+        pass
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(started.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
         return None
 
 
