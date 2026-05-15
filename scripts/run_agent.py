@@ -15,6 +15,7 @@ rc != 0 → infra failure.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ def fill_template(text: str, env: dict[str, str]) -> str:
 
 
 def check_auggie_auth() -> None:
+    if not shutil.which("auggie"):
+        die("auggie not found on PATH")
     result = subprocess.run(
         ["auggie", "token", "print"], capture_output=True, text=True
     )
