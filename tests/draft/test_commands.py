@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import os
@@ -3356,3 +3357,271 @@ def test_command_create_preamble_silent_for_none_label(capsys):
 
     captured = capsys.readouterr()
     assert "original-spec" not in captured.err
+
+
+# --- _print_run_summary ---
+
+
+def _make_run_metrics_with_sessions(sessions, tmp_path):
+    from pipeline import RunMetrics
+    from pipeline.heartbeat import Heartbeat
+
+    return RunMetrics(sessions, Heartbeat(tmp_path))
+
+
+def _make_session(started_ts, finished_ts, steps=None):
+    return {
+        "command": "create",
+        "started_at": started_ts,
+        "finished_at": finished_ts,
+        "exit_code": 0,
+        "steps": steps or [],
+    }
+
+
+def _make_step(cost_usd):
+    step = {
+        "name": "implement",
+        "started_at": "2026-01-01 00:00:00 UTC",
+        "finished_at": "2026-01-01 00:00:05 UTC",
+        "exit_code": 0,
+        "data": {},
+    }
+    if cost_usd is not None:
+        step["data"]["llm_cost_usd"] = cost_usd
+    return step
+
+
+def _make_pipeline_run_with_cost(cost_usd):
+    from pipeline import KnownMetric
+
+    def fake_run(ctx, engine, lifecycle, session_metrics):
+        step = session_metrics.step_begin("implement")
+        if cost_usd is not None:
+            step.set(KnownMetric.LLM_COST_USD, cost_usd)
+        step.end(0)
+
+    return fake_run
+
+
+def test_print_run_summary_with_cost(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(0.4567)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    lines = out.splitlines()
+    done_idx = next((i for i, line in enumerate(lines) if line == "done."), None)
+    assert done_idx is not None
+    assert lines[done_idx + 1].startswith("runtime:")
+    assert "cost:    $0.46" in lines[done_idx + 2]
+
+
+def test_print_run_summary_no_cost(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(None)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "cost:    -" in out
+
+
+def test_print_run_summary_zero_cost(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(0.0)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "cost:    $0.00" in out
+
+
+def test_print_run_summary_aggregates_raises(tmp_path, capsys):
+    from unittest.mock import patch
+
+    from draft.command_create import _print_run_summary
+    from pipeline import RunMetrics
+    from pipeline.heartbeat import Heartbeat
+
+    metrics = RunMetrics([], Heartbeat(tmp_path))
+    with patch.object(RunMetrics, "aggregates", side_effect=RuntimeError("boom")):
+        _print_run_summary(metrics)
+    out = capsys.readouterr().out
+    assert "runtime:" not in out
+    assert "cost:" not in out
+
+
+def _make_create_args(**kwargs):
+    class FakeArgs:
+        spec_path = None
+        prompt = None
+        run_id = None
+        branch = None
+        from_branch = None
+        no_worktree = False
+        skip_pr = False
+        delete_worktree = False
+        no_review = False
+        overrides = []
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+@contextlib.contextmanager
+def _apply_patches(patch_list):
+    stack = contextlib.ExitStack()
+    for p in patch_list:
+        stack.enter_context(p)
+    with stack:
+        yield
+
+
+def _patch_create_run_infra(tmp_path, pipeline_run_side_effect=None):
+    from unittest.mock import MagicMock, patch
+
+    from draft.types import BranchSource
+
+    patches = [
+        patch("draft.command_create._reject_flag_conflicts"),
+        patch("draft.command_create._assert_spec_readable"),
+        patch("draft.command_create._assert_git_repo"),
+        patch("draft.command_create._assert_main_clone"),
+        patch("draft.command_create._assert_on_path"),
+        patch("draft.command_create._repo_root", return_value=str(tmp_path)),
+        patch("draft.command_create._project_name", return_value="test-project"),
+        patch("draft.command_create._resolve_base_branch", return_value="main"),
+        patch(
+            "draft.command_create._resolve_working_branch",
+            return_value=("test-branch", BranchSource.NEW),
+        ),
+        patch("draft.command_create._detect_pr_mode", return_value=("open", None)),
+        patch("draft.command_create._unique_branch", return_value="test-branch"),
+        patch(
+            "draft.command_create._canonical_worktree_path",
+            return_value=tmp_path / "wt",
+        ),
+        patch("draft.command_create.load_config", return_value={}),
+        patch("draft.command_create._validate_overrides"),
+        patch("draft.command_create._apply_overrides", side_effect=lambda c, _: c),
+        patch("draft.command_create.validate_config"),
+        patch(
+            "draft.command_create.resolve_prompt_template",
+            side_effect=lambda c, _: c,
+        ),
+        patch(
+            "draft.command_create.resolve_pr_body_template",
+            side_effect=lambda c, _: c,
+        ),
+        patch("draft.command_create.validate_reviewer_argv0s"),
+        patch("draft.command_create.step_config", return_value={}),
+        patch("draft.command_create._compose_active_steps", return_value=([], set())),
+        patch("draft.command_create._print_preamble"),
+        patch("draft.command_create.Runner"),
+        patch("draft.command_create.DraftLifecycle"),
+        patch("draft.command_create.HookRunner"),
+        patch("draft.command_create.HeartbeatPulse"),
+        patch("draft.command_create.PIPELINES", {"create": MagicMock(steps=[])}),
+    ]
+
+    mock_pipeline_cls = MagicMock()
+    if pipeline_run_side_effect is not None:
+        mock_pipeline_cls.return_value.run.side_effect = pipeline_run_side_effect
+    else:
+        mock_pipeline_cls.return_value.run.return_value = None
+    patches.append(patch("pipeline.Pipeline", mock_pipeline_cls))
+
+    return patches
+
+
+def test_command_create_success_prints_summary(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(tmp_path)
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    lines = out.splitlines()
+    done_idx = next((i for i, line in enumerate(lines) if line == "done."), None)
+    assert done_idx is not None
+    assert lines[done_idx + 1].startswith("runtime:")
+    assert lines[done_idx + 2].startswith("cost:")
+
+
+def test_command_create_failed_run_no_summary(tmp_path, capsys):
+    import draft.command_create as cc
+    from pipeline import StepError
+
+    args = _make_create_args(spec_path="spec.md")
+    err = StepError("implement", 1)
+    all_patches = _patch_create_run_infra(tmp_path, pipeline_run_side_effect=err)
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "done." not in out
+    assert "runtime:" not in out
+    assert "cost:" not in out
+
+
+def test_command_create_skip_pr_summary_follows_done_line(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md", skip_pr=True)
+    all_patches = _patch_create_run_infra(tmp_path)
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    lines = out.splitlines()
+    done_idx = next(
+        (i for i, line in enumerate(lines) if "done. (push and PR skipped" in line),
+        None,
+    )
+    assert done_idx is not None, f"done. line not found in: {out!r}"
+    assert lines[done_idx + 1].startswith("runtime:")
+    assert lines[done_idx + 2].startswith("cost:")
+
+
+def test_command_create_aggregates_raises_done_still_prints(tmp_path, capsys):
+    from unittest.mock import patch
+
+    import draft.command_create as cc
+    from pipeline import RunMetrics
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(tmp_path)
+    with (
+        patch.object(RunMetrics, "aggregates", side_effect=RuntimeError("boom")),
+        _apply_patches(all_patches),
+    ):
+        rc = cc.run(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "done." in out
+    assert "runtime:" not in out
+    assert "cost:" not in out
