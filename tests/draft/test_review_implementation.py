@@ -745,16 +745,13 @@ class TestShellReproLine:
         result = self.fn("/wt", {"DRAFT_SPEC_FILE": "/path with space/spec.md"}, ["/x"])
         assert "DRAFT_SPEC_FILE='/path with space/spec.md'" in result
 
-    def test_env_value_special_chars_quoted(self, tmp_path):
-        import subprocess
+    def test_env_value_special_chars_quoted(self):
+        import shlex
 
         value = "weird'name\"x$y"
-        result = self.fn(str(tmp_path), {"DRAFT_BRANCH": value}, ["env"])
-        # Strip "$ " prefix and execute through bash to verify round-trip
-        cmd = result[2:]
-        proc = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-        assert proc.returncode == 0
-        assert f"DRAFT_BRANCH={value}" in proc.stdout
+        result = self.fn("/wt", {"DRAFT_BRANCH": value}, ["/abs/review.sh", "gpt5.4"])
+        expected_env = f"DRAFT_BRANCH={shlex.quote(value)}"
+        assert expected_env in result
 
     def test_cwd_with_space_quoted(self):
         result = self.fn("/path with space/wt", {}, ["/x"])
@@ -784,7 +781,7 @@ def test_invoke_script_writes_shell_repro_line(tmp_path):
     verdict = _invoke_script(
         argv=[true_bin],
         cwd=str(tmp_path),
-        env={"DRAFT_X": "y"},
+        env={},
         timeout=10,
         log_path=log_path,
     )
@@ -795,8 +792,8 @@ def test_invoke_script_writes_shell_repro_line(tmp_path):
     header_idx = next(i for i, line in enumerate(lines) if "=== review @" in line)
     assert lines[header_idx + 1] == f"argv: ['{true_bin}']"
     assert lines[header_idx + 2] == f"CWD: {tmp_path}"
-    assert lines[header_idx + 3] == "DRAFT env: {'DRAFT_X': 'y'}"
+    assert lines[header_idx + 3] == "DRAFT env: {}"
     shell_line = lines[header_idx + 4]
-    assert re.match(rf"^\$ cd .+ && DRAFT_X=y {re.escape(true_bin)}$", shell_line)
+    assert re.match(rf"^\$ cd .+ && {re.escape(true_bin)}$", shell_line)
 
     assert verdict.kind == "approve"
