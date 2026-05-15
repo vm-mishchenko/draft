@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Invokes auggie to review the working-tree diff against a spec.
+# Usage: review.sh <model>
+# This script is model-agnostic; the caller picks the model.
+# Recommended: pass an OpenAI model (e.g. gpt-4.1) to avoid Auggie's Anthropic default.
 # Verdict contract: stdout empty → approval; stdout non-empty → rejection; rc != 0 → infra failure.
 # Required env vars: DRAFT_REPO_DIR, DRAFT_BRANCH, DRAFT_BASE_BRANCH, DRAFT_SPEC_FILE.
 # Authentication: run 'auggie login' once or export AUGMENT_SESSION_AUTH before invoking.
-# Full contract: features/260423-draft-cli/scope/260513-scope-review-script.md
+# Full contract: features/260423-draft-cli/scopes/260514-scope-review-model-arg.md
 
 set -euo pipefail
 
@@ -11,6 +14,9 @@ set -euo pipefail
 MAX_REVIEW_ITEMS=3
 
 die() { echo "review.sh: $*" >&2; exit 1; }
+
+MODEL="${1:-}"
+[[ -n "$MODEL" ]] || die "usage: review.sh <model>"
 
 for v in DRAFT_REPO_DIR DRAFT_BRANCH DRAFT_BASE_BRANCH DRAFT_SPEC_FILE; do
   [[ -n "${!v:-}" ]] || die "$v is unset or empty"
@@ -117,6 +123,7 @@ if ! auggie_stdout="$(auggie --print --quiet --ask \
     --workspace-root "$DRAFT_REPO_DIR" \
     --allow-indexing \
     --max-turns 10 \
+    --model "$MODEL" \
     --instruction-file "$prompt_file")"; then
   rc=$?
   echo "review.sh: auggie review call failed with rc=$rc" >&2
