@@ -3,6 +3,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from draft.runs import find_original_run_on_branch, load_state
+from draft.types import BranchSource
 
 CASE_NONE = "none"
 CASE_PRIOR_RUN = "prior_run"
@@ -28,7 +29,7 @@ def _render_case(case: str, mapping: dict) -> str:
 
 
 def resolve_case(ctx) -> tuple[str, dict]:
-    if ctx.get("branch_source") != "existing":
+    if ctx.get("branch_source") != BranchSource.EXISTING:
         return (CASE_NONE, {})
     original_run = find_original_run_on_branch(ctx.get("project"), ctx.get("branch"))
     if original_run is not None:

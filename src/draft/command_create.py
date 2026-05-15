@@ -32,6 +32,7 @@ from draft.config import (
 )
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
+from draft.types import BranchSource, PrMode, WorktreeMode
 from pipeline import RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
@@ -199,7 +200,7 @@ def _resolve_worktree_for_existing_branch(
     canonical_str = str(canonical)
 
     if not paths:
-        return (canonical_str, "worktree")
+        return (canonical_str, WorktreeMode.WORKTREE)
 
     if not branch_was_explicit:
         print(
@@ -258,7 +259,7 @@ def _resolve_worktree_for_existing_branch(
         print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
         sys.exit(2)
 
-    return (canonical_str, "reuse-existing")
+    return (canonical_str, WorktreeMode.REUSE_EXISTING)
 
 
 def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
@@ -277,10 +278,10 @@ def _base_short_name(base: str) -> str:
     return base.removeprefix("origin/").removeprefix("refs/heads/")
 
 
-def _resolve_working_branch(repo: str, args, base: str) -> tuple[str, str]:
+def _resolve_working_branch(repo: str, args, base: str) -> tuple[str, BranchSource]:
     """Returns (branch, branch_source) where branch_source is 'new' or 'existing'."""
     if args.branch is None:
-        return ("", "new")  # caller derives the new branch slug
+        return ("", BranchSource.NEW)  # caller derives the new branch slug
 
     base_short = _base_short_name(base)
 
@@ -307,17 +308,17 @@ def _resolve_working_branch(repo: str, args, base: str) -> tuple[str, str]:
         )
         sys.exit(2)
 
-    return (branch, "existing")
+    return (branch, BranchSource.EXISTING)
 
 
 def _detect_pr_mode(
-    branch: str, branch_source: str, skip_pr: bool, repo: str
-) -> tuple[str, str | None]:
-    """Returns (pr_mode, pr_url) where pr_mode is 'open' | 'reuse' | 'skip'."""
+    branch: str, branch_source: BranchSource, skip_pr: bool, repo: str
+) -> tuple[PrMode, str | None]:
+    """Returns (pr_mode, pr_url)."""
     if skip_pr:
-        return ("skip", None)
-    if branch_source == "new":
-        return ("open", None)
+        return (PrMode.SKIP, None)
+    if branch_source == BranchSource.NEW:
+        return (PrMode.OPEN, None)
 
     result = subprocess.run(
         [
@@ -345,9 +346,9 @@ def _detect_pr_mode(
         sys.exit(3)
     urls = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if len(urls) == 0:
-        return ("open", None)
+        return (PrMode.OPEN, None)
     if len(urls) == 1:
-        return ("reuse", urls[0])
+        return (PrMode.REUSE, urls[0])
     print(f"error: branch '{branch}' has multiple open PRs:", file=sys.stderr)
     for u in urls:
         print(f"       {u}", file=sys.stderr)
@@ -376,13 +377,16 @@ def _compose_active_steps(
     has_any_reviewer: bool = False,
 ):
     skipped = set()
-    if worktree_mode in ("no-worktree", "reuse-existing"):
+    if worktree_mode in (WorktreeMode.NO_WORKTREE, WorktreeMode.REUSE_EXISTING):
         skipped.add("create-worktree")
     if skip_pr:
         skipped.update({"push-commits", "open-pr", "babysit-pr"})
-    elif pr_mode == "reuse":
+    elif pr_mode == PrMode.REUSE:
         skipped.add("open-pr")
-    if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+    if not (
+        delete_worktree
+        and worktree_mode in (WorktreeMode.WORKTREE, WorktreeMode.REUSE_EXISTING)
+    ):
         skipped.add("delete-worktree")
     if (not has_any_reviewer) or skip_review:
         skipped.add("review-implementation")
@@ -401,7 +405,10 @@ def _print_preamble(
     print("stages:")
     for step in all_steps:
         if step.name in skipped:
-            if step.name == "create-worktree" and worktree_mode == "reuse-existing":
+            if (
+                step.name == "create-worktree"
+                and worktree_mode == WorktreeMode.REUSE_EXISTING
+            ):
                 suffix = " [skipped, reused]"
             else:
                 suffix = " [skipped]"
@@ -456,7 +463,7 @@ def run(args) -> int:
     # 4. Branch-context preflight (no side effects, may exit)
     existing_wt_dir: str | None = None
     existing_worktree_mode: str | None = None
-    if branch_source == "existing":
+    if branch_source == BranchSource.EXISTING:
         _assert_no_active_run_on_branch(project_name, branch)
         if args.no_worktree:
             _assert_branch_free_for_in_place(repo, branch)
@@ -495,26 +502,26 @@ def run(args) -> int:
         prompt_file = run_dir / "prompt.md"
         prompt_file.write_text(args.prompt)
         spec = str(prompt_file)
-        if branch_source == "new":
+        if branch_source == BranchSource.NEW:
             branch = _branch_slug_from_claude(args.prompt, run_id)
     else:
         spec = str(Path(args.spec_path).resolve())
-        if branch_source == "new":
+        if branch_source == BranchSource.NEW:
             stem = Path(spec).stem
             branch = stem.lower().replace("_", "-").replace(" ", "-")[:50]
 
-    if branch_source == "new":
+    if branch_source == BranchSource.NEW:
         branch = _unique_branch(repo, branch)
 
     # 7. Worktree path
     if args.no_worktree:
-        worktree_mode = "no-worktree"
+        worktree_mode = WorktreeMode.NO_WORKTREE
         wt_dir = repo
     elif existing_worktree_mode is not None:
         worktree_mode = existing_worktree_mode
         wt_dir = existing_wt_dir
     else:
-        worktree_mode = "worktree"
+        worktree_mode = WorktreeMode.WORKTREE
         wt_dir = str(_canonical_worktree_path(project_name, branch))
 
     # 8. Config
@@ -580,7 +587,7 @@ def run(args) -> int:
         ctx.set("pr_url", pr_url)
 
     # 12. In-place checkout (worktree_mode == no-worktree)
-    if worktree_mode == "no-worktree":
+    if worktree_mode == WorktreeMode.NO_WORKTREE:
         _checkout_in_place(repo, branch)
     else:
         Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)
@@ -641,7 +648,8 @@ def run(args) -> int:
     # 16. Done
     if rc == 0:
         if args.skip_pr and not (
-            args.delete_worktree and worktree_mode in ("worktree", "reuse-existing")
+            args.delete_worktree
+            and worktree_mode in (WorktreeMode.WORKTREE, WorktreeMode.REUSE_EXISTING)
         ):
             print(f"done. (push and PR skipped; worktree left at {wt_dir})")
         else:

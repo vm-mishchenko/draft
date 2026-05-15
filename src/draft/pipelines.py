@@ -9,6 +9,7 @@ from draft.steps.implement_spec import ImplementSpecStep
 from draft.steps.open_pr import OpenPrStep
 from draft.steps.push_commits import PushCommitsStep
 from draft.steps.review_implementation import ReviewImplementationStep
+from draft.types import PrMode, WorktreeMode
 
 
 class CorruptStateError(Exception):
@@ -34,11 +35,11 @@ _delete_worktree = DeleteWorktreeStep()
 
 def _expected_steps_create(data: dict) -> tuple[str, ...]:
     steps: list[str] = []
-    worktree_mode = data.get("worktree_mode", "worktree")
+    worktree_mode = data.get("worktree_mode", WorktreeMode.WORKTREE)
     pr_mode = data.get("pr_mode")
     skip_pr = bool(data.get("skip_pr", False))
     delete_worktree = bool(data.get("delete_worktree", False))
-    if worktree_mode not in ("no-worktree", "reuse-existing"):
+    if worktree_mode not in (WorktreeMode.NO_WORKTREE, WorktreeMode.REUSE_EXISTING):
         steps.append("create-worktree")
     steps.append("implement-spec")
     has_review_cmd = bool(data.get("has_review_cmd", False))
@@ -47,34 +48,43 @@ def _expected_steps_create(data: dict) -> tuple[str, ...]:
         steps.append("review-implementation")
     if not skip_pr:
         steps.append("push-commits")
-        if pr_mode != "reuse":
+        if pr_mode != PrMode.REUSE:
             steps.append("open-pr")
         steps.append("babysit-pr")
-    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
+    if delete_worktree and worktree_mode in (
+        WorktreeMode.WORKTREE,
+        WorktreeMode.REUSE_EXISTING,
+    ):
         steps.append("delete-worktree")
     return tuple(steps)
 
 
 def _expected_steps_babysit(data: dict) -> tuple[str, ...]:
     steps: list[str] = []
-    worktree_mode = data.get("worktree_mode", "worktree")
+    worktree_mode = data.get("worktree_mode", WorktreeMode.WORKTREE)
     delete_worktree = bool(data.get("delete_worktree", False))
-    if worktree_mode not in ("no-worktree", "reuse-existing"):
+    if worktree_mode not in (WorktreeMode.NO_WORKTREE, WorktreeMode.REUSE_EXISTING):
         steps.append("create-worktree")
     steps.append("babysit-pr")
-    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
+    if delete_worktree and worktree_mode in (
+        WorktreeMode.WORKTREE,
+        WorktreeMode.REUSE_EXISTING,
+    ):
         steps.append("delete-worktree")
     return tuple(steps)
 
 
 def _expected_steps_fix_pr(data: dict) -> tuple[str, ...]:
     steps: list[str] = []
-    worktree_mode = data.get("worktree_mode", "worktree")
+    worktree_mode = data.get("worktree_mode", WorktreeMode.WORKTREE)
     delete_worktree = bool(data.get("delete_worktree", False))
-    if worktree_mode not in ("no-worktree", "reuse-existing"):
+    if worktree_mode not in (WorktreeMode.NO_WORKTREE, WorktreeMode.REUSE_EXISTING):
         steps.append("create-worktree")
     steps.append("fix-pr")
-    if delete_worktree and worktree_mode in ("worktree", "reuse-existing"):
+    if delete_worktree and worktree_mode in (
+        WorktreeMode.WORKTREE,
+        WorktreeMode.REUSE_EXISTING,
+    ):
         steps.append("delete-worktree")
     return tuple(steps)
 
