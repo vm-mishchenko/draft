@@ -144,7 +144,24 @@ def _branch_slug_from_claude(prompt_text: str, run_id: str) -> str:
         )
         full_prompt = template.replace("{{PROMPT}}", prompt_text)
         result = subprocess.run(
-            ["claude", "-p", full_prompt],
+            [
+                "claude",
+                "-p",
+                "--model",
+                "sonnet",
+                "--no-chrome",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--no-session-persistence",
+                "--tools=",
+                "--effort",
+                "low",
+                "--max-turns",
+                "1",
+                "--system-prompt",
+                "Output exactly what the user asks for.",
+                full_prompt,
+            ],
             capture_output=True,
             text=True,
             timeout=60,
