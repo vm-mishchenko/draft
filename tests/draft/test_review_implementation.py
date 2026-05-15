@@ -745,17 +745,16 @@ class TestShellReproLine:
         result = self.fn("/wt", {"DRAFT_SPEC_FILE": "/path with space/spec.md"}, ["/x"])
         assert "DRAFT_SPEC_FILE='/path with space/spec.md'" in result
 
-    def test_env_value_special_chars_quoted(self):
-        import shlex
+    def test_env_value_special_chars_quoted(self, tmp_path):
+        import subprocess
 
-        result = self.fn("/wt", {"DRAFT_BRANCH": "weird'name\"x$y"}, ["/x"])
-        # The quoted value must round-trip through shlex parsing
-        assert result.startswith("$ cd ")
-        # Extract env assignment and verify shlex can parse it
-        assert "DRAFT_BRANCH=" in result
-        tokens = shlex.split(result.split("&& ", 1)[1])
-        branch_token = next(t for t in tokens if t.startswith("DRAFT_BRANCH="))
-        assert branch_token == "DRAFT_BRANCH=weird'name\"x$y"
+        value = "weird'name\"x$y"
+        result = self.fn(str(tmp_path), {"DRAFT_BRANCH": value}, ["env"])
+        # Strip "$ " prefix and execute through bash to verify round-trip
+        cmd = result[2:]
+        proc = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+        assert proc.returncode == 0
+        assert f"DRAFT_BRANCH={value}" in proc.stdout
 
     def test_cwd_with_space_quoted(self):
         result = self.fn("/path with space/wt", {}, ["/x"])
@@ -793,16 +792,11 @@ def test_invoke_script_writes_shell_repro_line(tmp_path):
     content = log_path.read_text()
     lines = content.splitlines()
 
-    assert any("=== review @" in line for line in lines)
-    assert any(f"argv: ['{true_bin}']" in line for line in lines)
-    assert any("CWD:" in line for line in lines)
-    assert any("DRAFT env:" in line for line in lines)
-
-    draft_env_idx = next(i for i, line in enumerate(lines) if "DRAFT env:" in line)
-    remaining = lines[draft_env_idx + 1 :]
-    assert any(
-        re.match(rf"^\$ cd .+ && DRAFT_X=y {re.escape(true_bin)}$", line)
-        for line in remaining
-    )
+    header_idx = next(i for i, line in enumerate(lines) if "=== review @" in line)
+    assert lines[header_idx + 1] == f"argv: ['{true_bin}']"
+    assert lines[header_idx + 2] == f"CWD: {tmp_path}"
+    assert lines[header_idx + 3] == "DRAFT env: {'DRAFT_X': 'y'}"
+    shell_line = lines[header_idx + 4]
+    assert re.match(rf"^\$ cd .+ && DRAFT_X=y {re.escape(true_bin)}$", shell_line)
 
     assert verdict.kind == "approve"
