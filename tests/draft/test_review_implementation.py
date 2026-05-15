@@ -711,3 +711,89 @@ def test_readme_contains_reviewers_section():
     assert "reviewers:" in section
     # Old style: top-level cmd: "" under review-implementation should be gone
     assert 'cmd: ""' not in section
+
+
+# --- Tests: _shell_repro_line ---
+
+
+class TestShellReproLine:
+    def setup_method(self):
+        from draft.steps.review_implementation import _shell_repro_line
+
+        self.fn = _shell_repro_line
+
+    def test_no_env(self):
+        result = self.fn("/wt", {}, ["/abs/review.sh", "gpt5.4"])
+        assert result == "$ cd /wt && /abs/review.sh gpt5.4"
+
+    def test_env_alphabetical_order(self):
+        result = self.fn(
+            "/wt",
+            {"DRAFT_BRANCH": "feat/x", "DRAFT_REPO_DIR": "/wt"},
+            ["/abs/review.sh", "gpt5.4"],
+        )
+        assert (
+            result
+            == "$ cd /wt && DRAFT_BRANCH=feat/x DRAFT_REPO_DIR=/wt /abs/review.sh gpt5.4"
+        )
+
+    def test_empty_env_value_quoted(self):
+        result = self.fn("/wt", {"DRAFT_BASE_BRANCH": ""}, ["/abs/review.sh"])
+        assert "DRAFT_BASE_BRANCH=''" in result
+
+    def test_env_value_with_space_quoted(self):
+        result = self.fn("/wt", {"DRAFT_SPEC_FILE": "/path with space/spec.md"}, ["/x"])
+        assert "DRAFT_SPEC_FILE='/path with space/spec.md'" in result
+
+    def test_env_value_special_chars_quoted(self):
+        import shlex
+
+        value = "weird'name\"x$y"
+        result = self.fn("/wt", {"DRAFT_BRANCH": value}, ["/abs/review.sh", "gpt5.4"])
+        expected_env = f"DRAFT_BRANCH={shlex.quote(value)}"
+        assert expected_env in result
+
+    def test_cwd_with_space_quoted(self):
+        result = self.fn("/path with space/wt", {}, ["/x"])
+        assert result == "$ cd '/path with space/wt' && /x"
+
+    def test_argv_with_space_quoted(self):
+        result = self.fn("/wt", {}, ["/abs/review.sh", "model with space"])
+        assert "'/abs/review.sh'" in result or "/abs/review.sh" in result
+        assert "'model with space'" in result
+
+    def test_deterministic(self):
+        args = ("/wt", {"DRAFT_B": "b", "DRAFT_A": "a"}, ["/x", "y"])
+        assert self.fn(*args) == self.fn(*args)
+
+
+# --- Integration test: _invoke_script writes shell repro line ---
+
+
+def test_invoke_script_writes_shell_repro_line(tmp_path):
+    import re
+    import shutil
+
+    from draft.steps.review_implementation import _invoke_script
+
+    true_bin = shutil.which("true") or "/usr/bin/true"
+    log_path = tmp_path / "r.log"
+    verdict = _invoke_script(
+        argv=[true_bin],
+        cwd=str(tmp_path),
+        env={},
+        timeout=10,
+        log_path=log_path,
+    )
+
+    content = log_path.read_text()
+    lines = content.splitlines()
+
+    header_idx = next(i for i, line in enumerate(lines) if "=== review @" in line)
+    assert lines[header_idx + 1] == f"argv: ['{true_bin}']"
+    assert lines[header_idx + 2] == f"CWD: {tmp_path}"
+    assert lines[header_idx + 3] == "DRAFT env: {}"
+    shell_line = lines[header_idx + 4]
+    assert re.match(rf"^\$ cd .+ && {re.escape(true_bin)}$", shell_line)
+
+    assert verdict.kind == "approve"

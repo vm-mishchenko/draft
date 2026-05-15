@@ -423,15 +423,27 @@ class _Verdict:
     reason: str
 
 
+def _shell_repro_line(cwd: str, draft_env: dict[str, str], argv: list[str]) -> str:
+    env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in sorted(draft_env.items()))
+    cmd = shlex.join(argv)
+    head = f"$ cd {shlex.quote(cwd)} && "
+    return head + (f"{env_prefix} {cmd}" if env_prefix else cmd)
+
+
 def _invoke_script(
     argv: list[str], cwd: str, env: dict, timeout: int, log_path: Path
 ) -> _Verdict:
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     draft_env = {k: v for k, v in env.items() if k.startswith("DRAFT_")}
 
+    shell_line = _shell_repro_line(cwd, draft_env, argv)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(
-            f"=== review @ {now} ===\nargv: {argv}\nCWD: {cwd}\nDRAFT env: {draft_env}\n"
+            f"=== review @ {now} ===\n"
+            f"argv: {argv}\n"
+            f"CWD: {cwd}\n"
+            f"DRAFT env: {draft_env}\n"
+            f"{shell_line}\n"
         )
 
     try:
