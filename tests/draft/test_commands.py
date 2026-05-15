@@ -3392,52 +3392,64 @@ def _make_step(cost_usd):
     return step
 
 
-def test_print_run_summary_with_cost(tmp_path, capsys):
-    from draft.command_create import _print_run_summary
+def _make_pipeline_run_with_cost(cost_usd):
+    from pipeline import KnownMetric
 
-    sessions = [
-        _make_session(
-            "2026-01-01 00:00:00 UTC",
-            "2026-01-01 00:00:05 UTC",
-            steps=[_make_step(0.4567)],
-        )
-    ]
-    metrics = _make_run_metrics_with_sessions(sessions, tmp_path)
-    _print_run_summary(metrics)
+    def fake_run(ctx, engine, lifecycle, session_metrics):
+        step = session_metrics.step_begin("implement")
+        if cost_usd is not None:
+            step.set(KnownMetric.LLM_COST_USD, cost_usd)
+        step.end(0)
+
+    return fake_run
+
+
+def test_print_run_summary_with_cost(tmp_path, capsys):
+    import draft.command_create as cc
+
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(0.4567)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
     out = capsys.readouterr().out
-    assert "runtime:" in out
-    assert "cost:    $0.46" in out
+    assert rc == 0
+    lines = out.splitlines()
+    done_idx = next((i for i, line in enumerate(lines) if line == "done."), None)
+    assert done_idx is not None
+    assert lines[done_idx + 1].startswith("runtime:")
+    assert "cost:    $0.46" in lines[done_idx + 2]
 
 
 def test_print_run_summary_no_cost(tmp_path, capsys):
-    from draft.command_create import _print_run_summary
+    import draft.command_create as cc
 
-    sessions = [
-        _make_session(
-            "2026-01-01 00:00:00 UTC",
-            "2026-01-01 00:00:05 UTC",
-            steps=[_make_step(None)],
-        )
-    ]
-    metrics = _make_run_metrics_with_sessions(sessions, tmp_path)
-    _print_run_summary(metrics)
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(None)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
     out = capsys.readouterr().out
+    assert rc == 0
     assert "cost:    -" in out
 
 
 def test_print_run_summary_zero_cost(tmp_path, capsys):
-    from draft.command_create import _print_run_summary
+    import draft.command_create as cc
 
-    sessions = [
-        _make_session(
-            "2026-01-01 00:00:00 UTC",
-            "2026-01-01 00:00:05 UTC",
-            steps=[_make_step(0.0)],
-        )
-    ]
-    metrics = _make_run_metrics_with_sessions(sessions, tmp_path)
-    _print_run_summary(metrics)
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(
+        tmp_path, pipeline_run_side_effect=_make_pipeline_run_with_cost(0.0)
+    )
+    with _apply_patches(all_patches):
+        rc = cc.run(args)
+
     out = capsys.readouterr().out
+    assert rc == 0
     assert "cost:    $0.00" in out
 
 
