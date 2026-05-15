@@ -99,12 +99,11 @@ def main() -> None:
 
     template_arg, model = sys.argv[1], sys.argv[2]
 
-    env: dict[str, str] = {}
-    for var in TEMPLATE_VARS:
-        val = os.environ.get(var, "")
-        if not val:
-            die(f"{var} is unset or empty")
-        env[var] = val
+    repo_dir = os.environ.get("DRAFT_REPO_DIR", "")
+    if not repo_dir:
+        die("DRAFT_REPO_DIR is unset or empty")
+
+    env: dict[str, str] = {var: os.environ.get(var, "") for var in TEMPLATE_VARS}
 
     template_path = resolve_template_path(template_arg, env["DRAFT_REPO_DIR"])
     if not template_path.is_file():
@@ -120,7 +119,7 @@ def main() -> None:
 
     stdout = run_auggie(prompt, model, env["DRAFT_REPO_DIR"])
 
-    if "FOUND_ISSUES" in stdout:
+    if stdout.strip():
         print(stdout, end="")
 
 

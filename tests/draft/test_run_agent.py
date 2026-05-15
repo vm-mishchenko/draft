@@ -142,7 +142,7 @@ class TestMain:
             mock.patch.dict("os.environ", env),
             mock.patch("sys.argv", ["run_agent.py", str(tmpl), "gpt-4.1"]),
             mock.patch.object(run_agent, "check_auggie_auth"),
-            mock.patch.object(run_agent, "run_auggie", return_value="NO_ISSUES"),
+            mock.patch.object(run_agent, "run_auggie", return_value=""),
         ):
             run_agent.main()
         captured = capsys.readouterr()
@@ -163,7 +163,7 @@ class TestMain:
 
     def test_missing_env_var_exits(self, tmp_path):
         env, tmpl = self._base_env(tmp_path)
-        env.pop("DRAFT_BRANCH")
+        env.pop("DRAFT_REPO_DIR")
         with (
             mock.patch.dict("os.environ", env, clear=True),
             mock.patch("sys.argv", ["run_agent.py", str(tmpl), "gpt-4.1"]),
