@@ -7,6 +7,7 @@ from draft import runs
 from draft.config import ConfigError, load_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import CorruptStateError, get_pipeline
+from draft.types import WorktreeMode
 from pipeline import Pipeline, RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
@@ -120,7 +121,7 @@ def run(args) -> int:
     }
     expected = runs.expected_steps(state_for_check)
     finished = runs.is_run_finished(state_for_check)
-    worktree_mode = ctx.get("worktree_mode", "worktree")
+    worktree_mode = ctx.get("worktree_mode", WorktreeMode.WORKTREE)
     delete_worktree = bool(ctx.get("delete_worktree", False))
     saved_branch = ctx.get("branch", "")
     repo = ctx.get("repo", "")
@@ -134,7 +135,7 @@ def run(args) -> int:
         and all(ctx.is_completed(s) for s in expected if s != "delete-worktree")
     )
     if (
-        worktree_mode in ("worktree", "reuse-existing")
+        worktree_mode in (WorktreeMode.WORKTREE, WorktreeMode.REUSE_EXISTING)
         and delete_worktree
         and worktree_absent
         and (finished or delete_wt_only_pending)
@@ -144,7 +145,7 @@ def run(args) -> int:
 
     # Drift check: current branch context vs saved branch
     if saved_branch:
-        if worktree_mode == "no-worktree":
+        if worktree_mode == WorktreeMode.NO_WORKTREE:
             current = _branch_at(repo) if repo else None
             if current is not None and current != saved_branch:
                 print(
@@ -163,7 +164,7 @@ def run(args) -> int:
 
     # Recover deleted worktree (only for unfinished worktree-mode runs)
     if (
-        worktree_mode == "worktree"
+        worktree_mode == WorktreeMode.WORKTREE
         and ctx.is_completed("create-worktree")
         and wt_dir
         and not Path(wt_dir).exists()

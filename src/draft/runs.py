@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from draft.types import BranchSource
 from pipeline.metrics import parse_human
 
 FULL_PIPELINE_STEPS = (
@@ -134,7 +135,7 @@ def find_original_run_on_branch(project: str, branch: str) -> Path | None:
         data = state.get("data", {})
         if data.get("branch") != branch:
             continue
-        if data.get("branch_source") != "new":
+        if data.get("branch_source") != BranchSource.NEW:
             continue
         started = _run_started_at(run_dir) or 0.0
         candidates.append((started, run_dir))

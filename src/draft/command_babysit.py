@@ -23,6 +23,7 @@ from draft.command_common import (
 from draft.config import ConfigError, load_config, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
+from draft.types import WorktreeMode
 from pipeline import RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
@@ -144,7 +145,7 @@ def _resolve_worktree_for_babysit(
     if args.no_worktree:
         _assert_working_tree_clean(repo)
         _assert_branch_free_for_in_place(repo, branch)
-        return repo, "no-worktree"
+        return repo, WorktreeMode.NO_WORKTREE
     return _resolve_worktree_for_existing_branch(
         repo, project, branch, branch_was_explicit=True
     )
@@ -173,9 +174,12 @@ def _snapshot_spec(run_dir: Path, spec_path: str | None, pr_body: str) -> Path:
 def _compose_active_steps_babysit(worktree_mode: str, delete_worktree: bool):
     pipeline = PIPELINES["babysit"]
     skipped = set()
-    if worktree_mode in ("no-worktree", "reuse-existing"):
+    if worktree_mode in (WorktreeMode.NO_WORKTREE, WorktreeMode.REUSE_EXISTING):
         skipped.add("create-worktree")
-    if not (delete_worktree and worktree_mode in ("worktree", "reuse-existing")):
+    if not (
+        delete_worktree
+        and worktree_mode in (WorktreeMode.WORKTREE, WorktreeMode.REUSE_EXISTING)
+    ):
         skipped.add("delete-worktree")
     active = [s for s in pipeline.steps if s.name not in skipped]
     return active, skipped
@@ -192,7 +196,10 @@ def _print_preamble(
     print("stages:")
     for step in all_steps:
         if step.name in skipped:
-            if step.name == "create-worktree" and worktree_mode == "reuse-existing":
+            if (
+                step.name == "create-worktree"
+                and worktree_mode == WorktreeMode.REUSE_EXISTING
+            ):
                 suffix = " [skipped, reused]"
             else:
                 suffix = " [skipped]"
@@ -293,7 +300,7 @@ def run(args) -> int:
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("delete_worktree", args.delete_worktree)
 
-    if worktree_mode == "no-worktree":
+    if worktree_mode == WorktreeMode.NO_WORKTREE:
         _checkout_in_place(repo, branch)
     else:
         Path(wt_dir).parent.mkdir(parents=True, exist_ok=True)

@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from draft.types import BranchSource
 from pipeline import Step
 
 
@@ -50,7 +51,7 @@ class CreateWorktreeStep(Step):
         return {"timeout": 60}
 
     def cmd(self, ctx) -> list[str]:
-        if ctx.get("branch_source") == "existing":
+        if ctx.get("branch_source") == BranchSource.EXISTING:
             return ["git", "worktree", "add", ctx.get("wt_dir"), ctx.get("branch")]
         return [
             "git",
@@ -68,9 +69,9 @@ class CreateWorktreeStep(Step):
 
         branch = ctx.get("branch")
         repo = ctx.get("repo")
-        branch_source = ctx.get("branch_source", "new")
+        branch_source = ctx.get("branch_source", BranchSource.NEW)
 
-        if branch_source == "new" and _branch_exists(repo, branch):
+        if branch_source == BranchSource.NEW and _branch_exists(repo, branch):
             project = ctx.get("project")
             run_id = _find_run_id_for_branch(project, branch, exclude_run_id=ctx.run_id)
             print(f"\nerror: branch '{branch}' already exists", file=sys.stderr)
@@ -81,7 +82,7 @@ class CreateWorktreeStep(Step):
                 print(f"\n       to remove it: git branch -D {branch}", file=sys.stderr)
             raise StepError(self.name, 255)
 
-        if branch_source == "existing" and not _branch_exists(repo, branch):
+        if branch_source == BranchSource.EXISTING and not _branch_exists(repo, branch):
             print(f"\nerror: branch '{branch}' no longer exists", file=sys.stderr)
             raise StepError(self.name, 255)
 

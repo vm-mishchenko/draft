@@ -6,6 +6,7 @@ from pathlib import Path
 
 from draft import runs
 from draft.config import _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS
+from draft.types import WorktreeMode
 
 _TIMESTAMP_RE = re.compile(r"^\d{6}-\d{6}$")
 _RUN_ID_CHARS_RE = re.compile(r"^[a-z0-9._-]+$")
@@ -144,7 +145,7 @@ def _resolve_worktree_for_existing_branch(
     canonical_str = str(canonical)
 
     if not paths:
-        return (canonical_str, "worktree")
+        return (canonical_str, WorktreeMode.WORKTREE)
 
     if not branch_was_explicit:
         print(
@@ -203,7 +204,7 @@ def _resolve_worktree_for_existing_branch(
         print(f"       inspect with: git -C {canonical_str} status", file=sys.stderr)
         sys.exit(2)
 
-    return (canonical_str, "reuse-existing")
+    return (canonical_str, WorktreeMode.REUSE_EXISTING)
 
 
 def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
