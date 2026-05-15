@@ -33,7 +33,7 @@ from draft.config import (
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
 from draft.types import BranchSource, PrMode, WorktreeMode
-from pipeline import RunContext, Runner, StepError
+from pipeline import RunContext, RunMetrics, Runner, StepError, fmt_duration
 from pipeline.heartbeat import HeartbeatPulse
 
 _BRANCH_HEAD_SENTINEL = ""
@@ -429,6 +429,18 @@ def _remove_worktree(wt_dir: str) -> None:
         print(f"warning: failed to remove worktree {wt_dir}: {stderr}", file=sys.stderr)
 
 
+def _print_run_summary(metrics: RunMetrics) -> None:
+    try:
+        agg = metrics.aggregates()
+    except Exception:
+        return
+    runtime_str = fmt_duration(agg["total_runtime_seconds"])
+    cost = agg["total_llm_cost_usd"]
+    cost_str = f"${cost:.2f}" if cost is not None else "-"
+    print(f"{'runtime:':<9}{runtime_str}")
+    print(f"{'cost:':<9}{cost_str}")
+
+
 def run(args) -> int:
     if not args.spec_path and not args.prompt:
         print("error: provide a spec file or --prompt TEXT", file=sys.stderr)
@@ -654,4 +666,5 @@ def run(args) -> int:
             print(f"done. (push and PR skipped; worktree left at {wt_dir})")
         else:
             print("done.")
+        _print_run_summary(ctx.metrics)
     return rc
