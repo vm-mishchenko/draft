@@ -16,8 +16,10 @@ draft create spec.md
 
 ## Features
 
+You define the spec and checks to pass, and the CLI drives the workflow.
+
 - Project-agnostic - no assumptions about language, framework, or build system
-- Hooks - custom shell scripts at every pipeline stage
+- Hooks - run custom commands at every pipeline stage
 - Configured checks - you define which checks the generated code must pass
 - Discovered tests - LLM picks which tests to run based on spec and edited files
 - Code review - performed by a separate agent
