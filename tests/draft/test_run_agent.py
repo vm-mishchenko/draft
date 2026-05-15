@@ -63,7 +63,10 @@ class TestFillTemplate:
 
 class TestCheckAuggieAuth:
     def _run_check(self, returncode, output):
-        with mock.patch("subprocess.run") as mock_run:
+        with (
+            mock.patch("shutil.which", return_value="/usr/bin/auggie"),
+            mock.patch("subprocess.run") as mock_run,
+        ):
             mock_run.return_value = mock.MagicMock(
                 returncode=returncode, stdout=output, stderr=""
             )
