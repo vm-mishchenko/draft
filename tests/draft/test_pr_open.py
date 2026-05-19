@@ -323,6 +323,20 @@ def test_bundled_open_pr_md_no_old_placeholders():
     assert "{{PR_BODY_TEMPLATE_PATH}}" not in content
 
 
+def test_git_diff_uses_three_dot_range(tmp_path):
+    cfg = {"timeout": 300, "title_prefix": ""}
+    ctx = _make_ctx(cfg, tmp_path, base_branch="parent-branch")
+    engine = _make_engine()
+
+    with patch.object(pr_open_mod, "subprocess") as mock_sub:
+        mock_sub.run.side_effect = _subprocess_factory()
+        mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
+
+    diff_cmd = mock_sub.run.call_args_list[0].args[0]
+    assert "parent-branch...HEAD" in diff_cmd
+
+
 def test_gh_pr_create_uses_base_branch_directly(tmp_path):
     cfg = {"timeout": 300, "title_prefix": ""}
     ctx = _make_ctx(cfg, tmp_path, base_branch="main")

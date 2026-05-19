@@ -84,7 +84,7 @@ class OpenPrStep(Step):
         with engine.stage(self.name) as s:
             s.update("gathering context")
             git_diff = _run_git_capture(
-                ["git", "diff", f"{base_branch}..HEAD"],
+                ["git", "diff", f"{base_branch}...HEAD"],
                 wt_dir,
                 cfg["timeout"],
                 ctx.log_path("open-pr-git-diff"),
