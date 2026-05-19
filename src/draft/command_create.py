@@ -651,7 +651,7 @@ def run(args) -> int:
     # 14. Lifecycle + engine
     engine = Runner(model=config.get("model"))
     lifecycle = DraftLifecycle(
-        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
+        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine, ctx=ctx)
     )
 
     # 15. Run pipeline

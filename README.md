@@ -434,3 +434,22 @@ Events available on every step:
 - `post` — after the step finishes, success or failure
 - `on_success` — after the step succeeds
 - `on_error` — after the step fails
+
+Environment:
+
+Every hook command runs with these variables set on top of the inherited environment.
+
+- `DRAFT_BRANCH` — the run's working branch
+- `DRAFT_BASE_BRANCH` — the branch the run is based on
+
+Example:
+
+```yaml
+steps:
+  create-worktree:
+    hooks:
+      post:
+        - cmd: git town set-parent "$DRAFT_BASE_BRANCH"
+```
+
+Quote env-var expansions so branch names with shell metacharacters are handled safely.

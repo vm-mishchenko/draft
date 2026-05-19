@@ -323,7 +323,7 @@ def run(args) -> int:
 
     engine = Runner(model=config.get("model"))
     lifecycle = DraftLifecycle(
-        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine)
+        HookRunner(config, cwd=wt_dir, run_dir=run_dir, engine=engine, ctx=ctx)
     )
 
     hb = HeartbeatPulse(ctx.heartbeat).start()
