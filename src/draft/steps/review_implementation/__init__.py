@@ -217,6 +217,7 @@ def _run_suggested_checks(
     cfg: dict,
     stage,
     log_path: Path = None,
+    status_prefix: str = "",
 ) -> list[HookResult]:
     log_path = (
         log_path
@@ -254,7 +255,8 @@ def _run_suggested_checks(
                 log_fd.write(f"$ {cmd}\n")
                 log_fd.flush()
 
-            stage.update(f"suggested check {i + 1}/{len(suggested)}: {cmd}")
+            running_msg = f"{status_prefix}suggested check {i + 1}/{len(suggested)}"
+            stage.update(running_msg)
             result = _run_hook_cmd(cmd, timeout, wt_dir)
 
             if log_fd:
@@ -268,6 +270,10 @@ def _run_suggested_checks(
             elapsed += result.duration
 
             if result.rc != 0:
+                suffix = (
+                    f"timeout {timeout}s" if result.rc == 124 else f"exit {result.rc}"
+                )
+                stage.update(f"{running_msg} failed ({suffix})")
                 failures.append(result)
                 break
 
@@ -681,6 +687,7 @@ class ReviewImplementationStep(Step):
                     _SUGGESTER_CFG,
                     s,
                     log_path=logs["suggested"],
+                    status_prefix=f"[{name}] ",
                 )
                 if suggest_failures:
                     _record_set(
