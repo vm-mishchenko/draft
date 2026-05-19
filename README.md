@@ -49,6 +49,7 @@ Steps in order:
 - Clone and `cd` into the repo
 - Run `make setup` and put the venv on your PATH (the command prints where it is)
 - Nuclear option: `make clean && make setup`
+- Run `draft --help` after install to see all commands
 
 
 ## Commands
