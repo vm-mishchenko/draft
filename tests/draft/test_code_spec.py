@@ -1580,7 +1580,7 @@ def test_render_prompt_substitutes_original_spec(tmp_path):
         "branch_source": "existing",
         "branch": "my-branch",
         "project": "proj",
-        "base_branch": "origin/main",
+        "base_branch": "main",
     }.get(key, default)
     ctx.step_get.return_value = ""
 

@@ -887,3 +887,48 @@ def test_review_run_suggested_checks_default_prefix_empty(tmp_path):
     assert stage.update.call_args_list == [mock.call("suggested check 1/1")]
     msg = stage.update.call_args_list[0].args[0]
     assert not msg.startswith(" ")
+
+
+# --- Tests: DRAFT_BASE_BRANCH env variable ---
+
+
+def _run_step_capture_env(tmp_path, base_branch):
+    from draft.steps.review_implementation import ReviewImplementationStep
+
+    ctx = make_ctx(
+        tmp_path,
+        reviewers_cfg=[{"name": "q", "cmd": 'python -c "import sys; sys.exit(0)"'}],
+        suggest_extra_checks=False,
+    )
+    ctx.set("base_branch", base_branch)
+    engine = FakeEngine()
+    captured_env = {}
+
+    from draft.steps.review_implementation import _Verdict
+
+    def fake_invoke(argv, cwd, env, timeout, log_path):
+        captured_env.update(env)
+        return _Verdict("approve", "", "")
+
+    with (
+        mock.patch(
+            "draft.steps.review_implementation._invoke_script", side_effect=fake_invoke
+        ),
+        mock.patch.object(engine, "stage") as mock_stage,
+    ):
+        stage = FakeStage()
+        mock_stage.return_value.__enter__ = lambda s: stage
+        mock_stage.return_value.__exit__ = mock.Mock(return_value=False)
+        ReviewImplementationStep().run(ctx, engine, FakeLifecycle(), None)
+
+    return captured_env
+
+
+def test_reviewer_receives_draft_base_branch_main(tmp_path):
+    env = _run_step_capture_env(tmp_path, "main")
+    assert env["DRAFT_BASE_BRANCH"] == "main"
+
+
+def test_reviewer_receives_draft_base_branch_feature(tmp_path):
+    env = _run_step_capture_env(tmp_path, "feature-x")
+    assert env["DRAFT_BASE_BRANCH"] == "feature-x"

@@ -103,7 +103,7 @@ draft create <spec-path>
 - `spec-path` — path to the spec file; omit when using `--prompt`
 - `--prompt TEXT` — inline prompt text instead of a spec file
 - `--run-id NAME` — custom run id instead of the auto-generated timestamp
-- `--from BRANCH` — base branch for the new worktree (default: `origin/main` or `origin/master`)
+- `--from BRANCH` — base branch for the new worktree (default: `main` or `master`). Must be a local branch; create it with `git branch <name> origin/<name>` first if needed.
 - `--branch [NAME]` — use an existing local branch; omit `NAME` to use current `HEAD`
 - `--skip-pr` — stop the run after code generation; skip push and PR steps
 - `--no-worktree` — run in the main repo instead of a linked worktree; requires `--branch`
@@ -453,7 +453,7 @@ Environment:
 Every hook command runs with these variables set on top of the inherited environment.
 
 - `DRAFT_BRANCH` — the run's working branch
-- `DRAFT_BASE_BRANCH` — the branch the run is based on
+- `DRAFT_BASE_BRANCH` — the branch the run is based on. Always a local branch name (no remote prefix); identical across draft create, continue, fix-pr, and babysit.
 
 Example:
 

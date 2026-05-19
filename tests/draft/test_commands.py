@@ -1397,7 +1397,7 @@ def test_worktree_create_existing_branch_uses_no_dash_b(tmp_path):
 
     ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
     ctx.set("branch", "foo")
-    ctx.set("base_branch", "origin/main")
+    ctx.set("base_branch", "main")
     ctx.set("wt_dir", "/tmp/wt")
     ctx.set("branch_source", "existing")
 
@@ -1412,12 +1412,12 @@ def test_worktree_create_new_branch_uses_dash_b(tmp_path):
 
     ctx = RunContext("rid", tmp_path, {"create-worktree": {"timeout": 60}})
     ctx.set("branch", "foo")
-    ctx.set("base_branch", "origin/main")
+    ctx.set("base_branch", "main")
     ctx.set("wt_dir", "/tmp/wt")
     ctx.set("branch_source", "new")
 
     cmd = CreateWorktreeStep().cmd(ctx)
-    assert cmd == ["git", "worktree", "add", "/tmp/wt", "-b", "foo", "origin/main"]
+    assert cmd == ["git", "worktree", "add", "/tmp/wt", "-b", "foo", "main"]
 
 
 # --- reuse-worktree: _resolve_worktree_for_existing_branch ---
@@ -4331,3 +4331,191 @@ def test_continue_null_config_path_falls_back_to_default(tmp_path, capsys):
         cmd.run(FakeArgs())
 
     assert captured.get("config_path") is None
+
+
+# --- _resolve_base_branch ---
+
+
+def _make_resolve(local_branches, remote_refs=None):
+    """Returns a configured _resolve_base_branch caller with patched git helpers."""
+    from draft.command_create import _resolve_base_branch
+
+    remote_refs = remote_refs or set()
+
+    def local_exists(repo, branch):
+        return branch in local_branches
+
+    def remote_exists(repo, ref):
+        return ref in remote_refs
+
+    return _resolve_base_branch, local_exists, remote_exists
+
+
+def test_resolve_base_branch_default_main(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch(
+            "draft.command_create._local_branch_exists",
+            side_effect=lambda repo, b: b == "main",
+        ),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+    ):
+        result = _resolve_base_branch("/repo", None)
+
+    assert result == "main"
+
+
+def test_resolve_base_branch_default_master_when_no_main(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch(
+            "draft.command_create._local_branch_exists",
+            side_effect=lambda repo, b: b == "master",
+        ),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+    ):
+        result = _resolve_base_branch("/repo", None)
+
+    assert result == "master"
+
+
+def test_resolve_base_branch_default_neither_exits_3(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", None)
+
+    assert exc_info.value.code == 3
+    assert "could not find local branch 'main' or 'master'" in capsys.readouterr().err
+
+
+def test_resolve_base_branch_from_main_local_exists(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=True),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+    ):
+        result = _resolve_base_branch("/repo", "main")
+
+    assert result == "main"
+
+
+def test_resolve_base_branch_from_origin_main_strips_prefix(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=True),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+    ):
+        result = _resolve_base_branch("/repo", "origin/main")
+
+    assert result == "main"
+
+
+def test_resolve_base_branch_from_origin_feature_strips_prefix(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=True),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+    ):
+        result = _resolve_base_branch("/repo", "origin/feature-x")
+
+    assert result == "feature-x"
+
+
+def test_resolve_base_branch_missing_local_with_remote_suggests_create(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "feature-x")
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "local branch 'feature-x' does not exist" in err
+    assert "git branch feature-x origin/feature-x" in err
+
+
+def test_resolve_base_branch_origin_prefix_missing_local_with_remote(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "origin/feature-x")
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "local branch 'feature-x' does not exist" in err
+    assert "git branch feature-x origin/feature-x" in err
+
+
+def test_resolve_base_branch_missing_local_no_remote(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "feature-x")
+
+    assert exc_info.value.code == 2
+    assert (
+        "--from must be a local branch name (got: feature-x)" in capsys.readouterr().err
+    )
+
+
+def test_resolve_base_branch_empty_after_strip_exits_2(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "origin/")
+
+    assert exc_info.value.code == 2
+    assert "--from cannot be empty after stripping 'origin/'" in capsys.readouterr().err
+
+
+def test_resolve_base_branch_head_is_not_local_branch(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "HEAD")
+
+    assert exc_info.value.code == 2
+    assert "--from must be a local branch name (got: HEAD)" in capsys.readouterr().err
+
+
+def test_resolve_base_branch_tag_not_local_branch(capsys):
+    from draft.command_create import _resolve_base_branch
+
+    with (
+        patch("draft.command_create._local_branch_exists", return_value=False),
+        patch("draft.command_create._remote_ref_exists", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _resolve_base_branch("/repo", "v1.0.0")
+
+    assert exc_info.value.code == 2
+    assert "--from must be a local branch name (got: v1.0.0)" in capsys.readouterr().err

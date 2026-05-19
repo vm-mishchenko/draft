@@ -113,7 +113,7 @@ def test_resolve_case_existing_branch_no_prior_run_no_pr(tmp_path):
         branch_source="existing",
         branch="my-branch",
         project="myproject",
-        base_branch="origin/main",
+        base_branch="main",
     )
 
     with patch("draft.runs.runs_base", return_value=runs_dir):
@@ -121,7 +121,7 @@ def test_resolve_case_existing_branch_no_prior_run_no_pr(tmp_path):
 
     assert case == CASE_COMMITS_ONLY
     assert mapping["BRANCH"] == "my-branch"
-    assert mapping["BASE_BRANCH"] == "origin/main"
+    assert mapping["BASE_BRANCH"] == "main"
 
 
 def test_resolve_case_commits_only_default_base_branch(tmp_path):
@@ -139,7 +139,7 @@ def test_resolve_case_commits_only_default_base_branch(tmp_path):
         case, mapping = resolve_case(ctx)
 
     assert case == CASE_COMMITS_ONLY
-    assert mapping["BASE_BRANCH"] == "origin/main"
+    assert mapping["BASE_BRANCH"] == "main"
 
 
 def test_resolve_case_picks_earliest_of_two_prior_runs(tmp_path):
@@ -262,7 +262,7 @@ def test_render_original_spec_commits_only_contains_branch_and_git_log(tmp_path)
         branch_source="existing",
         branch="my-branch",
         project="myproject",
-        base_branch="origin/main",
+        base_branch="main",
     )
 
     with patch("draft.runs.runs_base", return_value=runs_dir):
@@ -270,7 +270,7 @@ def test_render_original_spec_commits_only_contains_branch_and_git_log(tmp_path)
 
     assert "## Original spec" in result
     assert "my-branch" in result
-    assert "git log origin/main..HEAD" in result
+    assert "git log main..HEAD" in result
 
 
 def test_render_original_spec_commits_only_literal_commit_token(tmp_path):
