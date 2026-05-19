@@ -797,3 +797,93 @@ def test_invoke_script_writes_shell_repro_line(tmp_path):
     assert re.match(rf"^\$ cd .+ && {re.escape(true_bin)}$", shell_line)
 
     assert verdict.kind == "approve"
+
+
+# --- _run_suggested_checks tests ---
+
+
+def _make_review_suggested_cfg(**overrides):
+    cfg = {
+        "per_check_timeout": 120,
+        "suggester_total_budget": 300,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _make_review_hook_result(cmd="echo ok", rc=0, output="ok\n", duration=1.0):
+    from draft.hooks import HookResult
+
+    return HookResult(cmd=cmd, rc=rc, output=output, duration=duration)
+
+
+def test_review_run_suggested_checks_uses_status_prefix(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from draft.steps.review_implementation import _run_suggested_checks
+
+    suggested = [{"cmd": "echo ok"}]
+    cfg = _make_review_suggested_cfg()
+    engine = MagicMock()
+    stage = MagicMock()
+
+    with patch(
+        "draft.steps.review_implementation._run_hook_cmd",
+        return_value=_make_review_hook_result(rc=0),
+    ):
+        failures = _run_suggested_checks(
+            suggested,
+            "/wt",
+            tmp_path,
+            engine,
+            cfg,
+            stage,
+            status_prefix="[reviewer-x] ",
+        )
+
+    assert failures == []
+    assert stage.update.call_args_list == [
+        mock.call("[reviewer-x] suggested check 1/1")
+    ]
+
+    stage2 = MagicMock()
+    with patch(
+        "draft.steps.review_implementation._run_hook_cmd",
+        return_value=_make_review_hook_result(rc=2),
+    ):
+        failures2 = _run_suggested_checks(
+            suggested,
+            "/wt",
+            tmp_path,
+            engine,
+            cfg,
+            stage2,
+            status_prefix="[reviewer-x] ",
+        )
+
+    assert len(failures2) == 1
+    assert stage2.update.call_args_list == [
+        mock.call("[reviewer-x] suggested check 1/1"),
+        mock.call("[reviewer-x] suggested check 1/1 failed (exit 2)"),
+    ]
+
+
+def test_review_run_suggested_checks_default_prefix_empty(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from draft.steps.review_implementation import _run_suggested_checks
+
+    suggested = [{"cmd": "echo ok"}]
+    cfg = _make_review_suggested_cfg()
+    engine = MagicMock()
+    stage = MagicMock()
+
+    with patch(
+        "draft.steps.review_implementation._run_hook_cmd",
+        return_value=_make_review_hook_result(rc=0),
+    ):
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
+
+    assert stage.update.call_args_list == [mock.call("suggested check 1/1")]
+    msg = stage.update.call_args_list[0].args[0]
+    assert not msg.startswith(" ")

@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -808,6 +809,10 @@ def test_run_suggested_checks_all_pass(tmp_path):
 
     assert failures == []
     assert stage.update.call_count == 2
+    assert stage.update.call_args_list == [
+        mock.call("suggested check 1/2"),
+        mock.call("suggested check 2/2"),
+    ]
     log_content = (tmp_path / "implement-spec.suggested.log").read_text()
     assert "--- exit 0" in log_content
 
@@ -830,6 +835,10 @@ def test_run_suggested_checks_first_failure_short_circuits(tmp_path):
     assert len(failures) == 1
     assert failures[0].rc == 1
     assert mock_hook.call_count == 1
+    assert stage.update.call_args_list == [
+        mock.call("suggested check 1/2"),
+        mock.call("suggested check 1/2 failed (exit 1)"),
+    ]
 
 
 def test_run_suggested_checks_timeout_capped(tmp_path):
@@ -883,6 +892,44 @@ def test_run_suggested_checks_budget_exhausted(tmp_path):
     assert mock_hook.call_count == 1
     log_content = (tmp_path / "implement-spec.suggested.log").read_text()
     assert "skipped (budget exhausted)" in log_content
+
+
+def test_run_suggested_checks_timeout_failure_status(tmp_path):
+    suggested = [{"cmd": "slow"}]
+    cfg = _make_run_suggested_cfg(per_check_timeout=120)
+
+    engine = MagicMock()
+    stage = MagicMock()
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=_make_hook_result(rc=124),
+    ):
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
+
+    assert stage.update.call_args_list == [
+        mock.call("suggested check 1/1"),
+        mock.call("suggested check 1/1 failed (timeout 120s)"),
+    ]
+
+
+def test_run_suggested_checks_no_cmd_in_status(tmp_path):
+    suggested = [{"cmd": "bazel test //very/long/target:Name"}]
+    cfg = _make_run_suggested_cfg()
+
+    engine = MagicMock()
+    stage = MagicMock()
+
+    with patch(
+        "draft.steps.implement_spec._run_hook_cmd",
+        return_value=_make_hook_result(rc=0),
+    ):
+        _run_suggested_checks(suggested, "/wt", tmp_path, engine, cfg, stage)
+
+    for call in stage.update.call_args_list:
+        msg = call.args[0]
+        assert "bazel" not in msg
+        assert ":" not in msg
 
 
 # --- Integration tests for ImplementSpecStep.run with suggest_extra_checks ---
