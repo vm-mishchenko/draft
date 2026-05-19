@@ -193,23 +193,10 @@ def test_hook_result_carries_duration(tmp_path):
 # --- env injection ---
 
 
-def _branch_marker_config(step, event, marker):
-    return {
-        "steps": {
-            step: {
-                "hooks": {
-                    event: [
-                        {
-                            "cmd": (
-                                f'echo "${{DRAFT_BRANCH:-[unset]}}|'
-                                f'${{DRAFT_BASE_BRANCH:-[unset]}}" > {marker}'
-                            )
-                        }
-                    ]
-                }
-            }
-        }
-    }
+def _marker_cmd(marker):
+    return (
+        f'echo "${{DRAFT_BRANCH:-[unset]}}|${{DRAFT_BASE_BRANCH:-[unset]}}" > {marker}'
+    )
 
 
 def test_env_both_vars_present(tmp_path):
@@ -217,7 +204,7 @@ def test_env_both_vars_present(tmp_path):
     ctx = RunContext("rid", tmp_path)
     ctx.set("branch", "feature-x")
     ctx.set("base_branch", "main")
-    config = _branch_marker_config("step", "pre", marker)
+    config = {"steps": {"step": {"hooks": {"pre": [{"cmd": _marker_cmd(marker)}]}}}}
     _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
     assert marker.read_text().strip() == "feature-x|main"
 
@@ -226,7 +213,7 @@ def test_env_only_branch(tmp_path):
     marker = tmp_path / "marker.txt"
     ctx = RunContext("rid", tmp_path)
     ctx.set("branch", "feature-x")
-    config = _branch_marker_config("step", "pre", marker)
+    config = {"steps": {"step": {"hooks": {"pre": [{"cmd": _marker_cmd(marker)}]}}}}
     _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
     assert marker.read_text().strip() == "feature-x|[unset]"
 
@@ -236,14 +223,14 @@ def test_env_none_values(tmp_path):
     ctx = RunContext("rid", tmp_path)
     ctx.set("branch", None)
     ctx.set("base_branch", None)
-    config = _branch_marker_config("step", "pre", marker)
+    config = {"steps": {"step": {"hooks": {"pre": [{"cmd": _marker_cmd(marker)}]}}}}
     _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
     assert marker.read_text().strip() == "[unset]|[unset]"
 
 
 def test_env_no_ctx_backward_compat(tmp_path):
     marker = tmp_path / "marker.txt"
-    config = _branch_marker_config("step", "pre", marker)
+    config = {"steps": {"step": {"hooks": {"pre": [{"cmd": _marker_cmd(marker)}]}}}}
     [result] = _runner(config, tmp_path, tmp_path).run("step", "pre")
     assert result.rc == 0
     assert marker.read_text().strip() == "[unset]|[unset]"
@@ -288,7 +275,11 @@ def test_env_reaches_verify_event(tmp_path):
     ctx = RunContext("rid", tmp_path)
     ctx.set("branch", "feature-x")
     ctx.set("base_branch", "main")
-    config = _branch_marker_config("implement-spec", "verify", marker)
+    config = {
+        "steps": {
+            "implement-spec": {"hooks": {"verify": [{"cmd": _marker_cmd(marker)}]}}
+        }
+    }
     runner = _runner_with_ctx(config, tmp_path, tmp_path, ctx)
     lifecycle = DraftLifecycle(runner)
     lifecycle.run_hooks("implement-spec", "verify")
