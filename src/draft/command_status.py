@@ -2,6 +2,7 @@ import json
 import sys
 
 from draft import runs
+from draft.command_common import _config_label
 from pipeline import RunMetrics, fmt_duration
 from pipeline.heartbeat import Heartbeat
 
@@ -37,6 +38,7 @@ def run(args) -> int:
                         "status": "unknown",
                         "worktree": None,
                         "pr_url": None,
+                        "config_path": None,
                         "steps": None,
                     },
                     indent=2,
@@ -114,6 +116,7 @@ def run(args) -> int:
             "status": run_status,
             "worktree": worktree,
             "pr_url": pr_url,
+            "config_path": state.get("config_path"),
             "logs": str(run_dir),
             "started_at": started_at,
             "finished_at": finished_at,
@@ -132,6 +135,7 @@ def run(args) -> int:
     if pr_url:
         print(f"pr:       {pr_url}")
     print(f"logs:          {run_dir}")
+    print(f"config:        {_config_label(state.get('config_path'), data.get('repo'))}")
     print(f"started:       {started_at or '-'}")
     print(f"finished:      {finished_at or '-'}")
     print(f"total runtime: {fmt_duration(total_seconds)}")

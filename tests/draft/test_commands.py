@@ -450,7 +450,7 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
 
     with (
         patch("draft.runs.find_run_dir", return_value=run_dir),
-        patch("draft.command_continue.load_config", return_value={}),
+        patch("draft.command_continue._load_run_config", return_value={}),
         patch("draft.command_continue.Pipeline") as MockPipeline,
     ):
         MockPipeline.return_value.run.return_value = None
@@ -3480,6 +3480,7 @@ def _make_create_args(**kwargs):
         delete_worktree = False
         no_review = False
         overrides = []
+        config_path = None
 
     for k, v in kwargs.items():
         setattr(FakeArgs, k, v)
@@ -3519,7 +3520,7 @@ def _patch_create_run_infra(tmp_path, pipeline_run_side_effect=None):
             "draft.command_create._canonical_worktree_path",
             return_value=tmp_path / "wt",
         ),
-        patch("draft.command_create.load_config", return_value={}),
+        patch("draft.command_create._load_run_config", return_value={}),
         patch("draft.command_create._validate_overrides"),
         patch("draft.command_create._apply_overrides", side_effect=lambda c, _: c),
         patch("draft.command_create.validate_config"),
@@ -3625,3 +3626,708 @@ def test_command_create_aggregates_raises_done_still_prints(tmp_path, capsys):
     assert "done." in out
     assert "runtime:" not in out
     assert "cost:" not in out
+
+
+# --- --config flag ---
+
+
+def _patch_create_preflight(tmp_path, repo_dir):
+    """Patches for create pre-flight only (up through PR mode detection)."""
+    from draft.types import BranchSource
+
+    return [
+        patch("draft.command_create._reject_flag_conflicts"),
+        patch("draft.command_create._assert_spec_readable"),
+        patch("draft.command_create._assert_git_repo"),
+        patch("draft.command_create._assert_main_clone"),
+        patch("draft.command_create._assert_on_path"),
+        patch("draft.command_create._repo_root", return_value=str(repo_dir)),
+        patch("draft.command_create._project_name", return_value=repo_dir.name),
+        patch("draft.command_create._resolve_base_branch", return_value="main"),
+        patch(
+            "draft.command_create._resolve_working_branch",
+            return_value=("test-branch", BranchSource.NEW),
+        ),
+        patch("draft.command_create._detect_pr_mode", return_value=("open", None)),
+    ]
+
+
+def test_create_config_flag_missing_file_no_run_created(tmp_path, capsys):
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    missing = tmp_path / "nope.yaml"
+
+    args = _make_create_args(
+        spec_path="spec.md", skip_pr=True, config_path=str(missing)
+    )
+    preflight = _patch_create_preflight(tmp_path, repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cc.run(args)
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "--config file not found" in err
+    runs_dir = home_dir / ".draft" / "runs"
+    assert not runs_dir.exists() or not list(runs_dir.rglob("draft.pid"))
+
+
+def test_create_config_flag_malformed_yaml_no_run_created(tmp_path, capsys):
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("steps: [invalid: yaml")
+
+    args = _make_create_args(spec_path="spec.md", skip_pr=True, config_path=str(broken))
+    preflight = _patch_create_preflight(tmp_path, repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cc.run(args)
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "malformed YAML in" in err
+    assert str(broken) in err
+    assert not (home_dir / ".draft" / "runs").exists() or not list(
+        (home_dir / ".draft" / "runs").rglob("draft.pid")
+    )
+
+
+def test_create_config_flag_validation_error_includes_source_path(tmp_path, capsys):
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
+
+    args = _make_create_args(spec_path="spec.md", skip_pr=True, config_path=str(cfg))
+    preflight = _patch_create_preflight(tmp_path, repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cc.run(args)
+
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert f"error in {cfg}" in err
+
+
+def test_create_config_flag_uses_only_specified_file(tmp_path, capsys):
+
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "config.fast.yaml"
+    cfg.write_text("model: fast-model\n")
+
+    args = _make_create_args(spec_path="spec.md", config_path=str(cfg))
+    all_patches = _patch_create_run_infra(tmp_path)
+    # Replace the _load_run_config mock with actual routing (to verify file is read)
+    filtered = [p for p in all_patches if "load_run_config" not in str(p)]
+
+    captured_config = {}
+
+    def fake_load(repo, cp):
+        from draft.config import load_config_from_file
+
+        result = load_config_from_file(cp) if cp is not None else {}
+        captured_config["config"] = result
+        return result
+
+    with (
+        _apply_patches(filtered),
+        patch("draft.command_create._load_run_config", side_effect=fake_load),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cc.run(args)
+
+    assert rc == 0
+    assert captured_config.get("config", {}).get("model") == "fast-model"
+
+
+def test_create_no_config_flag_persists_null(tmp_path):
+    import json
+
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    args = _make_create_args(spec_path="spec.md")
+    all_patches = _patch_create_run_infra(tmp_path)
+    with (
+        _apply_patches(all_patches),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        cc.run(args)
+
+    runs_dir = home_dir / ".draft" / "runs"
+    state_files = list(runs_dir.rglob("state.json"))
+    assert state_files, "expected a state.json to be written"
+    state = json.loads(state_files[0].read_text())
+    assert state.get("config_path") is None
+
+
+def test_create_config_flag_relative_path_resolves_against_cwd(tmp_path, monkeypatch):
+    import json
+
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("model: x\n")
+
+    monkeypatch.chdir(tmp_path)
+    args = _make_create_args(spec_path="spec.md", config_path="cfg.yaml")
+    all_patches = _patch_create_run_infra(tmp_path)
+    filtered = [p for p in all_patches if "load_run_config" not in str(p)]
+    with (
+        _apply_patches(filtered),
+        patch("draft.command_create._load_run_config", return_value={}),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cc.run(args)
+
+    assert rc == 0
+    runs_dir = home_dir / ".draft" / "runs"
+    state_files = list(runs_dir.rglob("state.json"))
+    assert state_files
+    state = json.loads(state_files[0].read_text())
+    assert state["config_path"] == str(cfg.resolve())
+
+
+def test_create_config_flag_no_run_dir_on_failure(tmp_path, capsys):
+    import draft.command_create as cc
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+
+    for config_content, expected_rc, err_fragment in [
+        (None, 1, "--config file not found"),  # missing file
+        ("steps: [invalid", 1, "malformed YAML"),  # malformed yaml
+    ]:
+        capsys.readouterr()
+        if config_content is None:
+            cfg = tmp_path / "missing_XXXX.yaml"
+        else:
+            cfg = tmp_path / "bad.yaml"
+            cfg.write_text(config_content)
+
+        args = _make_create_args(
+            spec_path="spec.md", skip_pr=True, config_path=str(cfg)
+        )
+        preflight = _patch_create_preflight(tmp_path, repo_dir)
+        with (
+            _apply_patches(preflight),
+            patch("pathlib.Path.home", return_value=home_dir),
+        ):
+            rc = cc.run(args)
+
+        assert rc == expected_rc
+        err = capsys.readouterr().err
+        assert err_fragment in err
+        assert not (home_dir / ".draft" / "runs").exists() or not list(
+            (home_dir / ".draft" / "runs").rglob("draft.pid")
+        )
+
+
+def test_create_preamble_prints_config_line_with_flag(tmp_path, capsys):
+    import draft.command_create as cc
+
+    cfg = tmp_path / "config.fast.yaml"
+    abs_cfg = str(cfg.resolve())
+    repo_dir = str(tmp_path / "repo")
+    run_dir = str(tmp_path / "runs" / "260505-120000")
+
+    cc._print_preamble(
+        "260505-120000",
+        "feature",
+        str(tmp_path / "wt"),
+        run_dir,
+        "2026-01-01T00:00:00",
+        [],
+        set(),
+        "worktree",
+        cfg,
+        repo_dir,
+    )
+
+    out = capsys.readouterr().out
+    assert f"config:   {abs_cfg}" in out
+
+
+def test_create_preamble_prints_config_line_without_flag(tmp_path, capsys):
+    import draft.command_create as cc
+
+    repo_dir = str(tmp_path / "repo")
+    run_dir = str(tmp_path / "runs" / "260505-120000")
+
+    cc._print_preamble(
+        "260505-120000",
+        "feature",
+        str(tmp_path / "wt"),
+        run_dir,
+        "2026-01-01T00:00:00",
+        [],
+        set(),
+        "worktree",
+        None,
+        repo_dir,
+    )
+
+    out = capsys.readouterr().out
+    assert "config:" in out
+    assert ".draft/config.yaml" in out
+
+
+# --- babysit --config flag ---
+
+
+def _make_babysit_args(**kwargs):
+    class FakeArgs:
+        pr_input = "1"
+        spec_path = None
+        no_worktree = False
+        delete_worktree = False
+        run_id = None
+        overrides = []
+        config_path = None
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+def _patch_babysit_preflight(repo_dir):
+    from draft.types import WorktreeMode
+
+    return [
+        patch("draft.command_babysit._assert_git_repo"),
+        patch("draft.command_babysit._assert_main_clone"),
+        patch("draft.command_babysit._assert_on_path"),
+        patch("draft.command_babysit._repo_root", return_value=str(repo_dir)),
+        patch("draft.command_babysit._project_name", return_value=repo_dir.name),
+        patch(
+            "draft.command_babysit._fetch_pr",
+            return_value={
+                "headRefName": "feature",
+                "headRefOid": "abc",
+                "number": 1,
+                "state": "OPEN",
+                "url": "https://github.com/test/repo/pull/1",
+                "baseRefName": "main",
+                "isCrossRepository": False,
+                "body": "",
+            },
+        ),
+        patch("draft.command_babysit._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch(
+            "draft.command_babysit._resolve_worktree_for_babysit",
+            return_value=(str(repo_dir / "wt"), WorktreeMode.WORKTREE),
+        ),
+        patch("draft.command_babysit._pr_already_green", return_value=False),
+    ]
+
+
+def test_babysit_config_flag_missing_file_no_run_created(tmp_path, capsys):
+    import draft.command_babysit as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    missing = tmp_path / "nope.yaml"
+
+    args = _make_babysit_args(config_path=str(missing))
+    preflight = _patch_babysit_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 1
+    assert "--config file not found" in capsys.readouterr().err
+    assert not (home_dir / ".draft" / "runs").exists() or not list(
+        (home_dir / ".draft" / "runs").rglob("draft.pid")
+    )
+
+
+def test_babysit_config_flag_uses_only_specified_file(tmp_path, capsys):
+    from unittest.mock import MagicMock
+
+    import draft.command_babysit as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "config.fast.yaml"
+    cfg.write_text("model: babysit-model\n")
+
+    args = _make_babysit_args(config_path=str(cfg))
+    preflight = _patch_babysit_preflight(repo_dir)
+    captured = {}
+
+    def fake_load(repo, cp):
+        from draft.config import load_config_from_file
+
+        result = load_config_from_file(cp) if cp is not None else {}
+        captured["model"] = result.get("model")
+        return result
+
+    with (
+        _apply_patches(preflight),
+        patch("draft.command_babysit._load_run_config", side_effect=fake_load),
+        patch("draft.command_babysit._validate_overrides"),
+        patch("draft.command_babysit._apply_overrides", side_effect=lambda c, _: c),
+        patch("draft.command_babysit.validate_config"),
+        patch("draft.command_babysit.step_config", return_value={}),
+        patch(
+            "draft.command_babysit._compose_active_steps_babysit",
+            return_value=([], set()),
+        ),
+        patch("draft.command_babysit._print_preamble"),
+        patch("draft.command_babysit.Runner"),
+        patch("draft.command_babysit.DraftLifecycle"),
+        patch("draft.command_babysit.HookRunner"),
+        patch("draft.command_babysit.HeartbeatPulse"),
+        patch("draft.command_babysit.PIPELINES", {"babysit": MagicMock(steps=[])}),
+        patch("pipeline.Pipeline"),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 0
+    assert captured.get("model") == "babysit-model"
+
+
+def test_babysit_config_flag_validation_error_includes_source_path(tmp_path, capsys):
+    import draft.command_babysit as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
+
+    args = _make_babysit_args(config_path=str(cfg))
+    preflight = _patch_babysit_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 3
+    assert f"error in {cfg}" in capsys.readouterr().err
+
+
+def test_babysit_config_flag_no_run_dir_on_failure(tmp_path, capsys):
+    import draft.command_babysit as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    missing = tmp_path / "gone.yaml"
+
+    args = _make_babysit_args(config_path=str(missing))
+    preflight = _patch_babysit_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 1
+    assert not (home_dir / ".draft" / "runs").exists() or not list(
+        (home_dir / ".draft" / "runs").rglob("draft.pid")
+    )
+
+
+# --- fix-pr --config flag ---
+
+
+def _make_fix_pr_args(**kwargs):
+    class FakeArgs:
+        pr_input = "1"
+        spec_path = None
+        no_worktree = False
+        delete_worktree = False
+        run_id = None
+        overrides = []
+        config_path = None
+        watch = False
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
+def _patch_fix_pr_preflight(repo_dir):
+
+    return [
+        patch("draft.command_fix_pr._assert_git_repo"),
+        patch("draft.command_fix_pr._assert_main_clone"),
+        patch("draft.command_fix_pr._assert_on_path"),
+        patch("draft.command_fix_pr._repo_root", return_value=str(repo_dir)),
+        patch("draft.command_fix_pr._project_name", return_value=repo_dir.name),
+        patch(
+            "draft.command_fix_pr._fetch_pr",
+            return_value={
+                "headRefName": "feature",
+                "headRefOid": "abc",
+                "number": 1,
+                "state": "OPEN",
+                "url": "https://github.com/test/repo/pull/1",
+                "baseRefName": "main",
+                "isCrossRepository": False,
+                "body": "",
+            },
+        ),
+        patch("draft.command_fix_pr._assert_branch_exists_and_matches"),
+        patch("draft.runs.find_active_run_on_branch", return_value=None),
+        patch(
+            "draft.command_fix_pr._resolve_worktree_for_fix_pr",
+            return_value=(str(repo_dir / "wt"), "worktree"),
+        ),
+        patch("draft.command_fix_pr._single_check_gate", return_value="failure"),
+    ]
+
+
+def test_fix_pr_config_flag_missing_file_no_run_created(tmp_path, capsys):
+    import draft.command_fix_pr as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    missing = tmp_path / "nope.yaml"
+
+    args = _make_fix_pr_args(config_path=str(missing))
+    preflight = _patch_fix_pr_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 1
+    assert "--config file not found" in capsys.readouterr().err
+    assert not (home_dir / ".draft" / "runs").exists() or not list(
+        (home_dir / ".draft" / "runs").rglob("draft.pid")
+    )
+
+
+def test_fix_pr_config_flag_uses_only_specified_file(tmp_path, capsys):
+    from unittest.mock import MagicMock
+
+    import draft.command_fix_pr as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "config.fast.yaml"
+    cfg.write_text("model: fixpr-model\n")
+
+    args = _make_fix_pr_args(config_path=str(cfg))
+    preflight = _patch_fix_pr_preflight(repo_dir)
+    captured = {}
+
+    def fake_load(repo, cp):
+        from draft.config import load_config_from_file
+
+        result = load_config_from_file(cp) if cp is not None else {}
+        captured["model"] = result.get("model")
+        return result
+
+    with (
+        _apply_patches(preflight),
+        patch("draft.command_fix_pr._load_run_config", side_effect=fake_load),
+        patch("draft.command_fix_pr._validate_overrides"),
+        patch("draft.command_fix_pr._apply_overrides", side_effect=lambda c, _: c),
+        patch("draft.command_fix_pr.validate_config"),
+        patch("draft.command_fix_pr.step_config", return_value={}),
+        patch(
+            "draft.command_fix_pr._compose_active_steps_fix_pr",
+            return_value=([], set()),
+        ),
+        patch("draft.command_fix_pr._print_preamble"),
+        patch("draft.command_fix_pr.Runner"),
+        patch("draft.command_fix_pr.DraftLifecycle"),
+        patch("draft.command_fix_pr.HookRunner"),
+        patch("draft.command_fix_pr.HeartbeatPulse"),
+        patch("draft.command_fix_pr.PIPELINES", {"fix-pr": MagicMock(steps=[])}),
+        patch("pipeline.Pipeline"),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 0
+    assert captured.get("model") == "fixpr-model"
+
+
+def test_fix_pr_config_flag_validation_error_includes_source_path(tmp_path, capsys):
+    import draft.command_fix_pr as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
+
+    args = _make_fix_pr_args(config_path=str(cfg))
+    preflight = _patch_fix_pr_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 3
+    assert f"error in {cfg}" in capsys.readouterr().err
+
+
+def test_fix_pr_config_flag_no_run_dir_on_failure(tmp_path, capsys):
+    import draft.command_fix_pr as cmd
+
+    home_dir = tmp_path / "home"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    missing = tmp_path / "gone.yaml"
+
+    args = _make_fix_pr_args(config_path=str(missing))
+    preflight = _patch_fix_pr_preflight(repo_dir)
+    with (
+        _apply_patches(preflight),
+        patch("pathlib.Path.home", return_value=home_dir),
+    ):
+        rc = cmd.run(args)
+
+    assert rc == 1
+    assert not (home_dir / ".draft" / "runs").exists() or not list(
+        (home_dir / ".draft" / "runs").rglob("draft.pid")
+    )
+
+
+# --- continue --config flag ---
+
+
+def _make_continue_state(run_dir, config_path=None, extra_data=None):
+    import json
+
+    data = {
+        "branch": "fix",
+        "wt_dir": str(run_dir.parent / "wt"),
+        "repo": str(run_dir.parent.parent),
+        "pipeline": "create",
+    }
+    if extra_data:
+        data.update(extra_data)
+    state = {
+        "run_id": run_dir.name,
+        "run_dir": str(run_dir),
+        "completed": [],
+        "data": data,
+        "step_data": {},
+        "step_configs": {},
+        "sessions": [],
+        "config_path": config_path,
+    }
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+
+def test_continue_uses_persisted_config_path(tmp_path, capsys):
+    import draft.command_continue as cmd
+
+    run_dir = tmp_path / "myproject" / "260505-120000"
+    run_dir.mkdir(parents=True)
+
+    cfg = tmp_path / "config.fast.yaml"
+    cfg.write_text("model: persisted-model\n")
+    _make_continue_state(run_dir, config_path=str(cfg))
+
+    class FakeArgs:
+        run_id = "260505-120000"
+
+    captured = {}
+
+    def fake_load(repo, cp):
+        captured["config_path"] = str(cp) if cp else None
+        return {"model": "persisted-model"}
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.command_continue._load_run_config", side_effect=fake_load),
+        patch("draft.command_continue.Pipeline") as MockPipeline,
+    ):
+        MockPipeline.return_value.run.return_value = None
+        cmd.run(FakeArgs())
+
+    assert captured.get("config_path") == str(cfg)
+
+
+def test_continue_persisted_config_missing_errors_cleanly(tmp_path, capsys):
+
+    import draft.command_continue as cmd
+
+    run_dir = tmp_path / "myproject" / "260505-120000"
+    run_dir.mkdir(parents=True)
+
+    deleted_cfg = tmp_path / "deleted.yaml"
+    _make_continue_state(run_dir, config_path=str(deleted_cfg))
+    original_state = (run_dir / "state.json").read_text()
+
+    class FakeArgs:
+        run_id = "260505-120000"
+
+    with patch("draft.runs.find_run_dir", return_value=run_dir):
+        rc = cmd.run(FakeArgs())
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "config file from create run no longer exists" in err
+    assert str(deleted_cfg) in err
+    assert (run_dir / "state.json").read_text() == original_state
+    assert not (run_dir / "draft.pid").exists()
+
+
+def test_continue_null_config_path_falls_back_to_default(tmp_path, capsys):
+    import draft.command_continue as cmd
+
+    run_dir = tmp_path / "myproject" / "260505-120000"
+    run_dir.mkdir(parents=True)
+    _make_continue_state(run_dir, config_path=None)
+
+    class FakeArgs:
+        run_id = "260505-120000"
+
+    captured = {}
+
+    def fake_load(repo, cp):
+        captured["config_path"] = cp
+        return {}
+
+    with (
+        patch("draft.runs.find_run_dir", return_value=run_dir),
+        patch("draft.command_continue._load_run_config", side_effect=fake_load),
+        patch("draft.command_continue.Pipeline") as MockPipeline,
+    ):
+        MockPipeline.return_value.run.return_value = None
+        cmd.run(FakeArgs())
+
+    assert captured.get("config_path") is None

@@ -1,3 +1,5 @@
+import os
+import sys
 import textwrap
 from pathlib import Path
 
@@ -6,6 +8,7 @@ import pytest
 from draft.config import (
     ConfigError,
     load_config,
+    load_config_from_file,
     resolve_pr_body_template,
     resolve_prompt_template,
     step_config,
@@ -864,3 +867,70 @@ def test_validate_reviewer_argv0s_second_reviewer_failing(tmp_path):
     }
     with pytest.raises(ConfigError, match="reviewers\\[1\\]\\.cmd"):
         validate_reviewer_argv0s(config, str(tmp_path))
+
+
+# --- load_config_from_file ---
+
+
+def test_load_config_from_file_reads_yaml(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("model: fast\nsteps:\n  implement-spec:\n    max_retries: 2\n")
+    result = load_config_from_file(cfg)
+    assert result["model"] == "fast"
+    assert result["steps"]["implement-spec"]["max_retries"] == 2
+
+
+def test_load_config_from_file_missing_raises(tmp_path):
+    missing = tmp_path / "nope.yaml"
+    with pytest.raises(ConfigError, match="--config file not found"):
+        load_config_from_file(missing)
+
+
+def test_load_config_from_file_directory_raises(tmp_path):
+    with pytest.raises(ConfigError, match="must point to a file, not a directory"):
+        load_config_from_file(tmp_path)
+
+
+def test_load_config_from_file_malformed_yaml_raises(tmp_path):
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("steps: [invalid: yaml: here")
+    with pytest.raises(ConfigError) as exc_info:
+        load_config_from_file(broken)
+    msg = str(exc_info.value)
+    assert "malformed YAML in" in msg
+    assert str(broken) in msg
+
+
+def test_load_config_from_file_empty_returns_empty_dict(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    result = load_config_from_file(empty)
+    assert result == {}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod not reliable on Windows")
+def test_load_config_from_file_unreadable_raises(tmp_path):
+    if os.getuid() == 0:
+        pytest.skip("running as root; chmod 000 has no effect")
+    unreadable = tmp_path / "secret.yaml"
+    unreadable.write_text("model: x\n")
+    unreadable.chmod(0o000)
+    try:
+        with pytest.raises(ConfigError, match="cannot read --config file"):
+            load_config_from_file(unreadable)
+    finally:
+        unreadable.chmod(0o644)
+
+
+def test_load_config_from_file_list_root_raises(tmp_path):
+    cfg = tmp_path / "list.yaml"
+    cfg.write_text("- item1\n- item2\n")
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_config_from_file(cfg)
+
+
+def test_load_config_from_file_scalar_root_raises(tmp_path):
+    cfg = tmp_path / "scalar.yaml"
+    cfg.write_text("just a string\n")
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_config_from_file(cfg)

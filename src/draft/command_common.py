@@ -1,3 +1,4 @@
+import contextlib
 import os
 import re
 import subprocess
@@ -5,7 +6,13 @@ import sys
 from pathlib import Path
 
 from draft import runs
-from draft.config import _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS
+from draft.config import (
+    _FORBIDDEN_STEP_KEYS,
+    _LOOPING_STEPS,
+    ConfigError,
+    load_config,
+    load_config_from_file,
+)
 from draft.types import WorktreeMode
 
 _TIMESTAMP_RE = re.compile(r"^\d{6}-\d{6}$")
@@ -293,6 +300,36 @@ def _validate_overrides(overrides: list[str]) -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+
+def _resolve_config_arg(arg: str | None) -> Path | None:
+    if arg is None:
+        return None
+    return Path(arg).expanduser().resolve()
+
+
+def _load_run_config(repo: str, config_path: Path | None) -> dict:
+    if config_path is not None:
+        return load_config_from_file(config_path)
+    return load_config(repo)
+
+
+@contextlib.contextmanager
+def _decorate_validation_errors(source: Path | None):
+    try:
+        yield
+    except ConfigError as exc:
+        if source is None:
+            raise
+        raise ConfigError(f"error in {source}: {exc}") from None
+
+
+def _config_label(config_path: str | None, repo: str | None) -> str:
+    if config_path:
+        return config_path
+    if repo:
+        return str(Path(repo) / ".draft" / "config.yaml")
+    return "-"
 
 
 def _apply_overrides(config: dict, overrides: list[str]) -> dict:

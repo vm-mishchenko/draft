@@ -108,6 +108,7 @@ draft create <spec-path>
 - `--skip-pr` — stop the run after code generation; skip push and PR steps
 - `--no-worktree` — run in the main repo instead of a linked worktree; requires `--branch`
 - `--delete-worktree` — remove the worktree after the run succeeds
+- `--config PATH` — use only this config file for the run; bypasses both global and project config files
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 
 `--branch` and `--from` are mutually exclusive. `--delete-worktree` and `--no-worktree` are mutually exclusive.
@@ -127,6 +128,7 @@ draft babysit <pr>
 - `--no-worktree` — run in the main repo instead of a linked worktree
 - `--delete-worktree` — remove the worktree after the run succeeds
 - `--run-id NAME` — custom run id instead of the auto-generated timestamp
+- `--config PATH` — use only this config file for the run; bypasses both global and project config files
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 
 `--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. If CI is already green, the command exits without running the pipeline.
@@ -146,6 +148,7 @@ draft fix-pr <pr>
 - `--no-worktree` — run in the main repo instead of a linked worktree
 - `--delete-worktree` — remove the worktree after the run succeeds
 - `--run-id NAME` — custom run id instead of the auto-generated timestamp
+- `--config PATH` — use only this config file for the run; bypasses both global and project config files
 - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
 - `--watch` — wait for the first failing check to appear instead of exiting early when CI is pending or has no failures
 
@@ -162,6 +165,8 @@ draft continue <run-id>
 **Arguments**
 
 - `run-id` — run to resume; defaults to the most recent run
+
+Continue reuses the config file recorded on creation. There is no way to switch it mid-run.
 
 ### draft delete
 
@@ -217,7 +222,15 @@ Config files:
 - Project: `.draft/config.yaml`
 - Global: `~/.draft/config.yaml`
 
-Project values override global; both merge on top of each step's defaults. `--set <step>.<key>=<value>` overrides a single field for one run.
+Project values override global; both merge on top of each step's defaults. `--set <step>.<key>=<value>` overrides a single field for one run. `--config PATH` replaces both config files entirely for one run — no merge with the global or project file. The path is resolved relative to your cwd, persisted in `state.json`, and reused by `draft continue`.
+
+```yaml
+# config.fast.yaml — example single-file config for a quick run
+model: claude-haiku-4-5-20251001
+steps:
+  implement-spec:
+    max_retries: 2
+```
 
 General configuration structure:
 ```yaml
