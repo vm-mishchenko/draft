@@ -1,0 +1,1516 @@
+diff --git a/README.md b/README.md
+index e881622..0fbfa50 100644
+--- a/README.md
++++ b/README.md
+@@ -108,6 +108,7 @@ draft create <spec-path>
+ - `--skip-pr` — stop the run after code generation; skip push and PR steps
+ - `--no-worktree` — run in the main repo instead of a linked worktree; requires `--branch`
+ - `--delete-worktree` — remove the worktree after the run succeeds
++- `--config PATH` — use only this config file for the run; bypasses both global and project config files
+ - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+ 
+ `--branch` and `--from` are mutually exclusive. `--delete-worktree` and `--no-worktree` are mutually exclusive.
+@@ -127,6 +128,7 @@ draft babysit <pr>
+ - `--no-worktree` — run in the main repo instead of a linked worktree
+ - `--delete-worktree` — remove the worktree after the run succeeds
+ - `--run-id NAME` — custom run id instead of the auto-generated timestamp
++- `--config PATH` — use only this config file for the run; bypasses both global and project config files
+ - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+ 
+ `--delete-worktree` and `--no-worktree` are mutually exclusive. The PR must be open and not from a fork; the branch must already exist locally and match the PR head. If CI is already green, the command exits without running the pipeline.
+@@ -146,6 +148,7 @@ draft fix-pr <pr>
+ - `--no-worktree` — run in the main repo instead of a linked worktree
+ - `--delete-worktree` — remove the worktree after the run succeeds
+ - `--run-id NAME` — custom run id instead of the auto-generated timestamp
++- `--config PATH` — use only this config file for the run; bypasses both global and project config files
+ - `--set STEP.KEY=VALUE` — override a single step config field for this run; repeatable
+ - `--watch` — wait for the first failing check to appear instead of exiting early when CI is pending or has no failures
+ 
+@@ -163,6 +166,8 @@ draft continue <run-id>
+ 
+ - `run-id` — run to resume; defaults to the most recent run
+ 
++Continue reuses the config file recorded on creation. There is no way to switch it mid-run.
++
+ ### draft delete
+ 
+ Remove a single run's state directory and its linked git worktree.
+@@ -217,7 +222,15 @@ Config files:
+ - Project: `.draft/config.yaml`
+ - Global: `~/.draft/config.yaml`
+ 
+-Project values override global; both merge on top of each step's defaults. `--set <step>.<key>=<value>` overrides a single field for one run.
++Project values override global; both merge on top of each step's defaults. `--set <step>.<key>=<value>` overrides a single field for one run. `--config PATH` replaces both config files entirely for one run — no merge with the global or project file. The path is resolved relative to your cwd, persisted in `state.json`, and reused by `draft continue`.
++
++```yaml
++# config.fast.yaml — example single-file config for a quick run
++model: claude-haiku-4-5-20251001
++steps:
++  implement-spec:
++    max_retries: 2
++```
+ 
+ General configuration structure:
+ ```yaml
+diff --git a/src/draft/command_babysit.py b/src/draft/command_babysit.py
+index 3c915ca..f4874e5 100644
+--- a/src/draft/command_babysit.py
++++ b/src/draft/command_babysit.py
+@@ -14,13 +14,17 @@ from draft.command_common import (
+     _assert_main_clone,
+     _assert_on_path,
+     _checkout_in_place,
++    _config_label,
++    _decorate_validation_errors,
++    _load_run_config,
+     _project_name,
+     _repo_root,
++    _resolve_config_arg,
+     _resolve_worktree_for_existing_branch,
+     _validate_overrides,
+     _validate_run_id,
+ )
+-from draft.config import ConfigError, load_config, step_config, validate_config
++from draft.config import ConfigError, step_config, validate_config
+ from draft.hooks import DraftLifecycle, HookRunner
+ from draft.pipelines import PIPELINES
+ from draft.types import WorktreeMode
+@@ -58,6 +62,13 @@ def register(subparsers):
+         default=None,
+         help="Custom run id (default: auto-generated timestamp).",
+     )
++    p.add_argument(
++        "--config",
++        metavar="PATH",
++        default=None,
++        dest="config_path",
++        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
++    )
+     p.add_argument(
+         "--set",
+         metavar="STEP.KEY=VALUE",
+@@ -186,12 +197,22 @@ def _compose_active_steps_babysit(worktree_mode: str, delete_worktree: bool):
+ 
+ 
+ def _print_preamble(
+-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
++    run_id,
++    branch,
++    wt_dir,
++    run_dir,
++    started_at,
++    all_steps,
++    skipped,
++    worktree_mode,
++    config_path=None,
++    repo=None,
+ ):
+     print(f"run-id:   {run_id}")
+     print(f"branch:   {branch}")
+     print(f"worktree: {wt_dir}")
+     print(f"logs:     {run_dir}")
++    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
+     print(f"started:  {started_at}")
+     print("stages:")
+     for step in all_steps:
+@@ -256,28 +277,28 @@ def run(args) -> int:
+     else:
+         run_id = time.strftime("%y%m%d-%H%M%S")
+ 
+-    run_dir = Path.home() / ".draft" / "runs" / project / run_id
+-    run_dir.mkdir(parents=True, exist_ok=True)
+-    pid_file = run_dir / "draft.pid"
+-    pid_file.write_text(str(os.getpid()))
+-
+-    spec_path_dest = _snapshot_spec(run_dir, args.spec_path, pr_data.get("body") or "")
+-
++    config_path = _resolve_config_arg(args.config_path)
+     try:
+-        config = load_config(repo)
++        config = _load_run_config(repo, config_path)
+     except ConfigError as exc:
+         print(f"error: {exc}", file=sys.stderr)
+-        pid_file.unlink(missing_ok=True)
+         return 1
+     _validate_overrides(args.overrides)
+     config = _apply_overrides(config, args.overrides)
+     try:
+-        validate_config(config)
++        with _decorate_validation_errors(config_path):
++            validate_config(config)
+     except ConfigError as exc:
+         print(f"error: {exc}", file=sys.stderr)
+-        pid_file.unlink(missing_ok=True)
+         return 3
+ 
++    run_dir = Path.home() / ".draft" / "runs" / project / run_id
++    run_dir.mkdir(parents=True, exist_ok=True)
++    pid_file = run_dir / "draft.pid"
++    pid_file.write_text(str(os.getpid()))
++
++    spec_path_dest = _snapshot_spec(run_dir, args.spec_path, pr_data.get("body") or "")
++
+     pipeline = PIPELINES["babysit"]
+     step_configs = {
+         step.name: step_config(config, step.name, step.defaults())
+@@ -299,6 +320,7 @@ def run(args) -> int:
+     ctx.set("project", project)
+     ctx.set("worktree_mode", worktree_mode)
+     ctx.set("delete_worktree", args.delete_worktree)
++    ctx.config_path = str(config_path) if config_path else None
+ 
+     if worktree_mode == WorktreeMode.NO_WORKTREE:
+         _checkout_in_place(repo, branch)
+@@ -319,6 +341,8 @@ def run(args) -> int:
+         pipeline.steps,
+         skipped_names,
+         worktree_mode,
++        config_path,
++        repo,
+     )
+ 
+     engine = Runner(model=config.get("model"))
+diff --git a/src/draft/command_common.py b/src/draft/command_common.py
+index 7a8b514..cce960b 100644
+--- a/src/draft/command_common.py
++++ b/src/draft/command_common.py
+@@ -1,3 +1,4 @@
++import contextlib
+ import os
+ import re
+ import subprocess
+@@ -5,7 +6,13 @@ import sys
+ from pathlib import Path
+ 
+ from draft import runs
+-from draft.config import _FORBIDDEN_STEP_KEYS, _LOOPING_STEPS
++from draft.config import (
++    _FORBIDDEN_STEP_KEYS,
++    _LOOPING_STEPS,
++    ConfigError,
++    load_config,
++    load_config_from_file,
++)
+ from draft.types import WorktreeMode
+ 
+ _TIMESTAMP_RE = re.compile(r"^\d{6}-\d{6}$")
+@@ -295,6 +302,36 @@ def _validate_overrides(overrides: list[str]) -> None:
+             sys.exit(2)
+ 
+ 
++def _resolve_config_arg(arg: str | None) -> Path | None:
++    if arg is None:
++        return None
++    return Path(arg).expanduser().resolve()
++
++
++def _load_run_config(repo: str, config_path: Path | None) -> dict:
++    if config_path is not None:
++        return load_config_from_file(config_path)
++    return load_config(repo)
++
++
++@contextlib.contextmanager
++def _decorate_validation_errors(source: Path | None):
++    try:
++        yield
++    except ConfigError as exc:
++        if source is None:
++            raise
++        raise ConfigError(f"error in {source}: {exc}") from None
++
++
++def _config_label(config_path: str | None, repo: str | None) -> str:
++    if config_path:
++        return config_path
++    if repo:
++        return str(Path(repo) / ".draft" / "config.yaml")
++    return "-"
++
++
+ def _apply_overrides(config: dict, overrides: list[str]) -> dict:
+     import copy
+ 
+diff --git a/src/draft/command_continue.py b/src/draft/command_continue.py
+index 5c1fb9e..80d911f 100644
+--- a/src/draft/command_continue.py
++++ b/src/draft/command_continue.py
+@@ -4,7 +4,12 @@ import sys
+ from pathlib import Path
+ 
+ from draft import runs
+-from draft.config import ConfigError, load_config, validate_config
++from draft.command_common import (
++    _config_label,
++    _decorate_validation_errors,
++    _load_run_config,
++)
++from draft.config import ConfigError, validate_config
+ from draft.hooks import DraftLifecycle, HookRunner
+ from draft.pipelines import CorruptStateError, get_pipeline
+ from draft.types import WorktreeMode
+@@ -35,6 +40,7 @@ def _print_preamble(ctx, steps):
+     print(f"branch:   {ctx.get('branch', '-')}")
+     print(f"worktree: {ctx.get('wt_dir', '-')}")
+     print(f"logs:     {ctx.run_dir}")
++    print(f"config:   {_config_label(ctx.config_path, ctx.get('repo'))}")
+     print(f"started:  {started_at}")
+     print("stages:")
+     for step in steps:
+@@ -175,15 +181,26 @@ def run(args) -> int:
+     # New PID
+     pid_file.write_text(str(os.getpid()))
+ 
++    config_path = Path(ctx.config_path) if ctx.config_path else None
+     try:
+-        config = load_config(repo)
++        config = _load_run_config(repo, config_path)
+     except ConfigError as exc:
+-        print(f"error: {exc}", file=sys.stderr)
+-        return 1
++        if config_path is not None and not config_path.exists():
++            print(
++                f"error: config file from create run no longer exists: {config_path}."
++                f" Restore the file at that path to resume.",
++                file=sys.stderr,
++            )
++        else:
++            print(f"error: {exc}", file=sys.stderr)
++        pid_file.unlink(missing_ok=True)
++        return 2
+     try:
+-        validate_config(config)
++        with _decorate_validation_errors(config_path):
++            validate_config(config)
+     except ConfigError as exc:
+         print(f"error: {exc}", file=sys.stderr)
++        pid_file.unlink(missing_ok=True)
+         return 3
+ 
+     active_steps = [s for s in pipeline.steps if s.name in set(expected)]
+diff --git a/src/draft/command_create.py b/src/draft/command_create.py
+index 9f2d8a8..9d72966 100644
+--- a/src/draft/command_create.py
++++ b/src/draft/command_create.py
+@@ -13,17 +13,20 @@ from draft.command_common import (
+     _branch_worktrees,
+     _canonical_worktree_path,
+     _checkout_in_place,
++    _config_label,
+     _current_head_branch,
++    _decorate_validation_errors,
+     _is_working_tree_clean,
++    _load_run_config,
+     _local_branch_exists,
+     _project_name,
+     _repo_root,
++    _resolve_config_arg,
+     _validate_overrides,
+     _validate_run_id,
+ )
+ from draft.config import (
+     ConfigError,
+-    load_config,
+     resolve_pr_body_template,
+     resolve_prompt_template,
+     step_config,
+@@ -47,6 +50,13 @@ def register(subparsers):
+     p.add_argument(
+         "--prompt", metavar="TEXT", help="Inline prompt text instead of a spec file."
+     )
++    p.add_argument(
++        "--config",
++        metavar="PATH",
++        default=None,
++        dest="config_path",
++        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
++    )
+     p.add_argument(
+         "--set",
+         metavar="STEP.KEY=VALUE",
+@@ -412,12 +422,22 @@ def _compose_active_steps(
+ 
+ 
+ def _print_preamble(
+-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
++    run_id,
++    branch,
++    wt_dir,
++    run_dir,
++    started_at,
++    all_steps,
++    skipped,
++    worktree_mode,
++    config_path=None,
++    repo=None,
+ ):
+     print(f"run-id:   {run_id}")
+     print(f"branch:   {branch}")
+     print(f"worktree: {wt_dir}")
+     print(f"logs:     {run_dir}")
++    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
+     print(f"started:  {started_at}")
+     print("stages:")
+     for step in all_steps:
+@@ -522,11 +542,31 @@ def run(args) -> int:
+     # 5. Detect PR mode (may exit if multiple PRs)
+     pr_mode, pr_url = _detect_pr_mode(branch, branch_source, args.skip_pr, repo)
+ 
+-    # 6. Spec resolution + new-branch slug
++    # 6. Config (pre-flight: before run_dir exists)
++    config_path = _resolve_config_arg(args.config_path)
++    try:
++        config = _load_run_config(repo, config_path)
++    except ConfigError as exc:
++        print(f"error: {exc}", file=sys.stderr)
++        return 1
++    _validate_overrides(args.overrides)
++    config = _apply_overrides(config, args.overrides)
++    try:
++        with _decorate_validation_errors(config_path):
++            validate_config(config)
++            config = resolve_prompt_template(config, repo)
++            config = resolve_pr_body_template(config, repo)
++            validate_reviewer_argv0s(config, repo)
++    except ConfigError as exc:
++        print(f"error: {exc}", file=sys.stderr)
++        return 3
++
++    # 7. run_dir mkdir + draft.pid
+     run_dir = Path.home() / ".draft" / "runs" / project_name / run_id
+     run_dir.mkdir(parents=True, exist_ok=True)
+     (run_dir / "draft.pid").write_text(str(os.getpid()))
+ 
++    # 8. Spec resolution + new-branch slug
+     if args.prompt:
+         prompt_file = run_dir / "prompt.md"
+         prompt_file.write_text(args.prompt)
+@@ -542,7 +582,7 @@ def run(args) -> int:
+     if branch_source == BranchSource.NEW:
+         branch = _unique_branch(repo, branch)
+ 
+-    # 7. Worktree path
++    # 9. Worktree path
+     if args.no_worktree:
+         worktree_mode = WorktreeMode.NO_WORKTREE
+         wt_dir = repo
+@@ -553,25 +593,6 @@ def run(args) -> int:
+         worktree_mode = WorktreeMode.WORKTREE
+         wt_dir = str(_canonical_worktree_path(project_name, branch))
+ 
+-    # 8. Config
+-    try:
+-        config = load_config(repo)
+-    except ConfigError as exc:
+-        print(f"error: {exc}", file=sys.stderr)
+-        (run_dir / "draft.pid").unlink(missing_ok=True)
+-        return 1
+-    _validate_overrides(args.overrides)
+-    config = _apply_overrides(config, args.overrides)
+-    try:
+-        validate_config(config)
+-        config = resolve_prompt_template(config, repo)
+-        config = resolve_pr_body_template(config, repo)
+-        validate_reviewer_argv0s(config, repo)
+-    except ConfigError as exc:
+-        print(f"error: {exc}", file=sys.stderr)
+-        (run_dir / "draft.pid").unlink(missing_ok=True)
+-        return 3
+-
+     reviewers = (
+         config.get("steps", {}).get("review-implementation", {}).get("reviewers", [])
+     ) or []
+@@ -614,6 +635,7 @@ def run(args) -> int:
+     ctx.set("pipeline", "create")
+     if pr_url is not None:
+         ctx.set("pr_url", pr_url)
++    ctx.config_path = str(config_path) if config_path else None
+ 
+     # 12. In-place checkout (worktree_mode == no-worktree)
+     if worktree_mode == WorktreeMode.NO_WORKTREE:
+@@ -637,6 +659,8 @@ def run(args) -> int:
+         PIPELINES["create"].steps,
+         skipped_names,
+         worktree_mode,
++        config_path,
++        repo,
+     )
+ 
+     try:
+diff --git a/src/draft/command_fix_pr.py b/src/draft/command_fix_pr.py
+index 085598d..21d34ba 100644
+--- a/src/draft/command_fix_pr.py
++++ b/src/draft/command_fix_pr.py
+@@ -14,13 +14,17 @@ from draft.command_common import (
+     _assert_main_clone,
+     _assert_on_path,
+     _checkout_in_place,
++    _config_label,
++    _decorate_validation_errors,
++    _load_run_config,
+     _project_name,
+     _repo_root,
++    _resolve_config_arg,
+     _resolve_worktree_for_existing_branch,
+     _validate_overrides,
+     _validate_run_id,
+ )
+-from draft.config import ConfigError, load_config, step_config, validate_config
++from draft.config import ConfigError, step_config, validate_config
+ from draft.hooks import DraftLifecycle, HookRunner
+ from draft.pipelines import PIPELINES
+ from draft.steps.fix_pr import FixPrStep
+@@ -67,6 +71,13 @@ def register(subparsers):
+         default=[],
+         help="Override a step config value (repeatable).",
+     )
++    p.add_argument(
++        "--config",
++        metavar="PATH",
++        default=None,
++        dest="config_path",
++        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
++    )
+     p.add_argument(
+         "--watch",
+         action="store_true",
+@@ -182,12 +193,22 @@ def _compose_active_steps_fix_pr(worktree_mode: str, delete_worktree: bool):
+ 
+ 
+ def _print_preamble(
+-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
++    run_id,
++    branch,
++    wt_dir,
++    run_dir,
++    started_at,
++    all_steps,
++    skipped,
++    worktree_mode,
++    config_path=None,
++    repo=None,
+ ):
+     print(f"run-id:   {run_id}")
+     print(f"branch:   {branch}")
+     print(f"worktree: {wt_dir}")
+     print(f"logs:     {run_dir}")
++    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
+     print(f"started:  {started_at}")
+     print("stages:")
+     for step in all_steps:
+@@ -325,15 +346,17 @@ def run(args) -> int:
+ 
+     wt_dir, worktree_mode = _resolve_worktree_for_fix_pr(repo, project, branch, args)
+ 
++    config_path = _resolve_config_arg(args.config_path)
+     try:
+-        config = load_config(repo)
++        config = _load_run_config(repo, config_path)
+     except ConfigError as exc:
+         print(f"error: {exc}", file=sys.stderr)
+         return 1
+     _validate_overrides(args.overrides)
+     config = _apply_overrides(config, args.overrides)
+     try:
+-        validate_config(config)
++        with _decorate_validation_errors(config_path):
++            validate_config(config)
+     except ConfigError as exc:
+         print(f"error: {exc}", file=sys.stderr)
+         return 3
+@@ -416,6 +439,7 @@ def run(args) -> int:
+     ctx.set("project", project)
+     ctx.set("worktree_mode", worktree_mode)
+     ctx.set("delete_worktree", args.delete_worktree)
++    ctx.config_path = str(config_path) if config_path else None
+ 
+     if worktree_mode == WorktreeMode.NO_WORKTREE:
+         _checkout_in_place(repo, branch)
+@@ -436,6 +460,8 @@ def run(args) -> int:
+         pipeline.steps,
+         skipped_names,
+         worktree_mode,
++        config_path,
++        repo,
+     )
+     print("mode: local commit (no push)")
+     print()
+diff --git a/src/draft/command_status.py b/src/draft/command_status.py
+index 7ce3362..e258464 100644
+--- a/src/draft/command_status.py
++++ b/src/draft/command_status.py
+@@ -2,6 +2,7 @@ import json
+ import sys
+ 
+ from draft import runs
++from draft.command_common import _config_label
+ from pipeline import RunMetrics, fmt_duration
+ from pipeline.heartbeat import Heartbeat
+ 
+@@ -37,6 +38,7 @@ def run(args) -> int:
+                         "status": "unknown",
+                         "worktree": None,
+                         "pr_url": None,
++                        "config_path": None,
+                         "steps": None,
+                     },
+                     indent=2,
+@@ -114,6 +116,7 @@ def run(args) -> int:
+             "status": run_status,
+             "worktree": worktree,
+             "pr_url": pr_url,
++            "config_path": state.get("config_path"),
+             "logs": str(run_dir),
+             "started_at": started_at,
+             "finished_at": finished_at,
+@@ -132,6 +135,7 @@ def run(args) -> int:
+     if pr_url:
+         print(f"pr:       {pr_url}")
+     print(f"logs:          {run_dir}")
++    print(f"config:        {_config_label(state.get('config_path'), data.get('repo'))}")
+     print(f"started:       {started_at or '-'}")
+     print(f"finished:      {finished_at or '-'}")
+     print(f"total runtime: {fmt_duration(total_seconds)}")
+diff --git a/src/draft/config.py b/src/draft/config.py
+index 5208d54..8445695 100644
+--- a/src/draft/config.py
++++ b/src/draft/config.py
+@@ -47,6 +47,28 @@ def load_config(repo: str) -> dict:
+     return _deep_merge(global_cfg, project_cfg)
+ 
+ 
++def load_config_from_file(path: Path) -> dict:
++    if not path.exists():
++        raise ConfigError(f"--config file not found: {path}")
++    if not path.is_file():
++        raise ConfigError(f"--config must point to a file, not a directory: {path}")
++    try:
++        text = path.read_text()
++    except OSError as exc:
++        raise ConfigError(f"cannot read --config file {path}: {exc}") from exc
++    try:
++        data = yaml.safe_load(text)
++    except yaml.YAMLError as exc:
++        raise ConfigError(f"malformed YAML in {path}: {exc}") from exc
++    if data is None:
++        return {}
++    if not isinstance(data, dict):
++        raise ConfigError(
++            f"--config file must contain a YAML mapping, got {type(data).__name__}: {path}"
++        )
++    return data
++
++
+ def step_config(config: dict, step_name: str, step_defaults: dict) -> dict:
+     overrides = config.get("steps", {}).get(step_name, {})
+     # strip "hooks" sub-key — it's not a step config field
+diff --git a/src/draft/hooks.py b/src/draft/hooks.py
+index 7c05e28..55bdecc 100644
+--- a/src/draft/hooks.py
++++ b/src/draft/hooks.py
+@@ -100,9 +100,11 @@ class HookRunner:
+             ("DRAFT_BASE_BRANCH", "base_branch"),
+         ):
+             if self._ctx is None:
++                env.pop(name, None)
+                 continue
+             v = _to_env_str(self._ctx.get(key))
+             if v is _SKIP:
++                env.pop(name, None)
+                 continue
+             env[name] = v
+         return env
+diff --git a/src/pipeline/context.py b/src/pipeline/context.py
+index 3e06567..3e98c80 100644
+--- a/src/pipeline/context.py
++++ b/src/pipeline/context.py
+@@ -17,6 +17,7 @@ class RunContext:
+         self._completed: list[str] = []
+         self._step_configs: dict = step_configs or {}
+         self._sessions: list[dict] = []
++        self.config_path: str | None = None
+         self.heartbeat: Heartbeat = Heartbeat(self.run_dir)
+         self.metrics: RunMetrics = RunMetrics(self._sessions, self.heartbeat)
+ 
+@@ -69,6 +70,7 @@ class RunContext:
+             "step_data": self._step_data,
+             "step_configs": self._step_configs,
+             "sessions": self._sessions,
++            "config_path": self.config_path,
+         }
+         state_path = self.run_dir / "state.json"
+         tmp_path = self.run_dir / "state.json.tmp"
+@@ -94,5 +96,6 @@ class RunContext:
+         ctx._step_data = payload.get("step_data", {})
+         ctx._completed = payload.get("completed", [])
+         ctx._sessions = payload.get("sessions", [])
++        ctx.config_path = payload.get("config_path")
+         ctx.metrics = RunMetrics(ctx._sessions, ctx.heartbeat)
+         return ctx
+diff --git a/tests/draft/test_commands.py b/tests/draft/test_commands.py
+index 00cd01f..7b6940b 100644
+--- a/tests/draft/test_commands.py
++++ b/tests/draft/test_commands.py
+@@ -450,7 +450,7 @@ def test_command_continue_deleted_worktree_removes_from_completed(tmp_path, caps
+ 
+     with (
+         patch("draft.runs.find_run_dir", return_value=run_dir),
+-        patch("draft.command_continue.load_config", return_value={}),
++        patch("draft.command_continue._load_run_config", return_value={}),
+         patch("draft.command_continue.Pipeline") as MockPipeline,
+     ):
+         MockPipeline.return_value.run.return_value = None
+@@ -3480,6 +3480,7 @@ def _make_create_args(**kwargs):
+         delete_worktree = False
+         no_review = False
+         overrides = []
++        config_path = None
+ 
+     for k, v in kwargs.items():
+         setattr(FakeArgs, k, v)
+@@ -3519,7 +3520,7 @@ def _patch_create_run_infra(tmp_path, pipeline_run_side_effect=None):
+             "draft.command_create._canonical_worktree_path",
+             return_value=tmp_path / "wt",
+         ),
+-        patch("draft.command_create.load_config", return_value={}),
++        patch("draft.command_create._load_run_config", return_value={}),
+         patch("draft.command_create._validate_overrides"),
+         patch("draft.command_create._apply_overrides", side_effect=lambda c, _: c),
+         patch("draft.command_create.validate_config"),
+@@ -3625,3 +3626,708 @@ def test_command_create_aggregates_raises_done_still_prints(tmp_path, capsys):
+     assert "done." in out
+     assert "runtime:" not in out
+     assert "cost:" not in out
++
++
++# --- --config flag ---
++
++
++def _patch_create_preflight(tmp_path, repo_dir):
++    """Patches for create pre-flight only (up through PR mode detection)."""
++    from draft.types import BranchSource
++
++    return [
++        patch("draft.command_create._reject_flag_conflicts"),
++        patch("draft.command_create._assert_spec_readable"),
++        patch("draft.command_create._assert_git_repo"),
++        patch("draft.command_create._assert_main_clone"),
++        patch("draft.command_create._assert_on_path"),
++        patch("draft.command_create._repo_root", return_value=str(repo_dir)),
++        patch("draft.command_create._project_name", return_value=repo_dir.name),
++        patch("draft.command_create._resolve_base_branch", return_value="main"),
++        patch(
++            "draft.command_create._resolve_working_branch",
++            return_value=("test-branch", BranchSource.NEW),
++        ),
++        patch("draft.command_create._detect_pr_mode", return_value=("open", None)),
++    ]
++
++
++def test_create_config_flag_missing_file_no_run_created(tmp_path, capsys):
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    missing = tmp_path / "nope.yaml"
++
++    args = _make_create_args(
++        spec_path="spec.md", skip_pr=True, config_path=str(missing)
++    )
++    preflight = _patch_create_preflight(tmp_path, repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cc.run(args)
++
++    assert rc == 1
++    err = capsys.readouterr().err
++    assert "--config file not found" in err
++    runs_dir = home_dir / ".draft" / "runs"
++    assert not runs_dir.exists() or not list(runs_dir.rglob("draft.pid"))
++
++
++def test_create_config_flag_malformed_yaml_no_run_created(tmp_path, capsys):
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    broken = tmp_path / "broken.yaml"
++    broken.write_text("steps: [invalid: yaml")
++
++    args = _make_create_args(spec_path="spec.md", skip_pr=True, config_path=str(broken))
++    preflight = _patch_create_preflight(tmp_path, repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cc.run(args)
++
++    assert rc == 1
++    err = capsys.readouterr().err
++    assert "malformed YAML in" in err
++    assert str(broken) in err
++    assert not (home_dir / ".draft" / "runs").exists() or not list(
++        (home_dir / ".draft" / "runs").rglob("draft.pid")
++    )
++
++
++def test_create_config_flag_validation_error_includes_source_path(tmp_path, capsys):
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "bad.yaml"
++    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
++
++    args = _make_create_args(spec_path="spec.md", skip_pr=True, config_path=str(cfg))
++    preflight = _patch_create_preflight(tmp_path, repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cc.run(args)
++
++    assert rc == 3
++    err = capsys.readouterr().err
++    assert f"error in {cfg}" in err
++
++
++def test_create_config_flag_uses_only_specified_file(tmp_path, capsys):
++
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "config.fast.yaml"
++    cfg.write_text("model: fast-model\n")
++
++    args = _make_create_args(spec_path="spec.md", config_path=str(cfg))
++    all_patches = _patch_create_run_infra(tmp_path)
++    # Replace the _load_run_config mock with actual routing (to verify file is read)
++    filtered = [p for p in all_patches if "load_run_config" not in str(p)]
++
++    captured_config = {}
++
++    def fake_load(repo, cp):
++        from draft.config import load_config_from_file
++
++        result = load_config_from_file(cp) if cp is not None else {}
++        captured_config["config"] = result
++        return result
++
++    with (
++        _apply_patches(filtered),
++        patch("draft.command_create._load_run_config", side_effect=fake_load),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cc.run(args)
++
++    assert rc == 0
++    assert captured_config.get("config", {}).get("model") == "fast-model"
++
++
++def test_create_no_config_flag_persists_null(tmp_path):
++    import json
++
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    args = _make_create_args(spec_path="spec.md")
++    all_patches = _patch_create_run_infra(tmp_path)
++    with (
++        _apply_patches(all_patches),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        cc.run(args)
++
++    runs_dir = home_dir / ".draft" / "runs"
++    state_files = list(runs_dir.rglob("state.json"))
++    assert state_files, "expected a state.json to be written"
++    state = json.loads(state_files[0].read_text())
++    assert state.get("config_path") is None
++
++
++def test_create_config_flag_relative_path_resolves_against_cwd(tmp_path, monkeypatch):
++    import json
++
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "cfg.yaml"
++    cfg.write_text("model: x\n")
++
++    monkeypatch.chdir(tmp_path)
++    args = _make_create_args(spec_path="spec.md", config_path="cfg.yaml")
++    all_patches = _patch_create_run_infra(tmp_path)
++    filtered = [p for p in all_patches if "load_run_config" not in str(p)]
++    with (
++        _apply_patches(filtered),
++        patch("draft.command_create._load_run_config", return_value={}),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cc.run(args)
++
++    assert rc == 0
++    runs_dir = home_dir / ".draft" / "runs"
++    state_files = list(runs_dir.rglob("state.json"))
++    assert state_files
++    state = json.loads(state_files[0].read_text())
++    assert state["config_path"] == str(cfg.resolve())
++
++
++def test_create_config_flag_no_run_dir_on_failure(tmp_path, capsys):
++    import draft.command_create as cc
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++
++    for config_content, expected_rc, err_fragment in [
++        (None, 1, "--config file not found"),  # missing file
++        ("steps: [invalid", 1, "malformed YAML"),  # malformed yaml
++    ]:
++        capsys.readouterr()
++        if config_content is None:
++            cfg = tmp_path / "missing_XXXX.yaml"
++        else:
++            cfg = tmp_path / "bad.yaml"
++            cfg.write_text(config_content)
++
++        args = _make_create_args(
++            spec_path="spec.md", skip_pr=True, config_path=str(cfg)
++        )
++        preflight = _patch_create_preflight(tmp_path, repo_dir)
++        with (
++            _apply_patches(preflight),
++            patch("pathlib.Path.home", return_value=home_dir),
++        ):
++            rc = cc.run(args)
++
++        assert rc == expected_rc
++        err = capsys.readouterr().err
++        assert err_fragment in err
++        assert not (home_dir / ".draft" / "runs").exists() or not list(
++            (home_dir / ".draft" / "runs").rglob("draft.pid")
++        )
++
++
++def test_create_preamble_prints_config_line_with_flag(tmp_path, capsys):
++    import draft.command_create as cc
++
++    cfg = tmp_path / "config.fast.yaml"
++    abs_cfg = str(cfg.resolve())
++    repo_dir = str(tmp_path / "repo")
++    run_dir = str(tmp_path / "runs" / "260505-120000")
++
++    cc._print_preamble(
++        "260505-120000",
++        "feature",
++        str(tmp_path / "wt"),
++        run_dir,
++        "2026-01-01T00:00:00",
++        [],
++        set(),
++        "worktree",
++        cfg,
++        repo_dir,
++    )
++
++    out = capsys.readouterr().out
++    assert f"config:   {abs_cfg}" in out
++
++
++def test_create_preamble_prints_config_line_without_flag(tmp_path, capsys):
++    import draft.command_create as cc
++
++    repo_dir = str(tmp_path / "repo")
++    run_dir = str(tmp_path / "runs" / "260505-120000")
++
++    cc._print_preamble(
++        "260505-120000",
++        "feature",
++        str(tmp_path / "wt"),
++        run_dir,
++        "2026-01-01T00:00:00",
++        [],
++        set(),
++        "worktree",
++        None,
++        repo_dir,
++    )
++
++    out = capsys.readouterr().out
++    assert "config:" in out
++    assert ".draft/config.yaml" in out
++
++
++# --- babysit --config flag ---
++
++
++def _make_babysit_args(**kwargs):
++    class FakeArgs:
++        pr_input = "1"
++        spec_path = None
++        no_worktree = False
++        delete_worktree = False
++        run_id = None
++        overrides = []
++        config_path = None
++
++    for k, v in kwargs.items():
++        setattr(FakeArgs, k, v)
++    return FakeArgs()
++
++
++def _patch_babysit_preflight(repo_dir):
++    from draft.types import WorktreeMode
++
++    return [
++        patch("draft.command_babysit._assert_git_repo"),
++        patch("draft.command_babysit._assert_main_clone"),
++        patch("draft.command_babysit._assert_on_path"),
++        patch("draft.command_babysit._repo_root", return_value=str(repo_dir)),
++        patch("draft.command_babysit._project_name", return_value=repo_dir.name),
++        patch(
++            "draft.command_babysit._fetch_pr",
++            return_value={
++                "headRefName": "feature",
++                "headRefOid": "abc",
++                "number": 1,
++                "state": "OPEN",
++                "url": "https://github.com/test/repo/pull/1",
++                "baseRefName": "main",
++                "isCrossRepository": False,
++                "body": "",
++            },
++        ),
++        patch("draft.command_babysit._assert_branch_exists_and_matches"),
++        patch("draft.runs.find_active_run_on_branch", return_value=None),
++        patch(
++            "draft.command_babysit._resolve_worktree_for_babysit",
++            return_value=(str(repo_dir / "wt"), WorktreeMode.WORKTREE),
++        ),
++        patch("draft.command_babysit._pr_already_green", return_value=False),
++    ]
++
++
++def test_babysit_config_flag_missing_file_no_run_created(tmp_path, capsys):
++    import draft.command_babysit as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    missing = tmp_path / "nope.yaml"
++
++    args = _make_babysit_args(config_path=str(missing))
++    preflight = _patch_babysit_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 1
++    assert "--config file not found" in capsys.readouterr().err
++    assert not (home_dir / ".draft" / "runs").exists() or not list(
++        (home_dir / ".draft" / "runs").rglob("draft.pid")
++    )
++
++
++def test_babysit_config_flag_uses_only_specified_file(tmp_path, capsys):
++    from unittest.mock import MagicMock
++
++    import draft.command_babysit as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "config.fast.yaml"
++    cfg.write_text("model: babysit-model\n")
++
++    args = _make_babysit_args(config_path=str(cfg))
++    preflight = _patch_babysit_preflight(repo_dir)
++    captured = {}
++
++    def fake_load(repo, cp):
++        from draft.config import load_config_from_file
++
++        result = load_config_from_file(cp) if cp is not None else {}
++        captured["model"] = result.get("model")
++        return result
++
++    with (
++        _apply_patches(preflight),
++        patch("draft.command_babysit._load_run_config", side_effect=fake_load),
++        patch("draft.command_babysit._validate_overrides"),
++        patch("draft.command_babysit._apply_overrides", side_effect=lambda c, _: c),
++        patch("draft.command_babysit.validate_config"),
++        patch("draft.command_babysit.step_config", return_value={}),
++        patch(
++            "draft.command_babysit._compose_active_steps_babysit",
++            return_value=([], set()),
++        ),
++        patch("draft.command_babysit._print_preamble"),
++        patch("draft.command_babysit.Runner"),
++        patch("draft.command_babysit.DraftLifecycle"),
++        patch("draft.command_babysit.HookRunner"),
++        patch("draft.command_babysit.HeartbeatPulse"),
++        patch("draft.command_babysit.PIPELINES", {"babysit": MagicMock(steps=[])}),
++        patch("pipeline.Pipeline"),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 0
++    assert captured.get("model") == "babysit-model"
++
++
++def test_babysit_config_flag_validation_error_includes_source_path(tmp_path, capsys):
++    import draft.command_babysit as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "bad.yaml"
++    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
++
++    args = _make_babysit_args(config_path=str(cfg))
++    preflight = _patch_babysit_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 3
++    assert f"error in {cfg}" in capsys.readouterr().err
++
++
++def test_babysit_config_flag_no_run_dir_on_failure(tmp_path, capsys):
++    import draft.command_babysit as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    missing = tmp_path / "gone.yaml"
++
++    args = _make_babysit_args(config_path=str(missing))
++    preflight = _patch_babysit_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 1
++    assert not (home_dir / ".draft" / "runs").exists() or not list(
++        (home_dir / ".draft" / "runs").rglob("draft.pid")
++    )
++
++
++# --- fix-pr --config flag ---
++
++
++def _make_fix_pr_args(**kwargs):
++    class FakeArgs:
++        pr_input = "1"
++        spec_path = None
++        no_worktree = False
++        delete_worktree = False
++        run_id = None
++        overrides = []
++        config_path = None
++        watch = False
++
++    for k, v in kwargs.items():
++        setattr(FakeArgs, k, v)
++    return FakeArgs()
++
++
++def _patch_fix_pr_preflight(repo_dir):
++
++    return [
++        patch("draft.command_fix_pr._assert_git_repo"),
++        patch("draft.command_fix_pr._assert_main_clone"),
++        patch("draft.command_fix_pr._assert_on_path"),
++        patch("draft.command_fix_pr._repo_root", return_value=str(repo_dir)),
++        patch("draft.command_fix_pr._project_name", return_value=repo_dir.name),
++        patch(
++            "draft.command_fix_pr._fetch_pr",
++            return_value={
++                "headRefName": "feature",
++                "headRefOid": "abc",
++                "number": 1,
++                "state": "OPEN",
++                "url": "https://github.com/test/repo/pull/1",
++                "baseRefName": "main",
++                "isCrossRepository": False,
++                "body": "",
++            },
++        ),
++        patch("draft.command_fix_pr._assert_branch_exists_and_matches"),
++        patch("draft.runs.find_active_run_on_branch", return_value=None),
++        patch(
++            "draft.command_fix_pr._resolve_worktree_for_fix_pr",
++            return_value=(str(repo_dir / "wt"), "worktree"),
++        ),
++        patch("draft.command_fix_pr._single_check_gate", return_value="failure"),
++    ]
++
++
++def test_fix_pr_config_flag_missing_file_no_run_created(tmp_path, capsys):
++    import draft.command_fix_pr as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    missing = tmp_path / "nope.yaml"
++
++    args = _make_fix_pr_args(config_path=str(missing))
++    preflight = _patch_fix_pr_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 1
++    assert "--config file not found" in capsys.readouterr().err
++    assert not (home_dir / ".draft" / "runs").exists() or not list(
++        (home_dir / ".draft" / "runs").rglob("draft.pid")
++    )
++
++
++def test_fix_pr_config_flag_uses_only_specified_file(tmp_path, capsys):
++    from unittest.mock import MagicMock
++
++    import draft.command_fix_pr as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "config.fast.yaml"
++    cfg.write_text("model: fixpr-model\n")
++
++    args = _make_fix_pr_args(config_path=str(cfg))
++    preflight = _patch_fix_pr_preflight(repo_dir)
++    captured = {}
++
++    def fake_load(repo, cp):
++        from draft.config import load_config_from_file
++
++        result = load_config_from_file(cp) if cp is not None else {}
++        captured["model"] = result.get("model")
++        return result
++
++    with (
++        _apply_patches(preflight),
++        patch("draft.command_fix_pr._load_run_config", side_effect=fake_load),
++        patch("draft.command_fix_pr._validate_overrides"),
++        patch("draft.command_fix_pr._apply_overrides", side_effect=lambda c, _: c),
++        patch("draft.command_fix_pr.validate_config"),
++        patch("draft.command_fix_pr.step_config", return_value={}),
++        patch(
++            "draft.command_fix_pr._compose_active_steps_fix_pr",
++            return_value=([], set()),
++        ),
++        patch("draft.command_fix_pr._print_preamble"),
++        patch("draft.command_fix_pr.Runner"),
++        patch("draft.command_fix_pr.DraftLifecycle"),
++        patch("draft.command_fix_pr.HookRunner"),
++        patch("draft.command_fix_pr.HeartbeatPulse"),
++        patch("draft.command_fix_pr.PIPELINES", {"fix-pr": MagicMock(steps=[])}),
++        patch("pipeline.Pipeline"),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 0
++    assert captured.get("model") == "fixpr-model"
++
++
++def test_fix_pr_config_flag_validation_error_includes_source_path(tmp_path, capsys):
++    import draft.command_fix_pr as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    cfg = tmp_path / "bad.yaml"
++    cfg.write_text("steps:\n  implement-spec:\n    retry_delay: 5\n")
++
++    args = _make_fix_pr_args(config_path=str(cfg))
++    preflight = _patch_fix_pr_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 3
++    assert f"error in {cfg}" in capsys.readouterr().err
++
++
++def test_fix_pr_config_flag_no_run_dir_on_failure(tmp_path, capsys):
++    import draft.command_fix_pr as cmd
++
++    home_dir = tmp_path / "home"
++    repo_dir = tmp_path / "repo"
++    repo_dir.mkdir(parents=True)
++    missing = tmp_path / "gone.yaml"
++
++    args = _make_fix_pr_args(config_path=str(missing))
++    preflight = _patch_fix_pr_preflight(repo_dir)
++    with (
++        _apply_patches(preflight),
++        patch("pathlib.Path.home", return_value=home_dir),
++    ):
++        rc = cmd.run(args)
++
++    assert rc == 1
++    assert not (home_dir / ".draft" / "runs").exists() or not list(
++        (home_dir / ".draft" / "runs").rglob("draft.pid")
++    )
++
++
++# --- continue --config flag ---
++
++
++def _make_continue_state(run_dir, config_path=None, extra_data=None):
++    import json
++
++    data = {
++        "branch": "fix",
++        "wt_dir": str(run_dir.parent / "wt"),
++        "repo": str(run_dir.parent.parent),
++        "pipeline": "create",
++    }
++    if extra_data:
++        data.update(extra_data)
++    state = {
++        "run_id": run_dir.name,
++        "run_dir": str(run_dir),
++        "completed": [],
++        "data": data,
++        "step_data": {},
++        "step_configs": {},
++        "sessions": [],
++        "config_path": config_path,
++    }
++    (run_dir / "state.json").write_text(json.dumps(state))
++
++
++def test_continue_uses_persisted_config_path(tmp_path, capsys):
++    import draft.command_continue as cmd
++
++    run_dir = tmp_path / "myproject" / "260505-120000"
++    run_dir.mkdir(parents=True)
++
++    cfg = tmp_path / "config.fast.yaml"
++    cfg.write_text("model: persisted-model\n")
++    _make_continue_state(run_dir, config_path=str(cfg))
++
++    class FakeArgs:
++        run_id = "260505-120000"
++
++    captured = {}
++
++    def fake_load(repo, cp):
++        captured["config_path"] = str(cp) if cp else None
++        return {"model": "persisted-model"}
++
++    with (
++        patch("draft.runs.find_run_dir", return_value=run_dir),
++        patch("draft.command_continue._load_run_config", side_effect=fake_load),
++        patch("draft.command_continue.Pipeline") as MockPipeline,
++    ):
++        MockPipeline.return_value.run.return_value = None
++        cmd.run(FakeArgs())
++
++    assert captured.get("config_path") == str(cfg)
++
++
++def test_continue_persisted_config_missing_errors_cleanly(tmp_path, capsys):
++
++    import draft.command_continue as cmd
++
++    run_dir = tmp_path / "myproject" / "260505-120000"
++    run_dir.mkdir(parents=True)
++
++    deleted_cfg = tmp_path / "deleted.yaml"
++    _make_continue_state(run_dir, config_path=str(deleted_cfg))
++    original_state = (run_dir / "state.json").read_text()
++
++    class FakeArgs:
++        run_id = "260505-120000"
++
++    with patch("draft.runs.find_run_dir", return_value=run_dir):
++        rc = cmd.run(FakeArgs())
++
++    assert rc == 2
++    err = capsys.readouterr().err
++    assert "config file from create run no longer exists" in err
++    assert str(deleted_cfg) in err
++    assert (run_dir / "state.json").read_text() == original_state
++    assert not (run_dir / "draft.pid").exists()
++
++
++def test_continue_null_config_path_falls_back_to_default(tmp_path, capsys):
++    import draft.command_continue as cmd
++
++    run_dir = tmp_path / "myproject" / "260505-120000"
++    run_dir.mkdir(parents=True)
++    _make_continue_state(run_dir, config_path=None)
++
++    class FakeArgs:
++        run_id = "260505-120000"
++
++    captured = {}
++
++    def fake_load(repo, cp):
++        captured["config_path"] = cp
++        return {}
++
++    with (
++        patch("draft.runs.find_run_dir", return_value=run_dir),
++        patch("draft.command_continue._load_run_config", side_effect=fake_load),
++        patch("draft.command_continue.Pipeline") as MockPipeline,
++    ):
++        MockPipeline.return_value.run.return_value = None
++        cmd.run(FakeArgs())
++
++    assert captured.get("config_path") is None
+diff --git a/tests/draft/test_config.py b/tests/draft/test_config.py
+index 4a8ac1a..543fdb5 100644
+--- a/tests/draft/test_config.py
++++ b/tests/draft/test_config.py
+@@ -1,3 +1,5 @@
++import os
++import sys
+ import textwrap
+ from pathlib import Path
+ 
+@@ -6,6 +8,7 @@ import pytest
+ from draft.config import (
+     ConfigError,
+     load_config,
++    load_config_from_file,
+     resolve_pr_body_template,
+     resolve_prompt_template,
+     step_config,
+@@ -864,3 +867,70 @@ def test_validate_reviewer_argv0s_second_reviewer_failing(tmp_path):
+     }
+     with pytest.raises(ConfigError, match="reviewers\\[1\\]\\.cmd"):
+         validate_reviewer_argv0s(config, str(tmp_path))
++
++
++# --- load_config_from_file ---
++
++
++def test_load_config_from_file_reads_yaml(tmp_path):
++    cfg = tmp_path / "config.yaml"
++    cfg.write_text("model: fast\nsteps:\n  implement-spec:\n    max_retries: 2\n")
++    result = load_config_from_file(cfg)
++    assert result["model"] == "fast"
++    assert result["steps"]["implement-spec"]["max_retries"] == 2
++
++
++def test_load_config_from_file_missing_raises(tmp_path):
++    missing = tmp_path / "nope.yaml"
++    with pytest.raises(ConfigError, match="--config file not found"):
++        load_config_from_file(missing)
++
++
++def test_load_config_from_file_directory_raises(tmp_path):
++    with pytest.raises(ConfigError, match="must point to a file, not a directory"):
++        load_config_from_file(tmp_path)
++
++
++def test_load_config_from_file_malformed_yaml_raises(tmp_path):
++    broken = tmp_path / "broken.yaml"
++    broken.write_text("steps: [invalid: yaml: here")
++    with pytest.raises(ConfigError) as exc_info:
++        load_config_from_file(broken)
++    msg = str(exc_info.value)
++    assert "malformed YAML in" in msg
++    assert str(broken) in msg
++
++
++def test_load_config_from_file_empty_returns_empty_dict(tmp_path):
++    empty = tmp_path / "empty.yaml"
++    empty.write_text("")
++    result = load_config_from_file(empty)
++    assert result == {}
++
++
++@pytest.mark.skipif(sys.platform == "win32", reason="chmod not reliable on Windows")
++def test_load_config_from_file_unreadable_raises(tmp_path):
++    if os.getuid() == 0:
++        pytest.skip("running as root; chmod 000 has no effect")
++    unreadable = tmp_path / "secret.yaml"
++    unreadable.write_text("model: x\n")
++    unreadable.chmod(0o000)
++    try:
++        with pytest.raises(ConfigError, match="cannot read --config file"):
++            load_config_from_file(unreadable)
++    finally:
++        unreadable.chmod(0o644)
++
++
++def test_load_config_from_file_list_root_raises(tmp_path):
++    cfg = tmp_path / "list.yaml"
++    cfg.write_text("- item1\n- item2\n")
++    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
++        load_config_from_file(cfg)
++
++
++def test_load_config_from_file_scalar_root_raises(tmp_path):
++    cfg = tmp_path / "scalar.yaml"
++    cfg.write_text("just a string\n")
++    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
++        load_config_from_file(cfg)
+diff --git a/tests/pipeline/test_context.py b/tests/pipeline/test_context.py
+index 508941a..3d3a934 100644
+--- a/tests/pipeline/test_context.py
++++ b/tests/pipeline/test_context.py
+@@ -109,3 +109,34 @@ def test_load_legacy_state_without_sessions(tmp_run_dir):
+     assert ctx._sessions == []
+     session_metrics = ctx.metrics.session_begin("continue")
+     assert session_metrics is not None
++
++
++def test_config_path_round_trips(tmp_run_dir):
++    ctx = make_ctx(tmp_run_dir)
++    ctx.config_path = "/abs/path/config.fast.yaml"
++    ctx.save()
++    ctx2 = RunContext.load("260505-120000", tmp_run_dir)
++    assert ctx2.config_path == "/abs/path/config.fast.yaml"
++
++
++def test_config_path_default_is_none(tmp_run_dir):
++    ctx = make_ctx(tmp_run_dir)
++    assert ctx.config_path is None
++    ctx.save()
++    ctx2 = RunContext.load("260505-120000", tmp_run_dir)
++    assert ctx2.config_path is None
++
++
++def test_load_legacy_state_without_config_path(tmp_run_dir):
++    legacy = {
++        "run_id": "260505-120000",
++        "run_dir": str(tmp_run_dir),
++        "completed": [],
++        "data": {},
++        "step_data": {},
++        "step_configs": {},
++        "sessions": [],
++    }
++    (tmp_run_dir / "state.json").write_text(json.dumps(legacy))
++    ctx = RunContext.load("260505-120000", tmp_run_dir)
++    assert ctx.config_path is None
