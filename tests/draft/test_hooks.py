@@ -37,25 +37,6 @@ def _runner_with_ctx(config, cwd, run_dir, ctx, engine=None) -> HookRunner:
     return HookRunner(config, cwd=str(cwd), run_dir=run_dir, engine=engine, ctx=ctx)
 
 
-def _branch_marker_config(step, event, marker):
-    return {
-        "steps": {
-            step: {
-                "hooks": {
-                    event: [
-                        {
-                            "cmd": (
-                                f'echo "${{DRAFT_BRANCH:-[unset]}}|'
-                                f'${{DRAFT_BASE_BRANCH:-[unset]}}" > {marker}'
-                            )
-                        }
-                    ]
-                }
-            }
-        }
-    }
-
-
 # --- log file shape ---
 
 
@@ -210,6 +191,25 @@ def test_hook_result_carries_duration(tmp_path):
 
 
 # --- env injection ---
+
+
+def _branch_marker_config(step, event, marker):
+    return {
+        "steps": {
+            step: {
+                "hooks": {
+                    event: [
+                        {
+                            "cmd": (
+                                f'echo "${{DRAFT_BRANCH:-[unset]}}|'
+                                f'${{DRAFT_BASE_BRANCH:-[unset]}}" > {marker}'
+                            )
+                        }
+                    ]
+                }
+            }
+        }
+    }
 
 
 def test_env_both_vars_present(tmp_path):
