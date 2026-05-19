@@ -17,6 +17,7 @@ draft create spec.md
 ## Features
 
 You define the spec and checks to pass, and the CLI drives the workflow.
+Each pipeline step can be tuned independently in your project config.
 
 - Project-agnostic - no assumptions about language, framework, or build system
 - Hooks - run custom commands at every pipeline stage
