@@ -76,7 +76,7 @@ def register(subparsers):
         metavar="BRANCH",
         dest="from_branch",
         default=None,
-        help="Base branch to create the worktree from (default: origin/main or origin/master).",
+        help="Base branch to create the worktree from (default: main or master). Must be a local branch.",
     )
     p.add_argument(
         "--branch",
@@ -116,19 +116,46 @@ def register(subparsers):
 # --- pre-flight helpers ---
 
 
+def _remote_ref_exists(repo: str, ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/remotes/{ref}"],
+        capture_output=True,
+        cwd=repo,
+    )
+    return result.returncode == 0
+
+
 def _resolve_base_branch(repo: str, from_branch: str | None) -> str:
-    if from_branch:
-        return from_branch
-    for candidate in ("origin/main", "origin/master"):
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", candidate],
-            capture_output=True,
-            cwd=repo,
-        )
-        if result.returncode == 0:
+    if from_branch is not None:
+        raw = from_branch
+        name = raw.removeprefix("origin/")
+        if not name:
+            print(
+                "error: --from cannot be empty after stripping 'origin/'",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if _local_branch_exists(repo, name):
+            return name
+        if _remote_ref_exists(repo, f"origin/{name}"):
+            print(
+                f"error: local branch '{name}' does not exist;"
+                f" create it with: git branch {name} origin/{name}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"error: --from must be a local branch name (got: {raw})",
+                file=sys.stderr,
+            )
+        sys.exit(2)
+
+    for candidate in ("main", "master"):
+        if _local_branch_exists(repo, candidate):
             return candidate
     print(
-        "error: could not find origin/main or origin/master; use --from to specify a base branch",
+        "error: could not find local branch 'main' or 'master';"
+        " use --from to specify a base branch",
         file=sys.stderr,
     )
     sys.exit(3)
@@ -301,16 +328,12 @@ def _assert_branch_free_for_in_place(repo: str, branch: str) -> None:
         sys.exit(2)
 
 
-def _base_short_name(base: str) -> str:
-    return base.removeprefix("origin/").removeprefix("refs/heads/")
-
-
 def _resolve_working_branch(repo: str, args, base: str) -> tuple[str, BranchSource]:
     """Returns (branch, branch_source) where branch_source is 'new' or 'existing'."""
     if args.branch is None:
         return ("", BranchSource.NEW)  # caller derives the new branch slug
 
-    base_short = _base_short_name(base)
+    base_short = base
 
     if args.branch == _BRANCH_HEAD_SENTINEL:
         head = _current_head_branch(repo)

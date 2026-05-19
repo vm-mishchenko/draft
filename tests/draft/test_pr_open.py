@@ -321,3 +321,18 @@ def test_bundled_open_pr_md_no_old_placeholders():
     content = (STEP_DIR / "open_pr.md").read_text()
     assert "{{BASE_BRANCH}}" not in content
     assert "{{PR_BODY_TEMPLATE_PATH}}" not in content
+
+
+def test_gh_pr_create_uses_base_branch_directly(tmp_path):
+    cfg = {"timeout": 300, "title_prefix": ""}
+    ctx = _make_ctx(cfg, tmp_path, base_branch="main")
+    engine = _make_engine()
+
+    with patch.object(pr_open_mod, "subprocess") as mock_sub:
+        mock_sub.run.side_effect = _subprocess_factory()
+        mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        OpenPrStep().run(ctx, engine, MagicMock(), MagicMock())
+
+    cmd = engine.run_command.call_args.kwargs["cmd"]
+    base_idx = cmd.index("--base")
+    assert cmd[base_idx + 1] == "main"

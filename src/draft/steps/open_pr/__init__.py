@@ -81,8 +81,6 @@ class OpenPrStep(Step):
 
         claude_log = ctx.log_path("open-pr-claude")
         log_path = ctx.log_path(self.name)
-        gh_base = base_branch.removeprefix("origin/")
-
         with engine.stage(self.name) as s:
             s.update("gathering context")
             git_diff = _run_git_capture(
@@ -150,7 +148,7 @@ class OpenPrStep(Step):
                     "pr",
                     "create",
                     "--base",
-                    gh_base,
+                    base_branch,
                     "--title",
                     title_prefix + title,
                     "--body",

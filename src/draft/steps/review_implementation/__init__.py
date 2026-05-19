@@ -389,10 +389,6 @@ def _guard_legacy_state(ctx, step_name):
         raise StepError(step_name, 1)
 
 
-def _short_base(base: str) -> str:
-    return base.removeprefix("origin/").removeprefix("refs/heads/")
-
-
 def _read_spec_text(spec_path: str) -> str:
     if not spec_path:
         return ""
@@ -568,7 +564,7 @@ class ReviewImplementationStep(Step):
                 **os.environ,
                 "DRAFT_REPO_DIR": wt_dir,
                 "DRAFT_BRANCH": branch,
-                "DRAFT_BASE_BRANCH": _short_base(base_branch),
+                "DRAFT_BASE_BRANCH": base_branch,
                 "DRAFT_SPEC_FILE": spec_path,
                 "DRAFT_REVIEWER_NAME": name,
             }

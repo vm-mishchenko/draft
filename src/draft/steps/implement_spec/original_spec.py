@@ -50,7 +50,7 @@ def resolve_case(ctx) -> tuple[str, dict]:
         CASE_COMMITS_ONLY,
         {
             "BRANCH": ctx.get("branch") or "",
-            "BASE_BRANCH": ctx.get("base_branch") or "origin/main",
+            "BASE_BRANCH": ctx.get("base_branch") or "main",
         },
     )
 
