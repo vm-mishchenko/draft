@@ -47,6 +47,22 @@ def load_config(repo: str) -> dict:
     return _deep_merge(global_cfg, project_cfg)
 
 
+def load_config_from_file(path: Path) -> dict:
+    if not path.exists():
+        raise ConfigError(f"--config file not found: {path}")
+    if not path.is_file():
+        raise ConfigError(f"--config must point to a file, not a directory: {path}")
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise ConfigError(f"cannot read --config file {path}: {exc}") from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"malformed YAML in {path}: {exc}") from exc
+    return data or {}
+
+
 def step_config(config: dict, step_name: str, step_defaults: dict) -> dict:
     overrides = config.get("steps", {}).get(step_name, {})
     # strip "hooks" sub-key — it's not a step config field

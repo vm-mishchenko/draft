@@ -109,3 +109,34 @@ def test_load_legacy_state_without_sessions(tmp_run_dir):
     assert ctx._sessions == []
     session_metrics = ctx.metrics.session_begin("continue")
     assert session_metrics is not None
+
+
+def test_config_path_round_trips(tmp_run_dir):
+    ctx = make_ctx(tmp_run_dir)
+    ctx.config_path = "/abs/path/config.fast.yaml"
+    ctx.save()
+    ctx2 = RunContext.load("260505-120000", tmp_run_dir)
+    assert ctx2.config_path == "/abs/path/config.fast.yaml"
+
+
+def test_config_path_default_is_none(tmp_run_dir):
+    ctx = make_ctx(tmp_run_dir)
+    assert ctx.config_path is None
+    ctx.save()
+    ctx2 = RunContext.load("260505-120000", tmp_run_dir)
+    assert ctx2.config_path is None
+
+
+def test_load_legacy_state_without_config_path(tmp_run_dir):
+    legacy = {
+        "run_id": "260505-120000",
+        "run_dir": str(tmp_run_dir),
+        "completed": [],
+        "data": {},
+        "step_data": {},
+        "step_configs": {},
+        "sessions": [],
+    }
+    (tmp_run_dir / "state.json").write_text(json.dumps(legacy))
+    ctx = RunContext.load("260505-120000", tmp_run_dir)
+    assert ctx.config_path is None

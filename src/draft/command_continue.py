@@ -4,7 +4,12 @@ import sys
 from pathlib import Path
 
 from draft import runs
-from draft.config import ConfigError, load_config, validate_config
+from draft.command_common import (
+    _config_label,
+    _decorate_validation_errors,
+    _load_run_config,
+)
+from draft.config import ConfigError, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import CorruptStateError, get_pipeline
 from draft.types import WorktreeMode
@@ -35,6 +40,7 @@ def _print_preamble(ctx, steps):
     print(f"branch:   {ctx.get('branch', '-')}")
     print(f"worktree: {ctx.get('wt_dir', '-')}")
     print(f"logs:     {ctx.run_dir}")
+    print(f"config:   {_config_label(ctx.config_path, ctx.get('repo'))}")
     print(f"started:  {started_at}")
     print("stages:")
     for step in steps:
@@ -175,15 +181,26 @@ def run(args) -> int:
     # New PID
     pid_file.write_text(str(os.getpid()))
 
+    config_path = Path(ctx.config_path) if ctx.config_path else None
     try:
-        config = load_config(repo)
+        config = _load_run_config(repo, config_path)
+    except ConfigError as exc:
+        if config_path is not None and not config_path.exists():
+            print(
+                f"error: config file from create run no longer exists: {config_path}."
+                f" Restore the file at that path to resume.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+        pid_file.unlink(missing_ok=True)
+        return 2
+    try:
+        with _decorate_validation_errors(config_path):
+            validate_config(config)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
-    try:
-        validate_config(config)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        pid_file.unlink(missing_ok=True)
         return 3
 
     active_steps = [s for s in pipeline.steps if s.name in set(expected)]

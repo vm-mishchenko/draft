@@ -17,6 +17,7 @@ class RunContext:
         self._completed: list[str] = []
         self._step_configs: dict = step_configs or {}
         self._sessions: list[dict] = []
+        self.config_path: str | None = None
         self.heartbeat: Heartbeat = Heartbeat(self.run_dir)
         self.metrics: RunMetrics = RunMetrics(self._sessions, self.heartbeat)
 
@@ -69,6 +70,7 @@ class RunContext:
             "step_data": self._step_data,
             "step_configs": self._step_configs,
             "sessions": self._sessions,
+            "config_path": self.config_path,
         }
         state_path = self.run_dir / "state.json"
         tmp_path = self.run_dir / "state.json.tmp"
@@ -94,5 +96,6 @@ class RunContext:
         ctx._step_data = payload.get("step_data", {})
         ctx._completed = payload.get("completed", [])
         ctx._sessions = payload.get("sessions", [])
+        ctx.config_path = payload.get("config_path")
         ctx.metrics = RunMetrics(ctx._sessions, ctx.heartbeat)
         return ctx

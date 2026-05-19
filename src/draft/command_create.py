@@ -13,17 +13,20 @@ from draft.command_common import (
     _branch_worktrees,
     _canonical_worktree_path,
     _checkout_in_place,
+    _config_label,
     _current_head_branch,
+    _decorate_validation_errors,
     _is_working_tree_clean,
+    _load_run_config,
     _local_branch_exists,
     _project_name,
     _repo_root,
+    _resolve_config_arg,
     _validate_overrides,
     _validate_run_id,
 )
 from draft.config import (
     ConfigError,
-    load_config,
     resolve_pr_body_template,
     resolve_prompt_template,
     step_config,
@@ -46,6 +49,13 @@ def register(subparsers):
     p.add_argument("spec_path", nargs="?", help="Path to spec file.")
     p.add_argument(
         "--prompt", metavar="TEXT", help="Inline prompt text instead of a spec file."
+    )
+    p.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        dest="config_path",
+        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
     )
     p.add_argument(
         "--set",
@@ -412,12 +422,22 @@ def _compose_active_steps(
 
 
 def _print_preamble(
-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
+    run_id,
+    branch,
+    wt_dir,
+    run_dir,
+    started_at,
+    all_steps,
+    skipped,
+    worktree_mode,
+    config_path=None,
+    repo=None,
 ):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
     print(f"logs:     {run_dir}")
+    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
     print(f"started:  {started_at}")
     print("stages:")
     for step in all_steps:
@@ -522,11 +542,31 @@ def run(args) -> int:
     # 5. Detect PR mode (may exit if multiple PRs)
     pr_mode, pr_url = _detect_pr_mode(branch, branch_source, args.skip_pr, repo)
 
-    # 6. Spec resolution + new-branch slug
+    # 6. Config (pre-flight: before run_dir exists)
+    config_path = _resolve_config_arg(args.config_path)
+    try:
+        config = _load_run_config(repo, config_path)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _validate_overrides(args.overrides)
+    config = _apply_overrides(config, args.overrides)
+    try:
+        with _decorate_validation_errors(config_path):
+            validate_config(config)
+            config = resolve_prompt_template(config, repo)
+            config = resolve_pr_body_template(config, repo)
+            validate_reviewer_argv0s(config, repo)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    # 7. run_dir mkdir + draft.pid
     run_dir = Path.home() / ".draft" / "runs" / project_name / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "draft.pid").write_text(str(os.getpid()))
 
+    # 8. Spec resolution + new-branch slug
     if args.prompt:
         prompt_file = run_dir / "prompt.md"
         prompt_file.write_text(args.prompt)
@@ -542,7 +582,7 @@ def run(args) -> int:
     if branch_source == BranchSource.NEW:
         branch = _unique_branch(repo, branch)
 
-    # 7. Worktree path
+    # 9. Worktree path
     if args.no_worktree:
         worktree_mode = WorktreeMode.NO_WORKTREE
         wt_dir = repo
@@ -552,25 +592,6 @@ def run(args) -> int:
     else:
         worktree_mode = WorktreeMode.WORKTREE
         wt_dir = str(_canonical_worktree_path(project_name, branch))
-
-    # 8. Config
-    try:
-        config = load_config(repo)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        (run_dir / "draft.pid").unlink(missing_ok=True)
-        return 1
-    _validate_overrides(args.overrides)
-    config = _apply_overrides(config, args.overrides)
-    try:
-        validate_config(config)
-        config = resolve_prompt_template(config, repo)
-        config = resolve_pr_body_template(config, repo)
-        validate_reviewer_argv0s(config, repo)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        (run_dir / "draft.pid").unlink(missing_ok=True)
-        return 3
 
     reviewers = (
         config.get("steps", {}).get("review-implementation", {}).get("reviewers", [])
@@ -614,6 +635,7 @@ def run(args) -> int:
     ctx.set("pipeline", "create")
     if pr_url is not None:
         ctx.set("pr_url", pr_url)
+    ctx.config_path = str(config_path) if config_path else None
 
     # 12. In-place checkout (worktree_mode == no-worktree)
     if worktree_mode == WorktreeMode.NO_WORKTREE:
@@ -637,6 +659,8 @@ def run(args) -> int:
         PIPELINES["create"].steps,
         skipped_names,
         worktree_mode,
+        config_path,
+        repo,
     )
 
     try:

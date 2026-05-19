@@ -14,13 +14,17 @@ from draft.command_common import (
     _assert_main_clone,
     _assert_on_path,
     _checkout_in_place,
+    _config_label,
+    _decorate_validation_errors,
+    _load_run_config,
     _project_name,
     _repo_root,
+    _resolve_config_arg,
     _resolve_worktree_for_existing_branch,
     _validate_overrides,
     _validate_run_id,
 )
-from draft.config import ConfigError, load_config, step_config, validate_config
+from draft.config import ConfigError, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
 from draft.steps.fix_pr import FixPrStep
@@ -66,6 +70,13 @@ def register(subparsers):
         dest="overrides",
         default=[],
         help="Override a step config value (repeatable).",
+    )
+    p.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        dest="config_path",
+        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
     )
     p.add_argument(
         "--watch",
@@ -182,12 +193,22 @@ def _compose_active_steps_fix_pr(worktree_mode: str, delete_worktree: bool):
 
 
 def _print_preamble(
-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
+    run_id,
+    branch,
+    wt_dir,
+    run_dir,
+    started_at,
+    all_steps,
+    skipped,
+    worktree_mode,
+    config_path=None,
+    repo=None,
 ):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
     print(f"logs:     {run_dir}")
+    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
     print(f"started:  {started_at}")
     print("stages:")
     for step in all_steps:
@@ -325,15 +346,17 @@ def run(args) -> int:
 
     wt_dir, worktree_mode = _resolve_worktree_for_fix_pr(repo, project, branch, args)
 
+    config_path = _resolve_config_arg(args.config_path)
     try:
-        config = load_config(repo)
+        config = _load_run_config(repo, config_path)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     _validate_overrides(args.overrides)
     config = _apply_overrides(config, args.overrides)
     try:
-        validate_config(config)
+        with _decorate_validation_errors(config_path):
+            validate_config(config)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
@@ -416,6 +439,7 @@ def run(args) -> int:
     ctx.set("project", project)
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("delete_worktree", args.delete_worktree)
+    ctx.config_path = str(config_path) if config_path else None
 
     if worktree_mode == WorktreeMode.NO_WORKTREE:
         _checkout_in_place(repo, branch)
@@ -436,6 +460,8 @@ def run(args) -> int:
         pipeline.steps,
         skipped_names,
         worktree_mode,
+        config_path,
+        repo,
     )
     print("mode: local commit (no push)")
     print()

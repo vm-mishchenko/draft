@@ -14,13 +14,17 @@ from draft.command_common import (
     _assert_main_clone,
     _assert_on_path,
     _checkout_in_place,
+    _config_label,
+    _decorate_validation_errors,
+    _load_run_config,
     _project_name,
     _repo_root,
+    _resolve_config_arg,
     _resolve_worktree_for_existing_branch,
     _validate_overrides,
     _validate_run_id,
 )
-from draft.config import ConfigError, load_config, step_config, validate_config
+from draft.config import ConfigError, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
 from draft.types import WorktreeMode
@@ -57,6 +61,13 @@ def register(subparsers):
         metavar="NAME",
         default=None,
         help="Custom run id (default: auto-generated timestamp).",
+    )
+    p.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        dest="config_path",
+        help="Use only this config file; bypass ~/.draft/config.yaml and <repo>/.draft/config.yaml.",
     )
     p.add_argument(
         "--set",
@@ -186,12 +197,22 @@ def _compose_active_steps_babysit(worktree_mode: str, delete_worktree: bool):
 
 
 def _print_preamble(
-    run_id, branch, wt_dir, run_dir, started_at, all_steps, skipped, worktree_mode
+    run_id,
+    branch,
+    wt_dir,
+    run_dir,
+    started_at,
+    all_steps,
+    skipped,
+    worktree_mode,
+    config_path=None,
+    repo=None,
 ):
     print(f"run-id:   {run_id}")
     print(f"branch:   {branch}")
     print(f"worktree: {wt_dir}")
     print(f"logs:     {run_dir}")
+    print(f"config:   {_config_label(str(config_path) if config_path else None, repo)}")
     print(f"started:  {started_at}")
     print("stages:")
     for step in all_steps:
@@ -256,27 +277,27 @@ def run(args) -> int:
     else:
         run_id = time.strftime("%y%m%d-%H%M%S")
 
+    config_path = _resolve_config_arg(args.config_path)
+    try:
+        config = _load_run_config(repo, config_path)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _validate_overrides(args.overrides)
+    config = _apply_overrides(config, args.overrides)
+    try:
+        with _decorate_validation_errors(config_path):
+            validate_config(config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
     run_dir = Path.home() / ".draft" / "runs" / project / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     pid_file = run_dir / "draft.pid"
     pid_file.write_text(str(os.getpid()))
 
     spec_path_dest = _snapshot_spec(run_dir, args.spec_path, pr_data.get("body") or "")
-
-    try:
-        config = load_config(repo)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        pid_file.unlink(missing_ok=True)
-        return 1
-    _validate_overrides(args.overrides)
-    config = _apply_overrides(config, args.overrides)
-    try:
-        validate_config(config)
-    except ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        pid_file.unlink(missing_ok=True)
-        return 3
 
     pipeline = PIPELINES["babysit"]
     step_configs = {
@@ -299,6 +320,7 @@ def run(args) -> int:
     ctx.set("project", project)
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("delete_worktree", args.delete_worktree)
+    ctx.config_path = str(config_path) if config_path else None
 
     if worktree_mode == WorktreeMode.NO_WORKTREE:
         _checkout_in_place(repo, branch)
@@ -319,6 +341,8 @@ def run(args) -> int:
         pipeline.steps,
         skipped_names,
         worktree_mode,
+        config_path,
+        repo,
     )
 
     engine = Runner(model=config.get("model"))
