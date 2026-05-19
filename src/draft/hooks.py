@@ -5,9 +5,27 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pipeline import PipelineLifecycle, StepError
+
+if TYPE_CHECKING:
+    from pipeline.context import RunContext
+
+
+_SKIP = object()
+
+
+def _to_env_str(value):
+    if value is None:
+        return _SKIP
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
 
 
 @dataclass
@@ -24,7 +42,9 @@ class HookError(Exception):
     """Raised when a hook command exits with a non-zero return code."""
 
 
-def _run_hook_cmd(cmd: str, timeout: int, cwd: str | None) -> HookResult:
+def _run_hook_cmd(
+    cmd: str, timeout: int, cwd: str | None, env: dict | None = None
+) -> HookResult:
     start = time.monotonic()
     try:
         result = subprocess.run(
@@ -34,6 +54,7 @@ def _run_hook_cmd(cmd: str, timeout: int, cwd: str | None) -> HookResult:
             timeout=timeout,
             capture_output=True,
             text=True,
+            env=env,
         )
         duration = time.monotonic() - start
         output = result.stdout + result.stderr
@@ -58,11 +79,33 @@ def _footer(rc: int, duration: float, timeout: int) -> str:
 class HookRunner:
     """Executes shell hook commands for a given pipeline step and lifecycle event."""
 
-    def __init__(self, config: dict, cwd: str | None, run_dir: str | Path, engine):
+    def __init__(
+        self,
+        config: dict,
+        cwd: str | None,
+        run_dir: str | Path,
+        engine,
+        ctx: "RunContext | None" = None,
+    ):
         self._steps_config = config.get("steps", {})
         self._cwd = cwd
         self._run_dir = Path(run_dir)
         self._engine = engine
+        self._ctx = ctx
+
+    def _build_env(self) -> dict:
+        env = dict(os.environ)
+        for name, key in (
+            ("DRAFT_BRANCH", "branch"),
+            ("DRAFT_BASE_BRANCH", "base_branch"),
+        ):
+            if self._ctx is None:
+                continue
+            v = _to_env_str(self._ctx.get(key))
+            if v is _SKIP:
+                continue
+            env[name] = v
+        return env
 
     def get_hooks(self, step_name: str, event: str) -> list[dict]:
         return list(
@@ -106,7 +149,9 @@ class HookRunner:
                     log_fd.flush()
 
                 with self._engine.tty_ticker(label) as set_status:
-                    result = _run_hook_cmd(cmd, timeout, self._cwd)
+                    result = _run_hook_cmd(
+                        cmd, timeout, self._cwd, env=self._build_env()
+                    )
 
                     if log_fd is not None:
                         if result.output:

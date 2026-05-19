@@ -1,8 +1,11 @@
+import os
 from contextlib import contextmanager
+from enum import Enum
 
 import pytest
 
-from draft.hooks import DraftLifecycle, HookError, HookRunner
+from draft.hooks import _SKIP, DraftLifecycle, HookError, HookRunner, _to_env_str
+from pipeline.context import RunContext
 
 
 class FakeEngine:
@@ -180,6 +183,162 @@ def test_hook_result_carries_duration(tmp_path):
     [result] = _runner(config, tmp_path, tmp_path).run("s", "pre")
     assert result.duration >= 0
     assert result.rc == 0
+
+
+def _runner_with_ctx(config, cwd, run_dir, ctx, engine=None) -> HookRunner:
+    engine = engine or FakeEngine()
+    return HookRunner(config, cwd=str(cwd), run_dir=run_dir, engine=engine, ctx=ctx)
+
+
+def _branch_marker_config(step, event, marker):
+    return {
+        "steps": {
+            step: {
+                "hooks": {
+                    event: [
+                        {
+                            "cmd": (
+                                f'echo "${{DRAFT_BRANCH:-[unset]}}|'
+                                f'${{DRAFT_BASE_BRANCH:-[unset]}}" > {marker}'
+                            )
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+
+# --- env injection ---
+
+
+def test_env_both_vars_present(tmp_path):
+    marker = tmp_path / "marker.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "feature-x")
+    ctx.set("base_branch", "main")
+    config = _branch_marker_config("step", "pre", marker)
+    _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
+    assert marker.read_text().strip() == "feature-x|main"
+
+
+def test_env_only_branch(tmp_path):
+    marker = tmp_path / "marker.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "feature-x")
+    config = _branch_marker_config("step", "pre", marker)
+    _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
+    assert marker.read_text().strip() == "feature-x|[unset]"
+
+
+def test_env_none_values(tmp_path):
+    marker = tmp_path / "marker.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", None)
+    ctx.set("base_branch", None)
+    config = _branch_marker_config("step", "pre", marker)
+    _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
+    assert marker.read_text().strip() == "[unset]|[unset]"
+
+
+def test_env_no_ctx_backward_compat(tmp_path):
+    marker = tmp_path / "marker.txt"
+    config = _branch_marker_config("step", "pre", marker)
+    [result] = _runner(config, tmp_path, tmp_path).run("step", "pre")
+    assert result.rc == 0
+    assert marker.read_text().strip() == "[unset]|[unset]"
+
+
+def test_env_preserves_os_environ(tmp_path):
+    marker = tmp_path / "marker.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "b")
+    ctx.set("base_branch", "m")
+    config = {
+        "steps": {"step": {"hooks": {"pre": [{"cmd": f'echo "$PATH" > {marker}'}]}}}
+    }
+    _runner_with_ctx(config, tmp_path, tmp_path, ctx).run("step", "pre")
+    assert marker.read_text().strip() == os.environ["PATH"]
+
+
+def test_env_live_ctx_reference(tmp_path):
+    marker1 = tmp_path / "m1.txt"
+    marker2 = tmp_path / "m2.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "a")
+    config1 = {
+        "steps": {
+            "step": {"hooks": {"pre": [{"cmd": f'echo "$DRAFT_BRANCH" > {marker1}'}]}}
+        }
+    }
+    runner = _runner_with_ctx(config1, tmp_path, tmp_path, ctx)
+    runner.run("step", "pre")
+    assert marker1.read_text().strip() == "a"
+
+    ctx.set("branch", "b")
+    runner._steps_config = {
+        "step": {"hooks": {"pre": [{"cmd": f'echo "$DRAFT_BRANCH" > {marker2}'}]}}
+    }
+    runner.run("step", "pre")
+    assert marker2.read_text().strip() == "b"
+
+
+def test_env_reaches_verify_event(tmp_path):
+    marker = tmp_path / "marker.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "feature-x")
+    ctx.set("base_branch", "main")
+    config = _branch_marker_config("implement-spec", "verify", marker)
+    runner = _runner_with_ctx(config, tmp_path, tmp_path, ctx)
+    lifecycle = DraftLifecycle(runner)
+    lifecycle.run_hooks("implement-spec", "verify")
+    assert marker.read_text().strip() == "feature-x|main"
+
+
+def test_env_failure_aborts_chain(tmp_path):
+    marker = tmp_path / "marker.txt"
+    second = tmp_path / "second.txt"
+    ctx = RunContext("rid", tmp_path)
+    ctx.set("branch", "feature-x")
+    config = {
+        "steps": {
+            "step": {
+                "hooks": {
+                    "pre": [
+                        {"cmd": (f'echo "$DRAFT_BRANCH" > {marker}; exit 1')},
+                        {"cmd": f"touch {second}"},
+                    ]
+                }
+            }
+        }
+    }
+    runner = _runner_with_ctx(config, tmp_path, tmp_path, ctx)
+    lifecycle = DraftLifecycle(runner)
+    with pytest.raises(HookError):
+        lifecycle.before_step(type("S", (), {"name": "step"})(), object())
+    assert marker.read_text().strip() == "feature-x"
+    assert not second.exists()
+
+
+def test_to_env_str_none():
+    assert _to_env_str(None) is _SKIP
+
+
+def test_to_env_str_bool():
+    assert _to_env_str(True) == "true"
+    assert _to_env_str(False) == "false"
+
+
+def test_to_env_str_enum():
+    class E(Enum):
+        NEW = "new"
+
+    assert _to_env_str(E.NEW) == "new"
+
+
+def test_to_env_str_other():
+    assert _to_env_str("plain") == "plain"
+    assert _to_env_str(42) == "42"
 
 
 # --- DraftLifecycle wraps + raises ---
