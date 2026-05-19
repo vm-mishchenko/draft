@@ -26,6 +26,7 @@ Each pipeline step can be tuned independently in your project config.
 - Code review - performed by a separate agent
 - Resumable runs - stop and continue at any point
 - Cost tracking - time and cost spent on each spec
+- Stacked PRs - chain runs by passing an existing branch via `--from`
 
 Steps in order:
 
