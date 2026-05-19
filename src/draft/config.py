@@ -60,7 +60,13 @@ def load_config_from_file(path: Path) -> dict:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise ConfigError(f"malformed YAML in {path}: {exc}") from exc
-    return data or {}
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"--config file must contain a YAML mapping, got {type(data).__name__}: {path}"
+        )
+    return data
 
 
 def step_config(config: dict, step_name: str, step_defaults: dict) -> dict:

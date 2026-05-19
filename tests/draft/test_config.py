@@ -920,3 +920,17 @@ def test_load_config_from_file_unreadable_raises(tmp_path):
             load_config_from_file(unreadable)
     finally:
         unreadable.chmod(0o644)
+
+
+def test_load_config_from_file_list_root_raises(tmp_path):
+    cfg = tmp_path / "list.yaml"
+    cfg.write_text("- item1\n- item2\n")
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_config_from_file(cfg)
+
+
+def test_load_config_from_file_scalar_root_raises(tmp_path):
+    cfg = tmp_path / "scalar.yaml"
+    cfg.write_text("just a string\n")
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_config_from_file(cfg)
