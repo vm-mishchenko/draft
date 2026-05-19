@@ -99,7 +99,6 @@ class HookRunner:
             ("DRAFT_BRANCH", "branch"),
             ("DRAFT_BASE_BRANCH", "base_branch"),
         ):
-            env.pop(name, None)
             if self._ctx is None:
                 continue
             v = _to_env_str(self._ctx.get(key))
