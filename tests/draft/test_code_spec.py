@@ -2054,7 +2054,70 @@ def test_suggest_failures_counter_increments_and_blocks_at_limit(tmp_path):
 
     assert suggest_call_count == 3
     assert run_sugg_call_count == 3
+    # verify the counter was written as 1, 2, 3 across the three failing attempts
+    suggest_failure_sets = [
+        c.args[2]
+        for c in ctx.step_set.call_args_list
+        if len(c.args) >= 3 and c.args[1] == "suggest_failures" and c.args[2] != 0
+    ]
+    assert suggest_failure_sets == [1, 2, 3]
     assert state["suggest_failures"] == 0
+
+
+def test_suggest_failures_counter_unchanged_on_commit_failure(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    state["suggest_failures"] = 3
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        pytest.raises(StepError),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run,
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 1, b"", b"hook failed"),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+    mock_run.assert_not_called()
+    assert state["suggest_failures"] == 3
+
+
+def test_suggest_failures_counter_unchanged_on_static_verify_failure(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    state["suggest_failures"] = 2
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    static_fail = HookResult(cmd="make test", rc=1, output="fail\n", duration=0.5)
+    lifecycle.run_hooks.return_value = [static_fail]
+
+    step = ImplementSpecStep()
+    with (
+        pytest.raises(StepError),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run,
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+    mock_run.assert_not_called()
+    assert state["suggest_failures"] == 2
 
 
 def test_suggest_failures_counter_cleared_on_commit_success(tmp_path):
@@ -2110,3 +2173,5 @@ def test_suggest_failures_not_written_when_suggest_disabled(tmp_path):
 
     keys_written = [c.args[1] for c in ctx.step_set.call_args_list]
     assert "suggest_failures" not in keys_written
+    keys_read = [c.args[1] for c in ctx.step_get.call_args_list]
+    assert "suggest_failures" not in keys_read

@@ -463,44 +463,42 @@ class ImplementSpecStep(Step):
                     ctx.save()
                     continue
 
-                suggest_failures = ctx.step_get(self.name, "suggest_failures", 0)
-                if (
-                    cfg["suggest_extra_checks"]
-                    and suggest_failures < _SUGGEST_FAILURE_LIMIT
-                ):
-                    s.update(f"{prefix}suggesting checks")
-                    suggested = _suggest_checks(
-                        ctx,
-                        engine,
-                        step_metrics,
-                        cfg,
-                        spec,
-                        wt_dir,
-                        static_cmds,
-                        suggest_template,
-                    )
-                    ctx.step_set(self.name, "suggested_checks", suggested)
-                    ctx.save()
-
-                    s.update(f"{prefix}running suggested checks")
-                    failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, cfg, s
-                    )
-                    if failures:
-                        ctx.step_set(
-                            self.name,
-                            "verify_errors",
-                            _render_suggested_verify_failures(failures),
+                if cfg["suggest_extra_checks"]:
+                    suggest_failures = ctx.step_get(self.name, "suggest_failures", 0)
+                    if suggest_failures < _SUGGEST_FAILURE_LIMIT:
+                        s.update(f"{prefix}suggesting checks")
+                        suggested = _suggest_checks(
+                            ctx,
+                            engine,
+                            step_metrics,
+                            cfg,
+                            spec,
+                            wt_dir,
+                            static_cmds,
+                            suggest_template,
                         )
-                        _append_failure_block(
-                            ctx.log_path(self.name),
-                            _format_suggested_failures(failures),
-                        )
-                        ctx.step_set(
-                            self.name, "suggest_failures", suggest_failures + 1
-                        )
+                        ctx.step_set(self.name, "suggested_checks", suggested)
                         ctx.save()
-                        continue
+
+                        s.update(f"{prefix}running suggested checks")
+                        failures = _run_suggested_checks(
+                            suggested, wt_dir, ctx.run_dir, engine, cfg, s
+                        )
+                        if failures:
+                            ctx.step_set(
+                                self.name,
+                                "verify_errors",
+                                _render_suggested_verify_failures(failures),
+                            )
+                            _append_failure_block(
+                                ctx.log_path(self.name),
+                                _format_suggested_failures(failures),
+                            )
+                            ctx.step_set(
+                                self.name, "suggest_failures", suggest_failures + 1
+                            )
+                            ctx.save()
+                            continue
 
                 s.update(f"{prefix}writing commit")
                 message, used_fallback = _generate_commit_message(
