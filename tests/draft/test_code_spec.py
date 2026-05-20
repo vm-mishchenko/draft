@@ -9,12 +9,16 @@ from draft.hooks import HookResult
 from draft.steps.implement_spec import (
     ImplementSpecStep,
     _filter_dupes,
+    _format_commands_bullets,
+    _format_static_verify_failures,
     _format_suggested_failures,
     _generate_commit_message,
     _load_template,
     _log_prompt,
     _parse_suggestions,
     _render_prompt,
+    _render_static_verify_failures,
+    _render_suggested_verify_failures,
     _render_verify_commands,
     _run_suggested_checks,
 )
@@ -450,7 +454,9 @@ def test_verify_failure_feeds_back_and_skips_commit(tmp_path):
 
     calls = ctx.step_set.call_args_list
     verify_calls = [c for c in calls if c.args[1] == "verify_errors"]
-    assert any("boom" in str(c.args[2]) for c in verify_calls)
+    assert any("## Verify failures" in str(c.args[2]) for c in verify_calls)
+    assert any("- make test" in str(c.args[2]) for c in verify_calls)
+    assert not any("boom" in str(c.args[2]) for c in verify_calls)
 
     sha_calls = [c for c in calls if c.args[1] == "commit_sha"]
     assert len(sha_calls) == 1
@@ -776,6 +782,177 @@ def test_format_suggested_failures_structure():
     assert text.startswith("## Suggested check failures")
     assert "$ pytest -x" in text
     assert "E" in text
+
+
+# --- new render/format helpers tests ---
+
+
+def test_format_commands_bullets_single():
+    failures = [HookResult(cmd="make test", rc=1, output="fail\n", duration=1.0)]
+    assert _format_commands_bullets(failures) == "- make test"
+
+
+def test_format_commands_bullets_multiple():
+    failures = [
+        HookResult(cmd="make lint", rc=1, output="e1\n", duration=1.0),
+        HookResult(cmd="make test", rc=1, output="e2\n", duration=1.0),
+    ]
+    assert _format_commands_bullets(failures) == "- make lint\n- make test"
+
+
+def test_render_static_verify_failures_heading_intro_bullets():
+    failures = [HookResult(cmd="make lint", rc=1, output="err\n", duration=0.5)]
+    result = _render_static_verify_failures(failures)
+    assert result.startswith("## Verify failures")
+    assert "re-run" in result
+    assert "- make lint" in result
+    assert "err" not in result
+
+
+def test_render_static_verify_failures_two_commands_no_output():
+    failures = [
+        HookResult(cmd="make lint", rc=1, output="e1\n", duration=0.5),
+        HookResult(cmd="make test", rc=1, output="e2\n", duration=0.5),
+    ]
+    result = _render_static_verify_failures(failures)
+    assert "- make lint" in result
+    assert "- make test" in result
+    assert "e1" not in result
+    assert "e2" not in result
+
+
+def test_render_static_verify_failures_timeout_no_output():
+    failures = [
+        HookResult(
+            cmd="make test", rc=124, output="timed out after 120s", duration=120.0
+        )
+    ]
+    result = _render_static_verify_failures(failures)
+    assert "- make test" in result
+    assert "timed out" not in result
+
+
+def test_render_suggested_verify_failures_heading_intro_bullets():
+    failures = [
+        HookResult(cmd="pytest -x", rc=1, output="UNIQUE_OUTPUT_XYZ\n", duration=0.5)
+    ]
+    result = _render_suggested_verify_failures(failures)
+    assert result.startswith("## Suggested check failures")
+    assert "re-run" in result
+    assert "- pytest -x" in result
+    assert "UNIQUE_OUTPUT_XYZ" not in result
+
+
+def test_render_suggested_verify_failures_timeout_no_output():
+    failures = [
+        HookResult(cmd="slow check", rc=124, output="timed out", duration=120.0)
+    ]
+    result = _render_suggested_verify_failures(failures)
+    assert "- slow check" in result
+    assert "timed out" not in result
+
+
+def test_format_static_verify_failures_structure():
+    failures = [HookResult(cmd="make lint", rc=1, output="E\n", duration=0.5)]
+    text = _format_static_verify_failures(failures)
+    assert "## Verify failures" in text
+    assert "$ make lint" in text
+    assert "E" in text
+
+
+def test_static_verify_failure_appends_full_output_to_log(tmp_path):
+    cfg = {"max_retries": 3, "timeout": 60}
+    log_path = tmp_path / "implement-spec.log"
+    ctx = _make_ctx(cfg, spec="my spec", tmp_path=tmp_path)
+    ctx.log_path.return_value = log_path
+
+    fail_result = MagicMock()
+    fail_result.rc = 1
+    fail_result.cmd = "make test"
+    fail_result.output = "boom output"
+
+    call_count = 0
+
+    def hooks_side_effect(step_name, event):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return [fail_result]
+        return []
+
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.side_effect = hooks_side_effect
+    engine = _make_engine()
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("Add foo", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    log_content = log_path.read_text()
+    assert "## Verify failures" in log_content
+    assert "$ make test" in log_content
+    assert "boom output" in log_content
+
+
+def test_suggested_check_failure_appends_full_output_to_log(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    log_path = tmp_path / "implement-spec.log"
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    ctx.log_path.return_value = log_path
+
+    fail_result = HookResult(cmd="false", rc=1, output="fail output\n", duration=0.1)
+    sugg_call_count = 0
+
+    def run_suggested_side(suggested, wt_dir, run_dir, eng, c, stage):
+        nonlocal sugg_call_count
+        sugg_call_count += 1
+        if sugg_call_count == 1:
+            return [fail_result]
+        return []
+
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+    engine = _make_engine()
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch(
+            "draft.steps.implement_spec._suggest_checks",
+            return_value=[{"cmd": "false"}],
+        ),
+        patch(
+            "draft.steps.implement_spec._run_suggested_checks",
+            side_effect=run_suggested_side,
+        ),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    log_content = log_path.read_text()
+    assert "## Suggested check failures" in log_content
+    assert "$ false" in log_content
+    assert "fail output" in log_content
 
 
 # --- _run_suggested_checks tests ---
@@ -1524,7 +1701,7 @@ def test_render_verify_commands_heading_is_verified_commands():
     assert result.startswith("## Verified commands")
 
 
-def test_render_prompt_verify_errors_section_uses_verified_errors_heading(tmp_path):
+def test_render_prompt_verify_errors_section_inserted_verbatim(tmp_path):
     tpl = tmp_path / "tpl.md"
     tpl.write_text("{{SPEC}}\n{{VERIFY_ERRORS}}")
     template = tpl.read_text()
@@ -1534,8 +1711,8 @@ def test_render_prompt_verify_errors_section_uses_verified_errors_heading(tmp_pa
     ctx.step_get.return_value = "some error"
 
     prompt = _render_prompt(ctx, template, "")
-    assert "## Verified errors" in prompt
-    assert "## Test failures" not in prompt
+    assert "some error" in prompt
+    assert "## Verified errors" not in prompt
 
 
 # --- _render_prompt four-placeholder tests ---
@@ -1741,7 +1918,7 @@ def test_render_prompt_verify_errors_no_literal_placeholder(tmp_path):
 
     prompt = _render_prompt(ctx, template, "")
     assert "{{ERRORS}}" not in prompt
-    assert "Fix the above failures." in prompt
+    assert "boom" in prompt
 
 
 def test_render_prompt_empty_verify_errors_no_fix_sentence(tmp_path):
@@ -1779,15 +1956,25 @@ def test_render_prompt_verify_errors_byte_equivalence(tmp_path):
     ctx.step_get.return_value = "boom"
 
     prompt = _render_prompt(ctx, template, "")
-    expected_errors_section = "## Verified errors\n\nboom\n\nFix the above failures."
-    assert expected_errors_section in prompt
+    assert "boom" in prompt
+    assert "## Verified errors" not in prompt
+    assert "Fix the above failures." not in prompt
 
 
 def test_verify_template_files_exist():
     from importlib.resources import files
 
     assert files("draft.steps.implement_spec").joinpath("verify_commands.md").is_file()
-    assert files("draft.steps.implement_spec").joinpath("verify_errors.md").is_file()
+    assert (
+        files("draft.steps.implement_spec")
+        .joinpath("static_verify_errors.md")
+        .is_file()
+    )
+    assert (
+        files("draft.steps.implement_spec")
+        .joinpath("suggested_verify_errors.md")
+        .is_file()
+    )
 
 
 def test_render_verify_commands_cmd_containing_placeholder():

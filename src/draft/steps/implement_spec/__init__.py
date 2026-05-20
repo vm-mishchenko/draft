@@ -40,13 +40,7 @@ def _render_prompt(ctx, template: str, verify_commands: str) -> str:
     spec = ctx.get("spec", "")
     spec_section = f"## Current Spec\n\n{spec}"
     verify_errors = ctx.step_get("implement-spec", "verify_errors", "")
-    if verify_errors:
-        verify_template = (
-            files("draft.steps.implement_spec").joinpath("verify_errors.md").read_text()
-        )
-        verify_section = verify_template.replace("{{ERRORS}}", verify_errors)
-    else:
-        verify_section = ""
+    verify_section = verify_errors if verify_errors else ""
     original_spec_section = original_spec.render_original_spec(ctx)
     return (
         template.replace("{{VERIFY_COMMANDS}}", verify_commands)
@@ -219,9 +213,50 @@ def _filter_dupes(suggested: list[dict], static_cmds: list[str]) -> list[dict]:
     return [e for e in suggested if _normalize_cmd(e["cmd"]) not in normalized_static]
 
 
+def _format_commands_bullets(failures: list[HookResult]) -> str:
+    return "\n".join(f"- {r.cmd}" for r in failures)
+
+
+def _render_static_verify_failures(failures: list[HookResult]) -> str:
+    template = (
+        files("draft.steps.implement_spec")
+        .joinpath("static_verify_errors.md")
+        .read_text()
+    )
+    return template.replace("{{COMMANDS}}", _format_commands_bullets(failures))
+
+
+def _render_suggested_verify_failures(failures: list[HookResult]) -> str:
+    template = (
+        files("draft.steps.implement_spec")
+        .joinpath("suggested_verify_errors.md")
+        .read_text()
+    )
+    return template.replace("{{COMMANDS}}", _format_commands_bullets(failures))
+
+
+def _format_static_verify_failures(failures: list[HookResult]) -> str:
+    parts = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
+    return f"## Verify failures (output)\n\n{parts}"
+
+
 def _format_suggested_failures(failures: list[HookResult]) -> str:
     parts = "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures)
     return f"## Suggested check failures\n\n{parts}"
+
+
+def _append_failure_block(log_path, block: str) -> None:
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write("---\n")
+            f.write(block)
+            if not block.endswith("\n"):
+                f.write("\n")
+    except OSError as exc:
+        print(
+            f"warning: could not write failure block to {log_path}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _suggest_checks(
@@ -417,7 +452,11 @@ class ImplementSpecStep(Step):
                     ctx.step_set(
                         self.name,
                         "verify_errors",
-                        "\n\n".join(f"$ {r.cmd}\n{r.output}" for r in failures),
+                        _render_static_verify_failures(failures),
+                    )
+                    _append_failure_block(
+                        ctx.log_path(self.name),
+                        _format_static_verify_failures(failures),
                     )
                     ctx.save()
                     continue
@@ -445,6 +484,10 @@ class ImplementSpecStep(Step):
                         ctx.step_set(
                             self.name,
                             "verify_errors",
+                            _render_suggested_verify_failures(suggest_failures),
+                        )
+                        _append_failure_block(
+                            ctx.log_path(self.name),
                             _format_suggested_failures(suggest_failures),
                         )
                         ctx.save()
