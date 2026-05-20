@@ -13,6 +13,8 @@ from draft.steps.implement_spec._live_status import LiveStatusSummarizer
 from pipeline import Step, StepError
 from pipeline.runner import TIMEOUT_EXIT
 
+_SUGGEST_FAILURE_LIMIT = 3
+
 
 def _load_template(cfg: dict) -> str:
     path = cfg.get("prompt_template")
@@ -462,36 +464,41 @@ class ImplementSpecStep(Step):
                     continue
 
                 if cfg["suggest_extra_checks"]:
-                    s.update(f"{prefix}suggesting checks")
-                    suggested = _suggest_checks(
-                        ctx,
-                        engine,
-                        step_metrics,
-                        cfg,
-                        spec,
-                        wt_dir,
-                        static_cmds,
-                        suggest_template,
-                    )
-                    ctx.step_set(self.name, "suggested_checks", suggested)
-                    ctx.save()
-
-                    s.update(f"{prefix}running suggested checks")
-                    suggest_failures = _run_suggested_checks(
-                        suggested, wt_dir, ctx.run_dir, engine, cfg, s
-                    )
-                    if suggest_failures:
-                        ctx.step_set(
-                            self.name,
-                            "verify_errors",
-                            _render_suggested_verify_failures(suggest_failures),
+                    suggest_failures = ctx.step_get(self.name, "suggest_failures", 0)
+                    if suggest_failures < _SUGGEST_FAILURE_LIMIT:
+                        s.update(f"{prefix}suggesting checks")
+                        suggested = _suggest_checks(
+                            ctx,
+                            engine,
+                            step_metrics,
+                            cfg,
+                            spec,
+                            wt_dir,
+                            static_cmds,
+                            suggest_template,
                         )
-                        _append_failure_block(
-                            ctx.log_path(self.name),
-                            _format_suggested_failures(suggest_failures),
-                        )
+                        ctx.step_set(self.name, "suggested_checks", suggested)
                         ctx.save()
-                        continue
+
+                        s.update(f"{prefix}running suggested checks")
+                        failures = _run_suggested_checks(
+                            suggested, wt_dir, ctx.run_dir, engine, cfg, s
+                        )
+                        if failures:
+                            ctx.step_set(
+                                self.name,
+                                "verify_errors",
+                                _render_suggested_verify_failures(failures),
+                            )
+                            _append_failure_block(
+                                ctx.log_path(self.name),
+                                _format_suggested_failures(failures),
+                            )
+                            ctx.step_set(
+                                self.name, "suggest_failures", suggest_failures + 1
+                            )
+                            ctx.save()
+                            continue
 
                 s.update(f"{prefix}writing commit")
                 message, used_fallback = _generate_commit_message(
@@ -538,6 +545,7 @@ class ImplementSpecStep(Step):
                 ctx.step_set(self.name, "verify_errors", "")
                 if cfg["suggest_extra_checks"]:
                     ctx.step_set(self.name, "suggested_checks", [])
+                    ctx.step_set(self.name, "suggest_failures", 0)
                 ctx.save()
                 s.update("ok")
                 return

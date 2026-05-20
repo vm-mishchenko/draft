@@ -43,7 +43,11 @@ def _make_ctx(cfg, spec="my spec", verify_errors="", tmp_path=None):
     ctx.get.side_effect = lambda key, default=None: {"wt_dir": "/wt", "spec": spec}.get(
         key, default
     )
-    ctx.step_get.return_value = verify_errors
+    ctx.step_get.side_effect = lambda name, key, default=None: (
+        verify_errors
+        if key == "verify_errors"
+        else (default if default is not None else "")
+    )
     ctx.log_path.return_value = "/tmp/log"
     ctx.run_dir = tmp_path if tmp_path is not None else Path("/tmp")
     return ctx
@@ -1982,3 +1986,192 @@ def test_render_verify_commands_cmd_containing_placeholder():
     assert result.count("{{COMMANDS}}") == 1
     assert "```bash" in result
     assert "echo {{COMMANDS}}" in result
+
+
+# --- suggest_failures counter tests ---
+
+
+def _make_suggest_ctx_with_counter(cfg, tmp_path):
+    """Return (ctx, state) where state["suggest_failures"] tracks the counter."""
+    state = {"suggest_failures": 0}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+
+    def step_get_side(name, key, default=None):
+        if key == "suggest_failures":
+            return state["suggest_failures"]
+        return default if default is not None else ""
+
+    def step_set_side(name, key, value):
+        if key == "suggest_failures":
+            state["suggest_failures"] = value
+
+    ctx.step_get.side_effect = step_get_side
+    ctx.step_set.side_effect = step_set_side
+    return ctx, state
+
+
+def test_suggest_failures_counter_increments_and_blocks_at_limit(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=5)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    fail_result = HookResult(cmd="false", rc=1, output="fail\n", duration=0.1)
+    suggest_call_count = 0
+    run_sugg_call_count = 0
+
+    def suggest_side(*args, **kwargs):
+        nonlocal suggest_call_count
+        suggest_call_count += 1
+        return [{"cmd": "false"}]
+
+    def run_suggested_side(suggested, wt_dir, run_dir, eng, c, stage):
+        nonlocal run_sugg_call_count
+        run_sugg_call_count += 1
+        return [fail_result]
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks", side_effect=suggest_side),
+        patch(
+            "draft.steps.implement_spec._run_suggested_checks",
+            side_effect=run_suggested_side,
+        ),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    assert suggest_call_count == 3
+    assert run_sugg_call_count == 3
+    # verify the counter was written as 1, 2, 3 across the three failing attempts
+    suggest_failure_sets = [
+        c.args[2]
+        for c in ctx.step_set.call_args_list
+        if len(c.args) >= 3 and c.args[1] == "suggest_failures" and c.args[2] != 0
+    ]
+    assert suggest_failure_sets == [1, 2, 3]
+    assert state["suggest_failures"] == 0
+
+
+def test_suggest_failures_counter_unchanged_on_commit_failure(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    state["suggest_failures"] = 3
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        pytest.raises(StepError),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run,
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 1, b"", b"hook failed"),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+    mock_run.assert_not_called()
+    assert state["suggest_failures"] == 3
+
+
+def test_suggest_failures_counter_unchanged_on_static_verify_failure(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=2)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    state["suggest_failures"] = 2
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    static_fail = HookResult(cmd="make test", rc=1, output="fail\n", duration=0.5)
+    lifecycle.run_hooks.return_value = [static_fail]
+
+    step = ImplementSpecStep()
+    with (
+        pytest.raises(StepError),
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks") as mock_suggest,
+        patch("draft.steps.implement_spec._run_suggested_checks") as mock_run,
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    mock_suggest.assert_not_called()
+    mock_run.assert_not_called()
+    assert state["suggest_failures"] == 2
+
+
+def test_suggest_failures_counter_cleared_on_commit_success(tmp_path):
+    cfg = _make_suggest_cfg(max_retries=3)
+    ctx, state = _make_suggest_ctx_with_counter(cfg, tmp_path)
+    state["suggest_failures"] = 2
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch("draft.steps.implement_spec._load_suggest_template", return_value="tpl"),
+        patch("draft.steps.implement_spec._suggest_checks", return_value=[]),
+        patch("draft.steps.implement_spec._run_suggested_checks", return_value=[]),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    assert state["suggest_failures"] == 0
+
+
+def test_suggest_failures_not_written_when_suggest_disabled(tmp_path):
+    cfg = {"max_retries": 1, "timeout": 60, "suggest_extra_checks": False}
+    ctx = _make_ctx(cfg, tmp_path=tmp_path)
+    engine = _make_engine()
+    lifecycle = MagicMock()
+    lifecycle.run_hooks.return_value = []
+
+    step = ImplementSpecStep()
+    with (
+        patch("draft.steps.implement_spec._has_changes", return_value=True),
+        patch(
+            "draft.steps.implement_spec._generate_commit_message",
+            return_value=("msg", False),
+        ),
+        patch("draft.steps.implement_spec._run_git_capture", return_value="sha\n"),
+        patch(
+            "draft.steps.implement_spec._run_git_capture_allow_fail",
+            return_value=subprocess.CompletedProcess([], 0, b"", b""),
+        ),
+    ):
+        step.run(ctx, engine, lifecycle, MagicMock())
+
+    keys_written = [c.args[1] for c in ctx.step_set.call_args_list]
+    assert "suggest_failures" not in keys_written
+    keys_read = [c.args[1] for c in ctx.step_get.call_args_list]
+    assert "suggest_failures" not in keys_read
