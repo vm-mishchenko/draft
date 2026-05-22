@@ -1943,7 +1943,7 @@ def test_render_verify_commands_byte_equivalence():
     result = _render_verify_commands([{"cmd": "make test"}])
     expected = (
         "## Verified commands\n\n"
-        "Draft will run the following after your changes. "
+        "User will run the following after your changes. "
         "Run them yourself before finishing if practical.\n\n"
         "```bash\nmake test\n```"
     )
