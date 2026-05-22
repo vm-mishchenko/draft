@@ -347,6 +347,7 @@ def test_command_delete_with_delete_branch_flag(tmp_path, capsys):
     assert branch_calls[0].kwargs.get("cwd") == str(repo_dir)
     captured = capsys.readouterr()
     assert "deleted branch draft/feature-x" in captured.out
+    assert "(project: myproject)" in captured.out
 
 
 def test_command_delete_without_flag_skips_branch_deletion(tmp_path, capsys):
@@ -385,6 +386,8 @@ def test_command_delete_without_flag_skips_branch_deletion(tmp_path, capsys):
         if call.args and call.args[0][:3] == ["git", "branch", "-D"]
     ]
     assert branch_calls == []
+    captured = capsys.readouterr()
+    assert "(project: myproject)" in captured.out
 
 
 # --- command_continue ---
@@ -628,7 +631,6 @@ def _make_prune_args(**kwargs):
     class FakeArgs:
         yes = False
         dry_run = False
-        include_all = False
         project = None
         all_projects = False
         delete_branch = False
@@ -664,11 +666,12 @@ def test_prune_no_runs(tmp_path, capsys):
     with (
         patch("draft.runs.current_project_name", return_value="myproject"),
         patch("draft.runs.project_runs", return_value=[]),
+        patch("draft.runs.all_project_names", return_value=[]),
     ):
         result = cp.run(_make_prune_args())
 
     assert result == 0
-    assert "no runs to prune" in capsys.readouterr().out
+    assert "deleted 0; skipped 0 active" in capsys.readouterr().out
 
 
 def test_prune_one_finished_one_in_progress_default_selection(
@@ -691,7 +694,9 @@ def test_prune_one_finished_one_in_progress_default_selection(
 
     captured = capsys.readouterr()
     assert "260505-130000" in captured.out
-    assert "260505-120000" not in captured.out
+    assert "260505-120000" in captured.out
+    assert "done" in captured.out
+    assert "stopped" in captured.out
 
 
 def test_prune_confirmation_declined(tmp_path, capsys, monkeypatch):
@@ -728,7 +733,7 @@ def test_prune_yes_deletes_run(tmp_path, capsys):
     assert result == 0
     assert not run_done.exists()
     captured = capsys.readouterr()
-    assert "deleted 1" in captured.out
+    assert "deleted 1; skipped 0 active" in captured.out
 
 
 def test_prune_dry_run_no_deletion(tmp_path, capsys):
@@ -748,7 +753,7 @@ def test_prune_dry_run_no_deletion(tmp_path, capsys):
     assert "would" in captured.out
 
 
-def test_prune_all_includes_incomplete(tmp_path, capsys):
+def test_prune_default_includes_incomplete(tmp_path, capsys):
     import draft.command_prune as cp
 
     run_partial = _make_run_dir(
@@ -759,14 +764,14 @@ def test_prune_all_includes_incomplete(tmp_path, capsys):
         patch("draft.runs.current_project_name", return_value="myproject"),
         patch("draft.runs.project_runs", return_value=[run_partial]),
     ):
-        result = cp.run(_make_prune_args(include_all=True, dry_run=True))
+        result = cp.run(_make_prune_args(dry_run=True))
 
     assert result == 0
     captured = capsys.readouterr()
     assert "260505-120000" in captured.out
 
 
-def test_prune_all_skips_active(tmp_path, capsys):
+def test_prune_default_skips_active(tmp_path, capsys):
     import draft.command_prune as cp
 
     run_active = _make_run_dir(tmp_path, run_id="260505-120000", state=_partial_state())
@@ -775,8 +780,9 @@ def test_prune_all_skips_active(tmp_path, capsys):
     with (
         patch("draft.runs.current_project_name", return_value="myproject"),
         patch("draft.runs.project_runs", return_value=[run_active]),
+        patch("draft.runs.all_project_names", return_value=[]),
     ):
-        result = cp.run(_make_prune_args(include_all=True, yes=True))
+        result = cp.run(_make_prune_args(yes=True))
 
     assert result == 0
     assert run_active.exists()
@@ -907,6 +913,114 @@ def test_prune_skip_pr_finished_included(tmp_path, capsys):
     assert result == 0
     captured = capsys.readouterr()
     assert "260505-130000" in captured.out
+
+
+def test_prune_status_grouping_order(tmp_path, capsys):
+    import draft.command_prune as cp
+
+    run_done = _make_run_dir(tmp_path, run_id="260505-140000", state=_full_state())
+    run_stopped = _make_run_dir(
+        tmp_path, run_id="260505-130000", state=_partial_state()
+    )
+    run_missing = _make_run_dir(tmp_path, run_id="260505-120000")
+    run_corrupt = _make_run_dir(tmp_path, run_id="260505-110000", state=None)
+    (run_corrupt / "state.json").write_text("not valid json {{{")
+    run_active = _make_run_dir(tmp_path, run_id="260505-100000", state=_partial_state())
+    (run_active / "draft.pid").write_text(str(os.getpid()))
+
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch(
+            "draft.runs.project_runs",
+            return_value=[run_done, run_stopped, run_missing, run_corrupt, run_active],
+        ),
+    ):
+        result = cp.run(_make_prune_args(dry_run=True))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    pos_done = out.index("260505-140000")
+    pos_stopped = out.index("260505-130000")
+    pos_missing = out.index("260505-120000")
+    pos_corrupt = out.index("260505-110000")
+    assert pos_done < pos_stopped < pos_missing < pos_corrupt
+    assert "260505-100000" not in out
+    assert "would skip 1 active" in out
+
+
+def test_prune_all_projects_hint_fires(tmp_path, capsys):
+    import draft.command_prune as cp
+
+    other_run = _make_run_dir(
+        tmp_path, run_id="260505-120000", project="other", state=_partial_state()
+    )
+
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch(
+            "draft.runs.project_runs",
+            side_effect=lambda name: [] if name == "myproject" else [other_run],
+        ),
+        patch("draft.runs.all_project_names", return_value=["myproject", "other"]),
+    ):
+        result = cp.run(_make_prune_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "non-running run(s) in other projects" in out
+    assert "--all-projects" in out
+    assert "deleted 0; skipped 0 active" in out
+
+
+def test_prune_all_projects_hint_suppressed_under_project_flag(tmp_path, capsys):
+    import draft.command_prune as cp
+
+    (tmp_path / "myproject").mkdir()
+
+    with (
+        patch("draft.runs.runs_base", return_value=tmp_path),
+        patch("draft.runs.project_runs", return_value=[]),
+        patch("draft.runs.all_project_names", return_value=["myproject", "other"]),
+    ):
+        result = cp.run(_make_prune_args(project="myproject"))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "non-running run(s) in other projects" not in out
+
+
+def test_prune_status_column_in_selection_line(tmp_path, capsys):
+    import re
+
+    import draft.command_prune as cp
+
+    run_stopped = _make_run_dir(
+        tmp_path, run_id="260505-120000", state=_partial_state()
+    )
+
+    with (
+        patch("draft.runs.current_project_name", return_value="myproject"),
+        patch("draft.runs.project_runs", return_value=[run_stopped]),
+    ):
+        cp.run(_make_prune_args(dry_run=True))
+
+    out = capsys.readouterr().out
+    assert re.search(r"\b260505-120000\s+stopped\s+draft/feat\b", out)
+
+
+def test_prune_all_flag_rejected(capsys):
+    import argparse
+
+    import draft.command_prune as cp
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    cp.register(subparsers)
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["prune", "--all"])
+
+    assert exc_info.value.code != 0
 
 
 # --- create-modes: flag conflicts ---

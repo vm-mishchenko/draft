@@ -43,5 +43,5 @@ def run(args) -> int:
     if result["branch_deleted"]:
         print(f"deleted branch {result['branch']}")
 
-    print(f"deleted run {args.run_id}")
+    print(f"deleted run {args.run_id} (project: {run_dir.parent.name})")
     return 0

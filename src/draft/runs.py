@@ -126,6 +126,24 @@ def is_run_finished(state: dict) -> bool:
     return all(s in state.get("completed", []) for s in expected_steps(state))
 
 
+def classify_run(run_dir: Path) -> str:
+    if is_run_active(run_dir):
+        return "running"
+    state_path = run_dir / "state.json"
+    if not state_path.exists():
+        return "missing"
+    try:
+        state = json.loads(state_path.read_text())
+    except Exception:
+        return "corrupt"
+    from draft.pipelines import CorruptStateError
+
+    try:
+        return "done" if is_run_finished(state) else "stopped"
+    except CorruptStateError:
+        return "corrupt"
+
+
 def find_original_run_on_branch(project: str, branch: str) -> Path | None:
     candidates = []
     for run_dir in project_runs(project):
