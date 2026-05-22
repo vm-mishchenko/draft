@@ -123,8 +123,6 @@ class OpenPrStep(Step):
                 extra_args=[
                     "--permission-mode",
                     "acceptEdits",
-                    "--model",
-                    "haiku",
                 ],
                 timeout=cfg["timeout"],
             )
