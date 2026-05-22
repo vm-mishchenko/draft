@@ -60,7 +60,7 @@ Steps in order:
 - [draft fix-pr](#draft-fix-pr) — fix the current CI failures on a PR locally without pushing
 - [draft continue](#draft-continue) — resume a stopped or failed run
 - [draft delete](#draft-delete) — remove a single run
-- [draft prune](#draft-prune) — bulk-delete finished runs
+- [draft prune](#draft-prune) — bulk-delete non-running runs in the current project
 
 ### draft init
 
@@ -170,7 +170,7 @@ Continue reuses the config file recorded on creation. There is no way to switch 
 
 ### draft delete
 
-Remove a single run's state directory and its linked git worktree.
+Remove a single run's state directory and its linked git worktree. On success, the output line names the resolved project, for example `deleted run 260521-212506 (project: draft)`.
 
 ```shell
 draft delete <run-id>
@@ -183,13 +183,12 @@ draft delete <run-id>
 
 ### draft prune
 
-Bulk-delete finished runs. By default operates on the current project.
+Bulk-delete every run in scope except those actively running. By default operates on the current project.
 
 ```shell
 draft prune
 draft prune --yes
 draft prune --dry-run
-draft prune --all
 draft prune --project NAME
 draft prune --all-projects
 draft prune --delete-branch
@@ -199,7 +198,6 @@ draft prune --delete-branch
 
 - `--yes`, `-y` — skip the confirmation prompt
 - `--dry-run` — print the selection and exit without deleting
-- `--all` — include every non-active run regardless of finished status (not only successful ones)
 - `--project NAME` — operate on the named project instead of the current one
 - `--all-projects` — operate across every project under `~/.draft/runs/`; mutually exclusive with `--project`
 - `--delete-branch` — also delete the local git branch for each pruned run

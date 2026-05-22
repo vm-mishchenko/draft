@@ -4,12 +4,15 @@ from pathlib import Path
 
 from draft import runs
 
+_STATUS_ORDER = {"done": 0, "stopped": 1, "missing": 2, "corrupt": 3}
+
 
 def register(subparsers):
     p = subparsers.add_parser(
         "prune",
-        help="Bulk-delete finished runs.",
-        description="Bulk-delete successfully finished runs. By default operates on the current project. See also: draft delete.",
+        help="Bulk-delete non-running runs in the current project.",
+        description="Bulk-delete every run in scope except those actively running. By default operates on the current project. See also: draft delete.",
+        allow_abbrev=False,
     )
     p.add_argument(
         "--yes", "-y", action="store_true", help="Skip the confirmation prompt."
@@ -18,12 +21,6 @@ def register(subparsers):
         "--dry-run",
         action="store_true",
         help="Print the selection and exit without deleting.",
-    )
-    p.add_argument(
-        "--all",
-        dest="include_all",
-        action="store_true",
-        help="Include every non-active run regardless of finished status.",
     )
     p.add_argument(
         "--project",
@@ -76,37 +73,43 @@ def _resolve_project_scope(args) -> list[Path] | int:
     return runs.project_runs(name)
 
 
-def _build_selection(candidates, *, include_all):
-    from draft.pipelines import CorruptStateError
-
+def _build_selection(candidates):
     selection = []
     active = []
     for run_dir in candidates:
-        if runs.is_run_active(run_dir):
+        status = runs.classify_run(run_dir)
+        if status == "running":
             active.append(run_dir)
             continue
         state = runs.load_state(run_dir)
-        try:
-            finished = state is not None and runs.is_run_finished(state)
-        except CorruptStateError:
-            finished = True
-        if include_all or finished:
-            selection.append((run_dir, state))
+        selection.append((run_dir, state, status))
 
-    selection.sort(key=lambda x: x[0].name, reverse=True)
+    selection.sort(key=lambda t: t[0].name, reverse=True)
+    selection.sort(key=lambda t: _STATUS_ORDER[t[2]])
     active.sort(key=lambda d: d.name, reverse=True)
     return selection, active
 
 
 def _print_selection(selection):
     print("runs to delete:")
-    for run_dir, state in selection:
+    for run_dir, state, status in selection:
         branch = "<unknown>"
         if state is not None:
             b = state.get("data", {}).get("branch")
             if b:
                 branch = b
-        print(f"  {run_dir.name}  {branch}")
+        print(f"  {run_dir.name}  {status:<7}  {branch}")
+
+
+def _count_non_running_in_other_projects(current: str | None) -> int:
+    count = 0
+    for name in runs.all_project_names():
+        if name == current:
+            continue
+        for run_dir in runs.project_runs(name):
+            if runs.classify_run(run_dir) != "running":
+                count += 1
+    return count
 
 
 def _confirm() -> bool:
@@ -121,12 +124,19 @@ def run(args) -> int:
     if isinstance(scope, int):
         return scope
 
-    selection, active = _build_selection(scope, include_all=args.include_all)
+    selection, active = _build_selection(scope)
 
     if not selection:
-        print("no runs to prune")
-        if active:
-            print(f"skipped {len(active)} active")
+        if not getattr(args, "project", None) and not getattr(
+            args, "all_projects", False
+        ):
+            current = runs.current_project_name()
+            other = _count_non_running_in_other_projects(current)
+            if other > 0:
+                print(
+                    f"{other} non-running run(s) in other projects; pass --all-projects to include them"
+                )
+        print(f"deleted 0; skipped {len(active)} active")
         return 0
 
     _print_selection(selection)
@@ -147,7 +157,7 @@ def run(args) -> int:
             return 0
 
     n_deleted = 0
-    for run_dir, _ in selection:
+    for run_dir, _, _ in selection:
         project = run_dir.parent.name
         result = runs.delete_run(run_dir, delete_branch=args.delete_branch)
         for warning in result["warnings"]:
@@ -164,7 +174,5 @@ def run(args) -> int:
             pid = int(pid_file.read_text().strip())
         print(f"skipped active run {run_dir.name} (pid {pid})")
 
-    print(
-        f"deleted {n_deleted}; skipped {len(active)} active; selected {len(selection)}"
-    )
+    print(f"deleted {n_deleted}; skipped {len(active)} active")
     return 0
