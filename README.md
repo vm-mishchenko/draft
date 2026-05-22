@@ -72,11 +72,14 @@ draft init
 
 ### draft list
 
-List the 15 most recent runs across all projects. Each run is printed as a multi-line record separated by a blank line.
+List the 15 most recent runs for the current git project. Outside a git repo, lists across all projects. Each run is printed as a multi-line record separated by a blank line.
 
 ```shell
 draft list
+draft list --all
 ```
+
+Pass `--all` to list across all projects regardless of the current directory.
 
 Example output:
 

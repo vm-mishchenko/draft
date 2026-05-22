@@ -1,15 +1,92 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from draft import runs
 from draft.runs import runs_base
 
 
+class _ListProjectError(Exception):
+    pass
+
+
 def register(subparsers):
     p = subparsers.add_parser("list", help="List the 15 most recent runs.")
     p.add_argument("--json", action="store_true", default=False, help="Emit JSON.")
+    p.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="List runs across all projects.",
+    )
     p.set_defaults(func=run)
+
+
+def _run_git(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True)
+
+
+def _current_project_name_for_list() -> str | None:
+    result = _run_git(["git", "rev-parse", "--show-toplevel"])
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "not a git repository" in stderr or "not a git repo" in stderr:
+            return None
+        raise _ListProjectError(
+            f"git rev-parse failed: {stderr or result.stdout.strip()}"
+        )
+
+    wt_result = _run_git(["git", "worktree", "list", "--porcelain"])
+    if wt_result.returncode != 0:
+        raise _ListProjectError(f"git worktree list failed: {wt_result.stderr.strip()}")
+
+    main_worktree = None
+    for line in wt_result.stdout.splitlines():
+        if line.startswith("worktree "):
+            main_worktree = line[len("worktree ") :].strip()
+            break
+
+    if main_worktree is None:
+        raise _ListProjectError(
+            "could not determine main worktree from git worktree list"
+        )
+
+    return Path(main_worktree).name
+
+
+def _all_run_dirs(base: Path) -> list[Path]:
+    dirs = []
+    for project_dir in base.iterdir():
+        if not project_dir.is_dir():
+            continue
+        for run_dir in project_dir.iterdir():
+            if run_dir.is_dir():
+                dirs.append(run_dir)
+    return dirs
+
+
+def _project_run_dirs(base: Path, project: str) -> list[Path]:
+    project_dir = base / project
+    if not project_dir.exists():
+        return []
+    return [run_dir for run_dir in project_dir.iterdir() if run_dir.is_dir()]
+
+
+def _selected_run_dirs(base: Path, args) -> list[Path] | int:
+    if getattr(args, "all", False):
+        return _all_run_dirs(base)
+
+    try:
+        project = _current_project_name_for_list()
+    except _ListProjectError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if project is None:
+        return _all_run_dirs(base)
+    return _project_run_dirs(base, project)
 
 
 def _workspace_status(wt_dir: str) -> str:
@@ -152,13 +229,10 @@ def run(args) -> int:
             print("no runs")
         return 0
 
-    dirs = []
-    for project_dir in base.iterdir():
-        if not project_dir.is_dir():
-            continue
-        for run_dir in project_dir.iterdir():
-            if run_dir.is_dir():
-                dirs.append(run_dir)
+    result = _selected_run_dirs(base, args)
+    if isinstance(result, int):
+        return result
+    dirs = result
 
     dirs = sorted(dirs, key=lambda d: d.name, reverse=False)[-15:]
 

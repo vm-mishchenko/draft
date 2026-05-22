@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,11 +11,21 @@ import pytest
 # --- command_list ---
 
 
+def _make_list_args(**kwargs):
+    class FakeArgs:
+        json = False
+        all = False
+
+    for k, v in kwargs.items():
+        setattr(FakeArgs, k, v)
+    return FakeArgs()
+
+
 def test_command_list_no_runs(tmp_path, capsys):
     import draft.command_list as clm
 
     with patch("draft.command_list.runs_base", return_value=tmp_path / "nonexistent"):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     captured = capsys.readouterr()
     assert "no runs" in captured.out
     assert result == 0
@@ -27,7 +38,7 @@ def test_command_list_no_runs_real(tmp_path, capsys):
     base.mkdir()
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     captured = capsys.readouterr()
     assert "no runs" in captured.out
     assert result == 0
@@ -56,7 +67,7 @@ def test_command_list_full_pipeline_shows_5(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     assert "2/5" in capsys.readouterr().out
 
 
@@ -71,7 +82,7 @@ def test_command_list_skip_pr_shows_2(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     assert "1/2" in capsys.readouterr().out
 
 
@@ -90,7 +101,7 @@ def test_command_list_reuse_existing_shows_4(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     assert "1/4" in capsys.readouterr().out
 
 
@@ -105,7 +116,7 @@ def test_command_list_reuse_pr_shows_4(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     assert "2/4" in capsys.readouterr().out
 
 
@@ -120,7 +131,7 @@ def test_command_list_no_pipeline_shows_corrupt(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     assert "corrupt" in capsys.readouterr().out
 
 
@@ -132,7 +143,7 @@ def test_command_list_missing_state_shows_dash(tmp_path, capsys):
     run_dir.mkdir(parents=True)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
     assert "Run: 260508-100000 (missing)" in out
@@ -147,7 +158,7 @@ def test_command_list_corrupt_state_shows_corrupt(tmp_path, capsys):
     (run_dir / "state.json").write_text("not json{{{")
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
     assert "corrupt" in out
@@ -205,7 +216,7 @@ def test_command_list_workspace_column_yes(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert f"Workspace: {wt}" in out
 
@@ -221,7 +232,7 @@ def test_command_list_workspace_column_no(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert "Workspace: (deleted)" in out
 
@@ -234,7 +245,7 @@ def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert "Workspace: -" in out
 
@@ -247,7 +258,7 @@ def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
     run_dir.mkdir(parents=True)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
     assert "Workspace: -" in out
@@ -262,7 +273,7 @@ def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
     (run_dir / "state.json").write_text("not json{{{")
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
     assert "Workspace: -" in out
@@ -291,7 +302,7 @@ def test_command_list_normal_run_full_record(tmp_path, capsys):
     (run_dir / "state.json").write_text(json.dumps(state))
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
 
     assert result == 0
     out = capsys.readouterr().out
@@ -317,7 +328,7 @@ def test_command_list_active_run_shows_running(tmp_path, capsys):
     (run_dir / "draft.pid").write_text(str(os.getpid()))
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
 
     out = capsys.readouterr().out
     lines = out.splitlines()
@@ -336,7 +347,7 @@ def test_command_list_non_active_run_no_running(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
 
     out = capsys.readouterr().out
     lines = out.splitlines()
@@ -353,13 +364,279 @@ def test_command_list_multiple_runs_blank_line_separator(tmp_path, capsys):
     _make_list_run(base, "260508-100001", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(object())
+        clm.run(_make_list_args(all=True))
 
     out = capsys.readouterr().out
     lines = out.splitlines()
     run_lines = [i for i, line in enumerate(lines) if line.startswith("Run:")]
     assert len(run_lines) == 2
     assert lines[run_lines[1] - 1] == ""
+
+
+# --- command_list project selection ---
+
+
+def _make_porcelain(main_path: str, linked_paths: list[str] = None) -> str:
+    lines = [f"worktree {main_path}", "HEAD abc123", "branch refs/heads/main", ""]
+    for p in linked_paths or []:
+        lines += [f"worktree {p}", "HEAD abc123", "branch refs/heads/feat", ""]
+    return "\n".join(lines)
+
+
+def test_command_list_project_filters_by_current_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "260508-100000" in out
+    assert "260508-200000" not in out
+
+
+def test_command_list_all_flag_skips_git(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+    (other_dir / "state.json").write_text(json.dumps(state))
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git") as mock_git,
+    ):
+        result = clm.run(_make_list_args(all=True))
+
+    assert result == 0
+    mock_git.assert_not_called()
+    out = capsys.readouterr().out
+    assert "260508-100000" in out
+    assert "260508-200000" in out
+
+
+def test_command_list_outside_git_shows_all(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+    (other_dir / "state.json").write_text(json.dumps(state))
+
+    not_git = subprocess.CompletedProcess(
+        [],
+        128,
+        stdout="",
+        stderr="fatal: not a git repository (or any of the parent directories): .git",
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", return_value=not_git),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "260508-100000" in out
+    assert "260508-200000" in out
+
+
+def test_command_list_no_project_dir_prints_no_runs(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    assert "no runs" in capsys.readouterr().out
+
+
+def test_command_list_linked_worktree_uses_main_worktree_name(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+
+    main_path = str(tmp_path / "myproject")
+    linked_path = str(tmp_path / "myproject-linked-worktree")
+    rev_parse = subprocess.CompletedProcess([], 0, stdout=linked_path + "\n", stderr="")
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(main_path, [linked_path]), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "260508-100000" in out
+
+
+def test_command_list_rev_parse_failure_returns_error(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+
+    git_error = subprocess.CompletedProcess(
+        [], 1, stdout="", stderr="git: command not found"
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", return_value=git_error),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result != 0
+    assert "error:" in capsys.readouterr().err
+
+
+def test_command_list_no_worktree_line_returns_error(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout="HEAD abc123\nbranch refs/heads/main\n", stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result != 0
+    assert "error:" in capsys.readouterr().err
+
+
+def test_command_list_15_run_limit_within_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    for i in range(20):
+        _make_list_run(base, f"260508-{100000 + i:06d}", state)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    run_lines = [line for line in out.splitlines() if line.startswith("Run:")]
+    assert len(run_lines) == 15
+
+
+def test_command_list_json_project_selection(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": [],
+        "data": {"pipeline": "create"},
+    }
+    _make_list_run(base, "260508-100000", state)
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+    (other_dir / "state.json").write_text(json.dumps(state))
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args(json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    run_ids = [r["run_id"] for r in rows]
+    assert "260508-100000" in run_ids
+    assert "260508-200000" not in run_ids
+
+
+def test_command_list_json_all_flag_returns_all_projects(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    other_dir = base / "other" / "260508-200000"
+    other_dir.mkdir(parents=True)
+    (other_dir / "state.json").write_text(json.dumps(state))
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+    ):
+        result = clm.run(_make_list_args(all=True, json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    run_ids = [r["run_id"] for r in rows]
+    assert "260508-100000" in run_ids
+    assert "260508-200000" in run_ids
 
 
 # --- command_delete ---
@@ -2254,20 +2531,11 @@ def test_delete_worktree_step_git_nonzero_unknown_error_raises(tmp_path):
 # --- command_list --json ---
 
 
-def _make_list_args(**kwargs):
-    class FakeArgs:
-        json = False
-
-    for k, v in kwargs.items():
-        setattr(FakeArgs, k, v)
-    return FakeArgs()
-
-
 def test_command_list_json_no_runs_dir(tmp_path, capsys):
     import draft.command_list as clm
 
     with patch("draft.command_list.runs_base", return_value=tmp_path / "nonexistent"):
-        result = clm.run(_make_list_args(json=True))
+        result = clm.run(_make_list_args(all=True, json=True))
     assert result == 0
     assert json.loads(capsys.readouterr().out) == []
 
@@ -2278,7 +2546,7 @@ def test_command_list_json_empty_runs(tmp_path, capsys):
     base = tmp_path / "runs"
     base.mkdir()
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(_make_list_args(json=True))
+        result = clm.run(_make_list_args(all=True, json=True))
     assert result == 0
     assert json.loads(capsys.readouterr().out) == []
 
@@ -2304,7 +2572,7 @@ def test_command_list_json_valid_row(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(_make_list_args(json=True))
+        result = clm.run(_make_list_args(all=True, json=True))
 
     assert result == 0
     rows = json.loads(capsys.readouterr().out)
@@ -2327,7 +2595,7 @@ def test_command_list_json_missing_state(tmp_path, capsys):
     run_dir.mkdir(parents=True)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(_make_list_args(json=True))
+        result = clm.run(_make_list_args(all=True, json=True))
 
     assert result == 0
     rows = json.loads(capsys.readouterr().out)
@@ -2348,7 +2616,7 @@ def test_command_list_json_corrupt_state(tmp_path, capsys):
     (run_dir / "state.json").write_text("not json{{{")
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(_make_list_args(json=True))
+        result = clm.run(_make_list_args(all=True, json=True))
 
     assert result == 0
     rows = json.loads(capsys.readouterr().out)
@@ -2366,7 +2634,7 @@ def test_command_list_json_workspace_yes(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["workspace"] == "yes"
@@ -2383,7 +2651,7 @@ def test_command_list_json_workspace_no(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["workspace"] == "no"
@@ -2397,7 +2665,7 @@ def test_command_list_json_workspace_null_when_absent(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["workspace"] is None
@@ -2411,7 +2679,7 @@ def test_command_list_json_pr_url_null_when_absent(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["pr_url"] is None
@@ -2427,7 +2695,7 @@ def test_command_list_json_running_true(tmp_path, capsys):
     (run_dir / "draft.pid").write_text(str(os.getpid()))
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["running"] is True
@@ -2441,7 +2709,7 @@ def test_command_list_json_running_false(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        clm.run(_make_list_args(json=True))
+        clm.run(_make_list_args(all=True, json=True))
 
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["running"] is False
@@ -2455,7 +2723,7 @@ def test_command_list_human_record_layout(tmp_path, capsys):
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
-        result = clm.run(object())
+        result = clm.run(_make_list_args(all=True))
 
     assert result == 0
     out = capsys.readouterr().out
