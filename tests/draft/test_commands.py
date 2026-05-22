@@ -135,8 +135,7 @@ def test_command_list_missing_state_shows_dash(tmp_path, capsys):
         result = clm.run(object())
     out = capsys.readouterr().out
     assert result == 0
-    lines = [line for line in out.splitlines() if "260508-100000" in line]
-    assert lines and "-" in lines[0]
+    assert "Run: 260508-100000 (missing)" in out
 
 
 def test_command_list_corrupt_state_shows_corrupt(tmp_path, capsys):
@@ -208,8 +207,7 @@ def test_command_list_workspace_column_yes(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [line for line in out.splitlines() if "260508-100000" in line]
-    assert lines and "yes" in lines[0]
+    assert f"Workspace: {wt}" in out
 
 
 def test_command_list_workspace_column_no(tmp_path, capsys):
@@ -225,8 +223,7 @@ def test_command_list_workspace_column_no(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [line for line in out.splitlines() if "260508-100000" in line]
-    assert lines and "no" in lines[0]
+    assert "Workspace: (deleted)" in out
 
 
 def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
@@ -239,11 +236,7 @@ def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(object())
     out = capsys.readouterr().out
-    lines = [line for line in out.splitlines() if "260508-100000" in line]
-    assert lines
-    # The WORKSPACE column should show '-'
-    # Split by multiple spaces to check the workspace field
-    assert "-" in lines[0]
+    assert "Workspace: -" in out
 
 
 def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
@@ -257,9 +250,7 @@ def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
         result = clm.run(object())
     out = capsys.readouterr().out
     assert result == 0
-    lines = [line for line in out.splitlines() if "260508-100001" in line]
-    assert lines and "WORKSPACE" not in lines[0]
-    assert "WORKSPACE" in out.splitlines()[0]
+    assert "Workspace: -" in out
 
 
 def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
@@ -274,9 +265,101 @@ def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
         result = clm.run(object())
     out = capsys.readouterr().out
     assert result == 0
-    assert "WORKSPACE" in out.splitlines()[0]
-    lines = [line for line in out.splitlines() if "260508-100002" in line]
-    assert lines
+    assert "Workspace: -" in out
+
+
+def test_command_list_normal_run_full_record(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    wt = tmp_path / "my-wt"
+    wt.mkdir()
+    state = {
+        "completed": ["worktree-create", "code-spec"],
+        "data": {
+            "worktree_mode": "worktree",
+            "pr_mode": "open",
+            "skip_pr": False,
+            "branch": "feat/foo",
+            "wt_dir": str(wt),
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "pipeline": "create",
+        },
+    }
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(object())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Run: 260508-100000 (2/5)" in out
+    assert "Project: myproject" in out
+    assert "Branch: feat/foo" in out
+    assert "PR: https://github.com/org/repo/pull/1" in out
+    assert f"Workspace: {wt}" in out
+    assert f"Logs: {run_dir}" in out
+
+
+def test_command_list_active_run_shows_running(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": [],
+        "data": {"worktree_mode": "worktree", "pr_mode": "open", "pipeline": "create"},
+    }
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+    (run_dir / "draft.pid").write_text(str(os.getpid()))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].startswith("Run: 260508-100000 (")
+    assert "running" in lines[0]
+
+
+def test_command_list_non_active_run_no_running(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"worktree_mode": "worktree", "pr_mode": "open", "pipeline": "create"},
+    }
+    _make_list_run(base, "260508-100000", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].startswith("Run: 260508-100000 (")
+    assert "running" not in lines[0]
+
+
+def test_command_list_multiple_runs_blank_line_separator(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    _make_list_run(base, "260508-100001", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(object())
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    run_lines = [i for i, line in enumerate(lines) if line.startswith("Run:")]
+    assert len(run_lines) == 2
+    assert lines[run_lines[1] - 1] == ""
 
 
 # --- command_delete ---
@@ -2364,11 +2447,11 @@ def test_command_list_json_running_false(tmp_path, capsys):
     assert rows[0]["running"] is False
 
 
-def test_command_list_no_json_unchanged(tmp_path, capsys):
+def test_command_list_human_record_layout(tmp_path, capsys):
     import draft.command_list as clm
 
     base = tmp_path / "runs"
-    state = {"completed": [], "data": {"branch": "feat"}}
+    state = {"completed": [], "data": {"branch": "feat", "pipeline": "create"}}
     _make_list_run(base, "260508-100000", state)
 
     with patch("draft.command_list.runs_base", return_value=base):
@@ -2376,8 +2459,8 @@ def test_command_list_no_json_unchanged(tmp_path, capsys):
 
     assert result == 0
     out = capsys.readouterr().out
-    assert "RUN-ID" in out
-    assert "260508-100000" in out
+    assert "Run: 260508-100000" in out
+    assert "Branch: feat" in out
 
 
 # --- command_status ---

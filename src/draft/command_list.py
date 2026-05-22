@@ -21,6 +21,46 @@ def _workspace_status(wt_dir: str) -> str:
         return "-"
 
 
+def _load_state_payload_for_display(run_dir: Path) -> dict | None:
+    try:
+        return json.loads((run_dir / "state.json").read_text())
+    except Exception:
+        return None
+
+
+def _workspace_display(wt_dir: str | None) -> str:
+    if not wt_dir:
+        return "-"
+    try:
+        return str(wt_dir) if Path(wt_dir).is_dir() else "(deleted)"
+    except OSError:
+        return "(deleted)"
+
+
+def _format_run_line(row: dict) -> str:
+    if row["state"] == "missing":
+        parts = ["missing"]
+    elif row["state"] == "corrupt":
+        parts = ["corrupt"]
+    else:
+        parts = [f"{row['stages_completed']}/{row['stages_total']}"]
+    if row["running"]:
+        parts.append("running")
+    return f"Run: {row['run_id']} ({', '.join(parts)})"
+
+
+def _print_human_record(run_dir: Path) -> None:
+    row = _row_data(run_dir)
+    payload = _load_state_payload_for_display(run_dir)
+    wt_dir = (payload or {}).get("data", {}).get("wt_dir") or None
+    print(_format_run_line(row))
+    print(f"Project: {row['project']}")
+    print(f"Branch: {row['branch'] or '-'}")
+    print(f"PR: {row['pr_url'] or '-'}")
+    print(f"Workspace: {_workspace_display(wt_dir)}")
+    print(f"Logs: {run_dir}")
+
+
 def _row_data(run_dir: Path) -> dict:
     running = _is_run_active(run_dir)
     run_id = run_dir.name
@@ -134,24 +174,9 @@ def run(args) -> int:
         print(json.dumps(rows, indent=2))
         return 0
 
-    header = f"{'RUN-ID':<18}  {'PROJECT':<20}  {'STAGES':<10}  {'RUNNING':<8}  {'WORKSPACE':<10}  {'BRANCH':<30}  PR"
-    print(header)
-    print("-" * len(header))
-
-    for d in dirs:
-        row = _row_data(d)
-        running_str = "yes" if row["running"] else "-"
-        workspace_str = row["workspace"] if row["workspace"] is not None else "-"
-        branch_str = row["branch"] or "-"
-        pr_str = row["pr_url"] or "-"
-        if row["state"] == "missing":
-            stages_str = "-"
-        elif row["state"] == "corrupt":
-            stages_str = "corrupt"
-        else:
-            stages_str = f"{row['stages_completed']}/{row['stages_total']}"
-        print(
-            f"{row['run_id']:<18}  {row['project']:<20}  {stages_str:<10}  {running_str:<8}  {workspace_str:<10}  {branch_str:<30}  {pr_str}"
-        )
+    for index, d in enumerate(dirs):
+        if index > 0:
+            print()
+        _print_human_record(d)
 
     return 0
