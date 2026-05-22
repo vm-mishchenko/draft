@@ -72,7 +72,7 @@ draft init
 
 ### draft list
 
-List the 15 most recent runs for the current git project. Outside a git repo, lists across all projects. Each run is printed as a multi-line record separated by a blank line.
+List the 15 most recent runs for the current git project. Outside a git repo, lists across all projects. Each run is printed as a compact three-line record separated by a blank line.
 
 ```shell
 draft list
@@ -85,11 +85,8 @@ Example output:
 
 ```
 Run: 260521-212506 (1/2, running)
-Project: draft
 Branch: draft/scope-list-render-layout
 PR: -
-Workspace: /path/to/workspace
-Logs: /path/to/run/logs
 ```
 
 Pass `--json` for machine-readable output.

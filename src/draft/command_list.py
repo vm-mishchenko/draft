@@ -105,37 +105,28 @@ def _load_state_payload_for_display(run_dir: Path) -> dict | None:
         return None
 
 
-def _workspace_display(wt_dir: str | None) -> str:
-    if not wt_dir:
-        return "-"
-    try:
-        return str(wt_dir) if Path(wt_dir).is_dir() else "(deleted)"
-    except OSError:
-        return "(deleted)"
+def _format_run_line(run_dir: Path, row: dict) -> str:
+    status = runs.classify_run(run_dir)
+    if row["state"] != "ok":
+        return f"Run: {row['run_id']} ({status})"
+    return f"Run: {row['run_id']} ({row['stages_completed']}/{row['stages_total']}, {status})"
 
 
-def _format_run_line(row: dict) -> str:
-    if row["state"] == "missing":
-        parts = ["missing"]
-    elif row["state"] == "corrupt":
-        parts = ["corrupt"]
-    else:
-        parts = [f"{row['stages_completed']}/{row['stages_total']}"]
-    if row["running"]:
-        parts.append("running")
-    return f"Run: {row['run_id']} ({', '.join(parts)})"
+def _display_metadata(run_dir: Path, row: dict) -> dict:
+    payload = _load_state_payload_for_display(run_dir)
+    data = (payload or {}).get("data", {})
+    return {
+        "branch": data.get("branch") or row["branch"] or "-",
+        "pr_url": data.get("pr_url") or row["pr_url"] or "-",
+    }
 
 
 def _print_human_record(run_dir: Path) -> None:
     row = _row_data(run_dir)
-    payload = _load_state_payload_for_display(run_dir)
-    wt_dir = (payload or {}).get("data", {}).get("wt_dir") or None
-    print(_format_run_line(row))
-    print(f"Project: {row['project']}")
-    print(f"Branch: {row['branch'] or '-'}")
-    print(f"PR: {row['pr_url'] or '-'}")
-    print(f"Workspace: {_workspace_display(wt_dir)}")
-    print(f"Logs: {run_dir}")
+    meta = _display_metadata(run_dir, row)
+    print(_format_run_line(run_dir, row))
+    print(f"Branch: {meta['branch']}")
+    print(f"PR: {meta['pr_url']}")
 
 
 def _row_data(run_dir: Path) -> dict:

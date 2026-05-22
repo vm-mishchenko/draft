@@ -218,7 +218,8 @@ def test_command_list_workspace_column_yes(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
-    assert f"Workspace: {wt}" in out
+    assert "Workspace:" not in out
+    assert "Run: 260508-100000" in out
 
 
 def test_command_list_workspace_column_no(tmp_path, capsys):
@@ -234,7 +235,8 @@ def test_command_list_workspace_column_no(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
-    assert "Workspace: (deleted)" in out
+    assert "Workspace:" not in out
+    assert "Run: 260508-100000" in out
 
 
 def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
@@ -247,7 +249,8 @@ def test_command_list_workspace_column_absent_wt_dir(tmp_path, capsys):
     with patch("draft.command_list.runs_base", return_value=base):
         clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
-    assert "Workspace: -" in out
+    assert "Workspace:" not in out
+    assert "Run: 260508-100000" in out
 
 
 def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
@@ -261,7 +264,8 @@ def test_command_list_missing_state_workspace_dash(tmp_path, capsys):
         result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
-    assert "Workspace: -" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
 
 
 def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
@@ -276,7 +280,8 @@ def test_command_list_corrupt_state_workspace_dash(tmp_path, capsys):
         result = clm.run(_make_list_args(all=True))
     out = capsys.readouterr().out
     assert result == 0
-    assert "Workspace: -" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
 
 
 def test_command_list_normal_run_full_record(tmp_path, capsys):
@@ -306,12 +311,12 @@ def test_command_list_normal_run_full_record(tmp_path, capsys):
 
     assert result == 0
     out = capsys.readouterr().out
-    assert "Run: 260508-100000 (2/5)" in out
-    assert "Project: myproject" in out
+    assert "Run: 260508-100000 (2/5, stopped)" in out
     assert "Branch: feat/foo" in out
     assert "PR: https://github.com/org/repo/pull/1" in out
-    assert f"Workspace: {wt}" in out
-    assert f"Logs: {run_dir}" in out
+    assert "Project:" not in out
+    assert "Workspace:" not in out
+    assert "Logs:" not in out
 
 
 def test_command_list_active_run_shows_running(tmp_path, capsys):
@@ -371,6 +376,143 @@ def test_command_list_multiple_runs_blank_line_separator(tmp_path, capsys):
     run_lines = [i for i, line in enumerate(lines) if line.startswith("Run:")]
     assert len(run_lines) == 2
     assert lines[run_lines[1] - 1] == ""
+
+
+def test_command_list_human_status_stopped(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"branch": "test-branch", "pipeline": "create"},
+    }
+    _make_list_run(base, "260521-220712", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (1/5, stopped)" in out
+    assert "Branch: test-branch" in out
+    assert "PR: -" in out
+
+
+def test_command_list_human_status_done(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": [
+            "create-worktree",
+            "implement-spec",
+            "push-commits",
+            "open-pr",
+            "babysit-pr",
+        ],
+        "data": {
+            "branch": "feat/done",
+            "worktree_mode": "worktree",
+            "pr_mode": "open",
+            "pipeline": "create",
+        },
+    }
+    _make_list_run(base, "260521-220712", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (5/5, done)" in out
+
+
+def test_command_list_human_status_missing(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260521-220712"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (missing)" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
+
+
+def test_command_list_human_status_corrupt(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{{")
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (corrupt)" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
+
+
+def test_command_list_corrupt_pipeline_readable_state(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    # state.json is readable but pipeline field is missing → corrupt classification
+    state = {
+        "completed": ["worktree-create"],
+        "data": {
+            "branch": "stored-branch",
+            "pr_url": "https://github.com/org/repo/pull/9",
+        },
+    }
+    _make_list_run(base, "260521-220712", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (corrupt)" in out
+    assert "Branch: stored-branch" in out
+    assert "PR: https://github.com/org/repo/pull/9" in out
+
+
+def test_command_list_running_with_missing_state(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myproject" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "draft.pid").write_text(str(os.getpid()))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (running)" in out
+
+
+def test_command_list_human_no_project_workspace_logs(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create"],
+        "data": {"branch": "feat/x", "pipeline": "create"},
+    }
+    _make_list_run(base, "260521-220712", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Project:" not in out
+    assert "Workspace:" not in out
+    assert "Logs:" not in out
 
 
 # --- command_list project selection ---
