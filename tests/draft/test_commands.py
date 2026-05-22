@@ -314,7 +314,7 @@ def test_command_list_normal_run_full_record(tmp_path, capsys):
     assert "Run: 260508-100000 (2/5, stopped)" in out
     assert "Branch: feat/foo" in out
     assert "PR: https://github.com/org/repo/pull/1" in out
-    assert "Project:" not in out
+    assert "Project: myproject" in out
     assert "Workspace:" not in out
     assert "Logs:" not in out
 
@@ -510,7 +510,7 @@ def test_command_list_human_no_project_workspace_logs(tmp_path, capsys):
         clm.run(_make_list_args(all=True))
 
     out = capsys.readouterr().out
-    assert "Project:" not in out
+    assert "Project: myproject" in out
     assert "Workspace:" not in out
     assert "Logs:" not in out
 
@@ -779,6 +779,244 @@ def test_command_list_json_all_flag_returns_all_projects(tmp_path, capsys):
     run_ids = [r["run_id"] for r in rows]
     assert "260508-100000" in run_ids
     assert "260508-200000" in run_ids
+
+
+def test_command_list_current_project_omits_project_field(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"branch": "feat/x", "pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "260508-100000" in out
+    assert "Project:" not in out
+
+
+def test_command_list_all_flag_human_includes_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"branch": "test-branch", "pipeline": "create"}}
+    run_dir = base / "draft" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+    other_dir = base / "other-project" / "260521-220713"
+    other_dir.mkdir(parents=True)
+    (other_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(all=True))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Project: draft" in out
+    assert "Project: other-project" in out
+
+
+def test_command_list_outside_git_human_includes_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"branch": "feat/x", "pipeline": "create"}}
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    not_git = subprocess.CompletedProcess(
+        [],
+        128,
+        stdout="",
+        stderr="fatal: not a git repository (or any of the parent directories): .git",
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", return_value=not_git),
+    ):
+        result = clm.run(_make_list_args())
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Project: myproject" in out
+
+
+def test_command_list_outside_git_all_flag_human_includes_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(all=True))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Project: myproject" in out
+
+
+def test_command_list_all_project_missing_state_includes_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myrepo" / "260521-220712"
+    run_dir.mkdir(parents=True)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (missing)" in out
+    assert "Project: myrepo" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
+
+
+def test_command_list_all_project_corrupt_state_includes_project(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    run_dir = base / "myrepo" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("not json{{{")
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Run: 260521-220712 (corrupt)" in out
+    assert "Project: myrepo" in out
+    assert "Branch: -" in out
+    assert "PR: -" in out
+
+
+def test_command_list_all_project_readable_corrupt_pipeline_includes_project(
+    tmp_path, capsys
+):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {
+        "completed": ["worktree-create"],
+        "data": {
+            "branch": "stored-branch",
+            "pr_url": "https://github.com/org/repo/pull/9",
+        },
+    }
+    run_dir = base / "myrepo" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    assert "Project: myrepo" in out
+    assert "Branch: stored-branch" in out
+    assert "PR: https://github.com/org/repo/pull/9" in out
+
+
+def test_command_list_all_project_field_order(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"branch": "feat/x", "pipeline": "create"}}
+    run_dir = base / "myrepo" / "260521-220712"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    run_idx = next(i for i, line in enumerate(lines) if line.startswith("Run:"))
+    project_idx = next(i for i, line in enumerate(lines) if line.startswith("Project:"))
+    branch_idx = next(i for i, line in enumerate(lines) if line.startswith("Branch:"))
+    pr_idx = next(i for i, line in enumerate(lines) if line.startswith("PR:"))
+    assert run_idx < project_idx < branch_idx < pr_idx
+
+
+def test_command_list_all_multiple_records_blank_line_separator(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create"}}
+    _make_list_run(base, "260508-100000", state)
+    _make_list_run(base, "260508-100001", state)
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        clm.run(_make_list_args(all=True))
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    run_lines = [i for i, line in enumerate(lines) if line.startswith("Run:")]
+    assert len(run_lines) == 2
+    assert lines[run_lines[1] - 1] == ""
+
+
+def test_command_list_json_all_project_field_unchanged(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create", "branch": "feat/x"}}
+    run_dir = base / "myproject" / "260508-100000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps(state))
+
+    with patch("draft.command_list.runs_base", return_value=base):
+        result = clm.run(_make_list_args(all=True, json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert len(rows) == 1
+    assert rows[0]["project"] == "myproject"
+    assert "run_id" in rows[0]
+    assert "branch" in rows[0]
+
+
+def test_command_list_json_current_project_row_shape_unchanged(tmp_path, capsys):
+    import draft.command_list as clm
+
+    base = tmp_path / "runs"
+    state = {"completed": [], "data": {"pipeline": "create", "branch": "feat/x"}}
+    _make_list_run(base, "260508-100000", state)
+
+    rev_parse = subprocess.CompletedProcess(
+        [], 0, stdout=str(tmp_path / "myproject") + "\n", stderr=""
+    )
+    wt_list = subprocess.CompletedProcess(
+        [], 0, stdout=_make_porcelain(str(tmp_path / "myproject")), stderr=""
+    )
+
+    with (
+        patch("draft.command_list.runs_base", return_value=base),
+        patch("draft.command_list._run_git", side_effect=[rev_parse, wt_list]),
+    ):
+        result = clm.run(_make_list_args(json=True))
+
+    assert result == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert len(rows) == 1
+    assert rows[0]["project"] == "myproject"
+    assert "run_id" in rows[0]
 
 
 # --- command_delete ---

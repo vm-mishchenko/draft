@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from draft import runs
@@ -10,6 +11,12 @@ from draft.runs import runs_base
 
 class _ListProjectError(Exception):
     pass
+
+
+@dataclass
+class _ListSelection:
+    run_dirs: list[Path]
+    include_project: bool
 
 
 def register(subparsers):
@@ -74,9 +81,9 @@ def _project_run_dirs(base: Path, project: str) -> list[Path]:
     return [run_dir for run_dir in project_dir.iterdir() if run_dir.is_dir()]
 
 
-def _selected_run_dirs(base: Path, args) -> list[Path] | int:
+def _selected_run_dirs(base: Path, args) -> _ListSelection | int:
     if getattr(args, "all", False):
-        return _all_run_dirs(base)
+        return _ListSelection(_all_run_dirs(base), include_project=True)
 
     try:
         project = _current_project_name_for_list()
@@ -85,8 +92,8 @@ def _selected_run_dirs(base: Path, args) -> list[Path] | int:
         return 1
 
     if project is None:
-        return _all_run_dirs(base)
-    return _project_run_dirs(base, project)
+        return _ListSelection(_all_run_dirs(base), include_project=True)
+    return _ListSelection(_project_run_dirs(base, project), include_project=False)
 
 
 def _workspace_status(wt_dir: str) -> str:
@@ -121,10 +128,12 @@ def _display_metadata(run_dir: Path, row: dict) -> dict:
     }
 
 
-def _print_human_record(run_dir: Path) -> None:
+def _print_human_record(run_dir: Path, include_project: bool) -> None:
     row = _row_data(run_dir)
     meta = _display_metadata(run_dir, row)
     print(_format_run_line(run_dir, row))
+    if include_project:
+        print(f"Project: {row.get('project') or '-'}")
     print(f"Branch: {meta['branch']}")
     print(f"PR: {meta['pr_url']}")
 
@@ -223,7 +232,8 @@ def run(args) -> int:
     result = _selected_run_dirs(base, args)
     if isinstance(result, int):
         return result
-    dirs = result
+    selection = result
+    dirs = selection.run_dirs
 
     dirs = sorted(dirs, key=lambda d: d.name, reverse=False)[-15:]
 
@@ -242,6 +252,6 @@ def run(args) -> int:
     for index, d in enumerate(dirs):
         if index > 0:
             print()
-        _print_human_record(d)
+        _print_human_record(d, selection.include_project)
 
     return 0
