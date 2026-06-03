@@ -20,7 +20,7 @@ You are writing a GitHub Pull Request title and description. Do not run any shel
 {{GIT_LOG}}
 ```
 
-Write a concise title (one line) and a body that follows the PR body template structure above.
+Write a concise title (one line) and a body that follows the PR body template structure above. The PR title must be a plain description of the change — do not include any ticket numbers, issue IDs, or references from Jira or similar tracking systems.
 
 Output contract. Your stdout is parsed by `open-pr`. Output exactly two fenced blocks, in this order, with the opening and closing markers on their own lines:
 
