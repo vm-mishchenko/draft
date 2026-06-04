@@ -27,14 +27,29 @@ from draft.command_common import (
 from draft.config import ConfigError, step_config, validate_config
 from draft.hooks import DraftLifecycle, HookRunner
 from draft.pipelines import PIPELINES
-from draft.types import WorktreeMode
+from draft.types import BranchSource, WorktreeMode
 from pipeline import RunContext, Runner, StepError
 from pipeline.heartbeat import HeartbeatPulse
 
 
 def register(subparsers):
     p = subparsers.add_parser(
-        "babysit", help="Monitor and fix CI failures on an existing PR."
+        "babysit",
+        help="Monitor and fix CI failures on an existing PR.",
+        description=(
+            "Monitor and fix CI failures on an existing PR.\n"
+            "\n"
+            "The PR branch must exist locally and match the remote HEAD. "
+            "If it does not exist locally, fetch it first:\n"
+            "  gh pr checkout <PR>\n"
+            "\n"
+            "Branch scenarios:\n"
+            "  not local          -- error; user should run 'gh pr checkout <PR>' first\n"
+            "  local, no worktree -- a new worktree is created at ~/.draft/worktrees/<project>/<branch>\n"
+            "  local, has worktree at canonical path -- worktree is reused as-is\n"
+            "  local, checked out in main repo -- error; use --no-worktree to run in place\n"
+        ),
+        formatter_class=__import__("argparse").RawDescriptionHelpFormatter,
     )
     p.add_argument("pr_input", help="PR URL or number.")
     p.add_argument(
@@ -320,6 +335,7 @@ def run(args) -> int:
     ctx.set("project", project)
     ctx.set("worktree_mode", worktree_mode)
     ctx.set("delete_worktree", args.delete_worktree)
+    ctx.set("branch_source", BranchSource.EXISTING)
     ctx.config_path = str(config_path) if config_path else None
 
     if worktree_mode == WorktreeMode.NO_WORKTREE:
