@@ -599,8 +599,7 @@ def run(args) -> int:
     else:
         spec = str(Path(args.spec_path).resolve())
         if branch_source == BranchSource.NEW:
-            stem = Path(spec).stem
-            branch = stem.lower().replace("_", "-").replace(" ", "-")[:50]
+            branch = _branch_slug_from_claude(Path(spec).read_text(), run_id)
 
     if branch_source == BranchSource.NEW:
         branch = _unique_branch(repo, branch)
