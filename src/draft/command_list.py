@@ -3,9 +3,11 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from draft import runs
+from draft.command_common import _config_label
 from draft.runs import runs_base
 
 
@@ -20,13 +22,20 @@ class _ListSelection:
 
 
 def register(subparsers):
-    p = subparsers.add_parser("list", help="List the 15 most recent runs.")
+    p = subparsers.add_parser("list", help="List all runs.")
     p.add_argument("--json", action="store_true", default=False, help="Emit JSON.")
     p.add_argument(
         "--all",
         action="store_true",
         default=False,
         help="List runs across all projects.",
+    )
+    p.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=False,
+        help="Show additional details for each run.",
     )
     p.set_defaults(func=run)
 
@@ -105,6 +114,23 @@ def _workspace_status(wt_dir: str) -> str:
         return "-"
 
 
+def _started_at(run_dir: Path) -> float | None:
+    ts = runs._run_started_at(run_dir)
+    if ts is not None:
+        return ts
+    try:
+        return datetime.strptime(run_dir.name, "%y%m%d-%H%M%S").timestamp()
+    except ValueError:
+        return None
+
+
+def _started_display(run_dir: Path) -> str | None:
+    ts = _started_at(run_dir)
+    if ts is None:
+        return None
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _load_state_payload_for_display(run_dir: Path) -> dict | None:
     try:
         return json.loads((run_dir / "state.json").read_text())
@@ -128,7 +154,25 @@ def _display_metadata(run_dir: Path, row: dict) -> dict:
     }
 
 
-def _print_human_record(run_dir: Path, include_project: bool) -> None:
+def _verbose_fields(run_dir: Path) -> dict:
+    state = runs.load_state(run_dir) or {}
+    data = state.get("data", {})
+    sessions = state.get("sessions", [])
+    started_at = sessions[0].get("started_at") if sessions else None
+    finished_at = sessions[-1].get("finished_at") if sessions else None
+    return {
+        "status": runs.classify_run(run_dir),
+        "worktree": data.get("wt_dir") or None,
+        "logs": str(run_dir),
+        "config_path": _config_label(state.get("config_path"), data.get("repo")),
+        "started_at": started_at,
+        "finished_at": finished_at,
+    }
+
+
+def _print_human_record(
+    run_dir: Path, include_project: bool, verbose: bool = False
+) -> None:
     row = _row_data(run_dir)
     meta = _display_metadata(run_dir, row)
     print(_format_run_line(run_dir, row))
@@ -136,17 +180,26 @@ def _print_human_record(run_dir: Path, include_project: bool) -> None:
         print(f"Project: {row.get('project') or '-'}")
     print(f"Branch: {meta['branch']}")
     print(f"PR: {meta['pr_url']}")
+    if verbose:
+        v = _verbose_fields(run_dir)
+        print(f"Worktree: {v['worktree'] or '-'}")
+        print(f"Logs:     {v['logs']}")
+        print(f"Config:   {v['config_path']}")
+        print(f"Started:  {v['started_at'] or '-'}")
+        print(f"Finished: {v['finished_at'] or '-'}")
 
 
 def _row_data(run_dir: Path) -> dict:
     running = _is_run_active(run_dir)
     run_id = run_dir.name
     project = run_dir.parent.name
+    started = _started_display(run_dir)
     state_path = run_dir / "state.json"
     if not state_path.exists():
         return {
             "run_id": run_id,
             "project": project,
+            "started": started,
             "state": "missing",
             "stages_completed": None,
             "stages_total": None,
@@ -161,6 +214,7 @@ def _row_data(run_dir: Path) -> dict:
         return {
             "run_id": run_id,
             "project": project,
+            "started": started,
             "state": "corrupt",
             "stages_completed": None,
             "stages_total": None,
@@ -178,6 +232,7 @@ def _row_data(run_dir: Path) -> dict:
         return {
             "run_id": run_id,
             "project": project,
+            "started": started,
             "state": "corrupt",
             "stages_completed": None,
             "stages_total": None,
@@ -195,6 +250,7 @@ def _row_data(run_dir: Path) -> dict:
     return {
         "run_id": run_id,
         "project": project,
+        "started": started,
         "state": "ok",
         "stages_completed": stages_completed,
         "stages_total": stages_total,
@@ -235,7 +291,7 @@ def run(args) -> int:
     selection = result
     dirs = selection.run_dirs
 
-    dirs = sorted(dirs, key=lambda d: d.name, reverse=False)[-15:]
+    dirs = sorted(dirs, key=lambda d: (_started_at(d) or 0.0, d.name))
 
     if not dirs:
         if getattr(args, "json", False):
@@ -244,14 +300,21 @@ def run(args) -> int:
             print("no runs")
         return 0
 
+    verbose = getattr(args, "verbose", False)
+
     if getattr(args, "json", False):
-        rows = [_row_data(d) for d in dirs]
+        rows = []
+        for d in dirs:
+            row = _row_data(d)
+            if verbose:
+                row.update(_verbose_fields(d))
+            rows.append(row)
         print(json.dumps(rows, indent=2))
         return 0
 
     for index, d in enumerate(dirs):
         if index > 0:
             print()
-        _print_human_record(d, selection.include_project)
+        _print_human_record(d, selection.include_project, verbose)
 
     return 0
